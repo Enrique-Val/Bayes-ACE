@@ -1,31 +1,50 @@
 import networkx as nx
 import pandas as pd
 import numpy as np
-import math
 from itertools import combinations
+from bayesace.utils import *
 
-def build_weighted_graph(dataframe, coordinate_columns, weight_function, distance_threshold):
+
+def epsilon_weight_function(point1, point2, epsilon, f_tilde):
+    d = len(point1)
+    dist = euclidean_distance(point1, point2)
+    return f_tilde(epsilon ** d / dist) * dist
+
+
+def kde_weight_function(point1, point2, bn, f_tilde):
+    dist = euclidean_distance(point1, point2)
+    return f_tilde(likelihood(pd.DataFrame([(point1 + point2).tolist()], columns=point1.index) / 2, bn)) * dist
+
+
+def complete_kde_weight_function(point1, point2, bn, f_tilde):
+    dist = euclidean_distance(point1, point2)
+    return f_tilde(likelihood(pd.DataFrame([(point1 + point2).tolist()], columns=point1.index) / 2, bn)) * dist
+
+
+def build_weighted_graph(dataframe, coordinate_columns, graph_type, epsilon=0.25, f_tilde=None, bn=None):
+    # Initial checks
+    if f_tilde is None:
+        f_tilde = identity
+
     # Create an undirected graph
     graph = nx.Graph()
 
     # Add nodes to the graph
     graph.add_nodes_from(dataframe.index)
 
-    # Function to calculate Euclidean distance between two points
-    def euclidean_distance(point1, point2):
-        return math.sqrt(sum((a - b) ** 2 for a, b in zip(point1, point2)))
-
-    print(coordinate_columns)
     # Connect nodes if their Euclidean distance is below the threshold
     for (node1, point1), (node2, point2) in combinations(dataframe[coordinate_columns].iterrows(), 2):
         distance = euclidean_distance(point1, point2)
-        if distance < distance_threshold:
+        if distance < epsilon:
             # Calculate the weight based on the provided function
-            if weight_function is None:
-                graph.add_edge(node1, node2, weight=1)
-            else:
-                weight = weight_function(point1, point2)
+            if graph_type == "epsilon":
+                weight = epsilon_weight_function(point1, point2, epsilon, f_tilde)
                 graph.add_edge(node1, node2, weight=weight)
+            elif graph_type == "kde":
+                weight = kde_weight_function(point1, point2, bn, f_tilde)
+                graph.add_edge(node1, node2, weight=weight)
+            else:
+                raise AttributeError("Parameter \"graph_type\" should take value \"epsilon\" or \"kde\"")
 
     return graph
 
@@ -52,15 +71,6 @@ def custom_weight_function(point1, point2):
     return sum(point1) + sum(point2)
 
 
-def epsilon_weight_function(point1, point2):
-    eps = 0.25
-    d = len(point1)
-    euc_dist = np.linalg.norm(point1 - point2)
-    return ((eps ** d) / euc_dist) * euc_dist
-
-
-
-
 # Example target node function (you can customize this based on your requirements)
 def is_target_node(row):
     # Example: Nodes where the X coordinate is greater than 2 are target nodes
@@ -68,15 +78,16 @@ def is_target_node(row):
 
 
 def get_target_nodes(dataset, y_pred, y_instance, confidence_threshold):
-    return dataset.index[y_pred[y_instance] < confidence_threshold]
+    print()
+    return dataset.index[y_pred.transpose()[y_instance] < confidence_threshold]
 
 
-def face_algorithm(dataset, y_pred, instance, y_instance, weight_function=None, distance_threshold=0.25,
-                   confidence_threshold=0.25, verbose=True):
+def face_algorithm(dataset, y_pred, instance, y_instance, graph_type, distance_threshold=0.25,
+                   confidence_threshold=0.25, bn=None, f_tilde=None, verbose=True):
     coordinate_columns = dataset.columns
 
-    resulting_graph = build_weighted_graph(dataset, coordinate_columns, weight_function,
-                                           distance_threshold)
+    resulting_graph = build_weighted_graph(dataset, coordinate_columns,
+                                           graph_type, epsilon=distance_threshold, bn=bn, f_tilde=f_tilde)
 
     # Replace with the user-input node
     source_node = instance
