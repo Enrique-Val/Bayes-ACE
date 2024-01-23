@@ -8,7 +8,7 @@ def identity(x):
     return x
 
 
-def separate_dataset_and_class(df: pd.DataFrame | pd.Series, class_name=None):
+def separate_dataset_and_class(df: pd.DataFrame | pd.Series | np.ndarray, class_name=None):
     # If user passed a dataframe or series and no class_name, set it to "class"
     if isinstance(df, pd.DataFrame) or isinstance(df, pd.Series) and class_name is None:
         class_name = "class"
@@ -29,12 +29,12 @@ def separate_dataset_and_class(df: pd.DataFrame | pd.Series, class_name=None):
             return df[:-1], df[-1]
 
 
-def euclidean_distance(x_cfx, x_og):
+def euclidean_distance(x_cfx : np.ndarray, x_og : np.ndarray) :
     # Make sure attributes go in the same order
     # x_og = x_og[x_cfx.index]
 
     # Return Euclidean distance
-    return np.sqrt(np.sum((x_cfx.values - x_og.values) ** 2))
+    return np.sqrt(np.sum((x_cfx - x_og) ** 2))
 
 
 def delta_distance(x_cfx, x_og, eps=0.1):
@@ -42,7 +42,7 @@ def delta_distance(x_cfx, x_og, eps=0.1):
     return sum(map(lambda i: i > eps, abs_distance[0]))
 
 
-def likelihood(x_cfx, bn):
+def likelihood(x_cfx: pd.DataFrame, bn):
     class_cpd = bn.cpd("class")
     class_values = class_cpd.variable_values()
     cfx = x_cfx.copy()
@@ -54,11 +54,11 @@ def likelihood(x_cfx, bn):
     return likelihood_val
 
 
-def log_likelihood(x_cfx, bn):
+def log_likelihood(x_cfx: pd.DataFrame, bn):
     return np.log(likelihood(x_cfx, bn))
 
 
-def accuracy(x_cfx, y_og: str | list, bn):
+def accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):
     class_cpd = bn.cpd("class")
     class_values = class_cpd.variable_values()
     cfx = x_cfx.copy()
@@ -71,35 +71,25 @@ def accuracy(x_cfx, y_og: str | list, bn):
     if ll > 0:
         return prob / ll
     else:
-        print("Peligro")
         return 1
 
 
-def straight_path(x_1, x_2):
-    spacing = int(euclidean_distance(x_1, x_2) / 10)
-    if spacing < 2:
-        spacing = 2
-    points = np.zeros(shape=(x_2.shape[1], spacing))
-    for i, att in enumerate(x_2.columns):
-        points[i] = np.linspace(x_1[att].values[0], x_2[att].values[0], spacing)
-    to_ret = pd.DataFrame(columns=x_2.columns, index=range(0, spacing))
-    to_ret[:] = points.transpose()
-    if to_ret.empty:
-        print(x_1)
-        print(x_2)
-        raise Exception("Straight path")
-    return to_ret
+def straight_path(x_1: np.ndarray, x_2: np.ndarray, chunks=2):
+    assert chunks > 1
+    return np.linspace(x_1, x_2, chunks)
 
 
-def path(df_vertex):
-    to_ret = pd.DataFrame(columns=df_vertex.columns)
-    for i in range(len(df_vertex.index) - 1):
-        x_1 = df_vertex.iloc[[i]]
-        x_2 = df_vertex.iloc[[i + 1]]
-        to_ret = pd.concat([to_ret, straight_path(x_1, x_2)])
-    return to_ret.reset_index()
+def path(vertex_array : np.ndarray, chunks=2):
+    straight_path_list = list()
+    for i in range(vertex_array.shape[0] - 1):
+        x_1 = vertex_array[i]
+        x_2 = vertex_array[i + 1]
+        straight_path_list.append(straight_path(x_1, x_2, chunks))
+    return straight_path_list
 
 
-def avg_path_logl(x_cfx, x_og, bn, penalty):
-    likelihood_path = (-log_likelihood(straight_path(x_og, x_cfx), bn) + 1) ** penalty
+def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
+    separation = euclidean_distance(path.iloc[0], path.iloc[1])
+    medium_points = ((path + path.shift()) / 2).drop(0).reset_index()
+    likelihood_path = (-log_likelihood(medium_points, bayesian_network)) ** penalty * separation
     return np.sum(likelihood_path)

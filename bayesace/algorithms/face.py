@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from itertools import combinations
 from bayesace.utils import *
+from numba import jit
 
 
 def epsilon_weight_function(point1, point2, epsilon, f_tilde):
@@ -11,17 +12,12 @@ def epsilon_weight_function(point1, point2, epsilon, f_tilde):
     return f_tilde(epsilon ** d / dist) * dist
 
 
-def kde_weight_function(point1, point2, bn, f_tilde):
+def kde_weight_function(point1, point2, bn, f_tilde, variables):
     dist = euclidean_distance(point1, point2)
-    return f_tilde(likelihood(pd.DataFrame([(point1 + point2).tolist()], columns=point1.index) / 2, bn)) * dist
+    return f_tilde(likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2, bn)) * dist
 
 
-def complete_kde_weight_function(point1, point2, bn, f_tilde):
-    dist = euclidean_distance(point1, point2)
-    return f_tilde(likelihood(pd.DataFrame([(point1 + point2).tolist()], columns=point1.index) / 2, bn)) * dist
-
-
-def build_weighted_graph(dataframe, coordinate_columns, graph_type, epsilon=0.25, f_tilde=None, bn=None):
+def build_weighted_graph(dataframe : pd.DataFrame, graph_type, epsilon=0.25, f_tilde=None, bn=None, chunks=2):
     # Initial checks
     if f_tilde is None:
         f_tilde = identity
@@ -29,23 +25,30 @@ def build_weighted_graph(dataframe, coordinate_columns, graph_type, epsilon=0.25
     # Create an undirected graph
     graph = nx.Graph()
 
+    mat = dataframe.to_numpy()
+
     # Add nodes to the graph
     graph.add_nodes_from(dataframe.index)
 
     # Connect nodes if their Euclidean distance is below the threshold
-    for (node1, point1), (node2, point2) in combinations(dataframe[coordinate_columns].iterrows(), 2):
-        distance = euclidean_distance(point1, point2)
-        if distance < epsilon:
-            # Calculate the weight based on the provided function
-            if graph_type == "epsilon":
-                weight = epsilon_weight_function(point1, point2, epsilon, f_tilde)
-                graph.add_edge(node1, node2, weight=weight)
-            elif graph_type == "kde":
-                weight = kde_weight_function(point1, point2, bn, f_tilde)
-                graph.add_edge(node1, node2, weight=weight)
-            else:
-                raise AttributeError("Parameter \"graph_type\" should take value \"epsilon\" or \"kde\"")
-
+    for i in range(mat.shape[0]):
+        for j in range(i+1, mat.shape[0]) :
+            point1 = mat[i]
+            point2 = mat[j]
+            distance = euclidean_distance(point1, point2)
+            if distance < epsilon:
+                # Calculate the weight based on the provided function
+                weight = None
+                if graph_type == "epsilon":
+                    weight = epsilon_weight_function(point1, point2, epsilon, f_tilde)
+                elif graph_type == "kde":
+                    weight = kde_weight_function(point1, point2, bn, f_tilde, variables=dataframe.columns)
+                elif graph_type == "integral":
+                    path_ij = pd.DataFrame(data=straight_path(point1, point2, chunks), columns=dataframe.columns)
+                    weight = path_likelihood_length(path_ij, bn, penalty=1)
+                else:
+                    raise AttributeError("Parameter \"graph_type\" should take value \"epsilon\", \"kde\" or \"integral\"")
+                graph.add_edge(i, j, weight=weight)
     return graph
 
 
@@ -83,11 +86,11 @@ def get_target_nodes(dataset, y_pred, y_instance, confidence_threshold):
 
 
 def face_algorithm(dataset, y_pred, instance, y_instance, graph_type, distance_threshold=0.25,
-                   confidence_threshold=0.25, bn=None, f_tilde=None, verbose=True):
-    coordinate_columns = dataset.columns
+                   confidence_threshold=0.25, bn=None, f_tilde=None, chunks=2, verbose=True):
 
-    resulting_graph = build_weighted_graph(dataset, coordinate_columns,
-                                           graph_type, epsilon=distance_threshold, bn=bn, f_tilde=f_tilde)
+    resulting_graph = build_weighted_graph(dataset,
+                                           graph_type, epsilon=distance_threshold, bn=bn, f_tilde=f_tilde,
+                                           chunks=chunks)
 
     # Replace with the user-input node
     source_node = instance
