@@ -29,7 +29,7 @@ def separate_dataset_and_class(df: pd.DataFrame | pd.Series | np.ndarray, class_
             return df[:-1], df[-1]
 
 
-def euclidean_distance(x_cfx : np.ndarray, x_og : np.ndarray) :
+def euclidean_distance(x_cfx: np.ndarray, x_og: np.ndarray):
     # Make sure attributes go in the same order
     # x_og = x_og[x_cfx.index]
 
@@ -68,10 +68,20 @@ def accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):
         cfx["class"] = pd.Categorical(y_og, categories=class_values)
     prob = math.e ** bn.logl(cfx)
     ll = likelihood(x_cfx, bn)
-    if ll > 0:
-        return prob / ll
-    else:
-        return 1
+    to_ret = np.empty(shape=len(x_cfx.index))
+    to_ret[ll < 0] = np.nan
+    to_ret[ll > 0] = prob[ll > 0] / ll[ll > 0]
+    # if not (ll > 0).any():
+    #    warnings("The instance with features "+str(x_cfx.iloc[0])+" and class " + str(y_og))
+    return to_ret
+
+
+def predict_class(data: pd.DataFrame, bayesian_network):
+    class_values = bayesian_network.cpd("class").variable_values()
+    to_ret = pd.DataFrame(columns=class_values)
+    for i in class_values:
+        to_ret[i] = accuracy(data, [i] * len(data.index), bayesian_network)
+    return to_ret
 
 
 def straight_path(x_1: np.ndarray, x_2: np.ndarray, chunks=2):
@@ -79,7 +89,7 @@ def straight_path(x_1: np.ndarray, x_2: np.ndarray, chunks=2):
     return np.linspace(x_1, x_2, chunks)
 
 
-def path(vertex_array : np.ndarray, chunks=2):
+def path(vertex_array: np.ndarray, chunks=2):
     straight_path_list = list()
     for i in range(vertex_array.shape[0] - 1):
         x_1 = vertex_array[i]

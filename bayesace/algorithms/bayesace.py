@@ -6,11 +6,12 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
 
 from bayesace.utils import *
-from bayesace.algorithms.algorithm import ACE
+from bayesace.algorithms.algorithm import ACE, ACEResult
 
 
 class BestPathFinder(ElementwiseProblem):
-    def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold = 0.05, accuracy_threshold = 0.05):
+    def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
+                 accuracy_threshold=0.05):
         n_features = (len(instance.columns) - 1)
         super().__init__(n_var=n_features * (n_vertex + 1),
                          n_obj=1,
@@ -18,7 +19,7 @@ class BestPathFinder(ElementwiseProblem):
                          xl=np.array([-2] * (n_features * (n_vertex + 1))),
                          xu=np.array([2] * (n_features * (n_vertex + 1))))
         self.x_og = instance.drop("class", axis=1).values
-        self.y_og = "a"  # instance["class"]
+        self.y_og = instance["class"].values[0]
         self.n_vertex = n_vertex
         self.penalty = penalty
         self.features = instance.drop("class", axis=1).columns
@@ -43,30 +44,31 @@ class BestPathFinder(ElementwiseProblem):
         # print(accuracy(self.x_cfx, self.y_og, self.bayesian_network))
         g1 = accuracy(pd.DataFrame(x_cfx, columns=self.features), self.y_og,
                       self.bayesian_network) - self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
-        g2 = likelihood(x_cfx, self.bayesian_network)+self.likelihood_threshold
+        g2 = -likelihood(pd.DataFrame(x_cfx, columns=self.features), self.bayesian_network) + self.likelihood_threshold
         out["G"] = np.column_stack([g1, g2])
 
 
 class BayesACE(ACE):
-    def __init__(self, n_vertex, pop_size=100, generations=10, likelihood_threshold = 0.05, accuracy_threshold = 0.05):
-        super().__init__()
+    def __init__(self, bayesian_network, features, penalty, chunks, n_vertex, seed=0, verbose=True, pop_size=100,
+                 generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50):
+        super().__init__(bayesian_network, features, penalty, chunks, likelihood_threshold= likelihood_threshold, accuracy_threshold=accuracy_threshold, seed=seed, verbose=verbose)
         self.n_vertex = n_vertex
         self.generations = generations
         self.population_size = pop_size
-        self.likelihood_threshold = likelihood_threshold
-        self.accuracy_threshold = accuracy_threshold
 
     def run(self, instance: pd.DataFrame):
         problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
-                                 penalty=self.penalty, chunks=self.chunks, likelihood_threshold=self.likelihood_threshold, accuracy_threshold=self.accuracy_threshold)
+                                 penalty=self.penalty, chunks=self.chunks,
+                                 likelihood_threshold=self.likelihood_threshold,
+                                 accuracy_threshold=self.accuracy_threshold)
         algorithm = NSGA2(pop_size=self.population_size)
         res = minimize(problem,
                        algorithm,
-                       ('n_gen', self.generations),
+                       termination=('n_gen', self.generations),
                        seed=self.seed,
                        verbose=self.verbose)
-        total_path = np.append([separate_dataset_and_class(instance)[0].values[0], res.X])
+        total_path = np.append(separate_dataset_and_class(instance)[0].values[0], res.X)
         path_to_ret = pd.DataFrame(data=np.resize(total_path, new_shape=(self.n_vertex + 2, self.n_features)),
                                    columns=self.features)
         counterfactual = path_to_ret.iloc[-1]
-        return counterfactual, path_to_ret, res.F
+        return ACEResult(counterfactual, path_to_ret, res.F)
