@@ -1,2 +1,10 @@
 
 .idea/
+
+.ipynb_checkpoints/pybensian_test-checkpoint.ipynb
+
+.ipynb_checkpoints/toy_data-checkpoint.ipynb
+
+pybensian_test.ipynb
+
+*.pyc

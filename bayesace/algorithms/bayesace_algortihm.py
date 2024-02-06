@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
 
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
+from pymoo.core.problem import StarmapParallelization
 
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
@@ -11,13 +13,13 @@ from bayesace.algorithms.algorithm import ACE, ACEResult
 
 class BestPathFinder(ElementwiseProblem):
     def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
-                 accuracy_threshold=0.05):
+                 accuracy_threshold=0.05, **kwargs):
         n_features = (len(instance.columns) - 1)
         super().__init__(n_var=n_features * (n_vertex + 1),
                          n_obj=1,
                          n_ieq_constr=2,
                          xl=np.array([-2] * (n_features * (n_vertex + 1))),
-                         xu=np.array([2] * (n_features * (n_vertex + 1))))
+                         xu=np.array([2] * (n_features * (n_vertex + 1))), **kwargs)
         self.x_og = instance.drop("class", axis=1).values
         self.y_og = instance["class"].values[0]
         self.n_vertex = n_vertex
@@ -49,24 +51,31 @@ class BestPathFinder(ElementwiseProblem):
 
 
 class BayesACE(ACE):
-    def __init__(self, bayesian_network, features, penalty, chunks, n_vertex, seed=0, verbose=True, pop_size=100,
-                 generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50):
-        super().__init__(bayesian_network, features, penalty, chunks, likelihood_threshold= likelihood_threshold, accuracy_threshold=accuracy_threshold, seed=seed, verbose=verbose)
+    def __init__(self, bayesian_network, features, chunks, n_vertex, pop_size=100,
+                 generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, seed=0, verbose=True):
+        super().__init__(bayesian_network, features, chunks, likelihood_threshold=likelihood_threshold,
+                         accuracy_threshold=accuracy_threshold, penalty = penalty, seed=seed, verbose=verbose)
         self.n_vertex = n_vertex
         self.generations = generations
         self.population_size = pop_size
 
-    def run(self, instance: pd.DataFrame):
+    def run(self, instance: pd.DataFrame, n_processes = 1):
+        # initialize the thread pool and create the runner
+        pool = mp.Pool(n_processes)
+        runner = StarmapParallelization(pool.starmap)
+
         problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
                                  penalty=self.penalty, chunks=self.chunks,
                                  likelihood_threshold=self.likelihood_threshold,
-                                 accuracy_threshold=self.accuracy_threshold)
+                                 accuracy_threshold=self.accuracy_threshold, elementwise_runner=runner)
         algorithm = NSGA2(pop_size=self.population_size)
         res = minimize(problem,
                        algorithm,
                        termination=('n_gen', self.generations),
                        seed=self.seed,
                        verbose=self.verbose)
+        pool.close()
+
         total_path = np.append(separate_dataset_and_class(instance)[0].values[0], res.X)
         path_to_ret = pd.DataFrame(data=np.resize(total_path, new_shape=(self.n_vertex + 2, self.n_features)),
                                    columns=self.features)

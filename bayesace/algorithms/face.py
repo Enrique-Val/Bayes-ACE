@@ -4,6 +4,25 @@ import numpy as np
 from itertools import combinations
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
+from multiprocessing import Pool
+
+
+def compute_weight_and_add_edge(graph, variables, i, j, point_i, point_j, graph_type, epsilon, f_tilde, bn, chunks):
+    distance = euclidean_distance(point_i, point_j)
+    if distance < epsilon:
+        # Calculate the weight based on the provided function
+        weight = None
+        if graph_type == "epsilon":
+            weight = epsilon_weight_function(point_i, point_j, epsilon, f_tilde)
+        elif graph_type == "kde":
+            weight = kde_weight_function(point_i, point_j, bn, f_tilde, variables=variables)[0]
+        elif graph_type == "integral":
+            path_ij = pd.DataFrame(data=straight_path(point_i, point_j, chunks), columns=variables)
+            weight = path_likelihood_length(path_ij, bn, penalty=1)
+        else:
+            raise AttributeError(
+                "Parameter \"graph_type\" should take value \"epsilon\", \"kde\" or \"integral\"")
+        graph.add_edge(i, j, weight=weight)
 
 
 def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_tilde=None, bn=None, chunks=2):
@@ -20,25 +39,17 @@ def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_ti
     graph.add_nodes_from(dataframe.index)
 
     # Connect nodes if their Euclidean distance is below the threshold
-    for i in range(mat.shape[0]):
+    combs = combinations(list(dataframe.index),2)
+    my_list = [(graph, dataframe.columns, i[0], i[1], mat[i[0]], mat[i[1]], graph_type, epsilon, f_tilde, bn,
+                chunks) for i in combs]
+    for i in my_list:
+        compute_weight_and_add_edge(i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7], i[8], i[9], i[10])
+    '''for i in range(mat.shape[0]):
         for j in range(i + 1, mat.shape[0]):
-            point1 = mat[i]
-            point2 = mat[j]
-            distance = euclidean_distance(point1, point2)
-            if distance < epsilon:
-                # Calculate the weight based on the provided function
-                weight = None
-                if graph_type == "epsilon":
-                    weight = epsilon_weight_function(point1, point2, epsilon, f_tilde)
-                elif graph_type == "kde":
-                    weight = kde_weight_function(point1, point2, bn, f_tilde, variables=dataframe.columns)
-                elif graph_type == "integral":
-                    path_ij = pd.DataFrame(data=straight_path(point1, point2, chunks), columns=dataframe.columns)
-                    weight = path_likelihood_length(path_ij, bn, penalty=1)
-                else:
-                    raise AttributeError(
-                        "Parameter \"graph_type\" should take value \"epsilon\", \"kde\" or \"integral\"")
-                graph.add_edge(i, j, weight=weight)
+            point_i = mat[i]
+            point_j = mat[j]
+
+            compute_weight_and_add_edge(graph, dataframe.columns, i, j, point_i, point_j,  graph_type, epsilon, f_tilde, bn, chunks)'''
     return graph
 
 
@@ -59,11 +70,12 @@ def find_closest_paths(graph, source_node, target_nodes):
 
 
 class FACE(ACE):
-    def __init__(self, bayesian_network, features, penalty, chunks, dataset: pd.DataFrame, distance_threshold,
+    def __init__(self, bayesian_network, features, chunks, dataset: pd.DataFrame, distance_threshold,
                  graph_type,
-                 f_tilde=identity, seed=0, verbose=True, likelihood_threshold=0.00, accuracy_threshold=0.50):
-        super().__init__(bayesian_network, features, penalty, chunks, likelihood_threshold=likelihood_threshold,
-                         accuracy_threshold=accuracy_threshold, seed=seed, verbose=verbose)
+                 f_tilde=identity, seed=0, verbose=False, likelihood_threshold=0.00, accuracy_threshold=0.50,
+                 penalty=1):
+        super().__init__(bayesian_network, features, chunks, likelihood_threshold=likelihood_threshold,
+                         accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose)
         self.dataset = dataset
         self.epsilon = distance_threshold
         self.graph_type = graph_type
@@ -79,23 +91,10 @@ class FACE(ACE):
         new_point = instance.values[0]
 
         for i in range(mat.shape[0]):
-            point = mat[i]
-            distance = euclidean_distance(new_point, point)
-            if distance < self.epsilon:
-                # Calculate the weight based on the provided function
-                weight = None
-                if self.graph_type == "epsilon":
-                    weight = epsilon_weight_function(new_point, point, self.epsilon, self.f_tilde)
-                elif self.graph_type == "kde":
-                    weight = kde_weight_function(new_point, point, self.bayesian_network, self.f_tilde,
-                                                 variables=self.features)
-                elif self.graph_type == "integral":
-                    path_ij = pd.DataFrame(data=straight_path(new_point, point, self.chunks), columns=self.features)
-                    weight = path_likelihood_length(path_ij, self.bayesian_network, penalty=1)
-                else:
-                    raise AttributeError(
-                        "Parameter \"graph_type\" should take value \"epsilon\", \"kde\" or \"integral\"")
-                self.graph.add_edge(i, len(self.dataset.index), weight=weight)
+            point_i = mat[i]
+            compute_weight_and_add_edge(self.graph, self.dataset.columns, i, len(self.dataset.index), point_i,
+                                        new_point, self.graph_type, self.epsilon, self.f_tilde, self.bayesian_network,
+                                        self.chunks)
 
     def run(self, instance: pd.DataFrame):
         x_og = instance.drop("class", axis=1)
@@ -108,8 +107,15 @@ class FACE(ACE):
         # Replace with the user-input node
         source_node = len(self.dataset.index)
 
-        # Mark target nodes based on the provided function
+        # Mark target nodes based on the accuracy and likelihood threshold
         target_nodes = self.dataset.index[self.y_pred[y_og] < self.accuracy_threshold]
+
+        if len(target_nodes) > 0:
+            true_array = likelihood(self.dataset.iloc[target_nodes], self.bayesian_network) > self.likelihood_threshold
+            target_nodes = target_nodes[true_array]
+
+        if len(target_nodes) == 0:
+            return ACEResult(None, x_og, np.inf)
 
         closest_paths = find_closest_paths(self.graph, source_node, target_nodes)
 
@@ -136,8 +142,6 @@ class FACE(ACE):
 
         counterfactual = path_x.iloc[-1]
 
-        print("Llega")
-
         # Delete node
         self.graph.remove_node(source_node)
 
@@ -155,7 +159,3 @@ def epsilon_weight_function(point1, point2, epsilon, f_tilde):
 def kde_weight_function(point1, point2, bn, f_tilde, variables):
     dist = euclidean_distance(point1, point2)
     return f_tilde(likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2, bn)) * dist
-
-
-
-
