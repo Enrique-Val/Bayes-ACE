@@ -4,7 +4,7 @@ import numpy as np
 from itertools import combinations
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
-from multiprocessing import Pool
+import multiprocessing as mp
 
 
 def compute_weight_and_add_edge(graph, variables, i, j, point_i, point_j, graph_type, epsilon, f_tilde, bn, chunks):
@@ -22,7 +22,7 @@ def compute_weight_and_add_edge(graph, variables, i, j, point_i, point_j, graph_
         else:
             raise AttributeError(
                 "Parameter \"graph_type\" should take value \"epsilon\", \"kde\" or \"integral\"")
-        graph.add_edge(i, j, weight=weight)
+        return (i, j, weight)
 
 
 def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_tilde=None, bn=None, chunks=2):
@@ -38,13 +38,25 @@ def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_ti
     # Add nodes to the graph
     graph.add_nodes_from(dataframe.index)
 
+    combs = combinations(list(dataframe.index), 2)
     # Connect nodes if their Euclidean distance is below the threshold
-    combs = combinations(list(dataframe.index),2)
+    pool = mp.Pool(mp.cpu_count())
+
+    result = pool.starmap_async(compute_weight_and_add_edge, [
+        (graph, dataframe.columns, i[0], i[1], mat[i[0]], mat[i[1]], graph_type, epsilon, f_tilde, bn,
+         chunks) for i in combs])
+
+    pool.close()
+    for i in result.get():
+        if i is not None :
+            graph.add_edge(i[0], i[1], weight=i[2])
+    '''
+    
     my_list = [(graph, dataframe.columns, i[0], i[1], mat[i[0]], mat[i[1]], graph_type, epsilon, f_tilde, bn,
                 chunks) for i in combs]
     for i in my_list:
         compute_weight_and_add_edge(i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7], i[8], i[9], i[10])
-    '''for i in range(mat.shape[0]):
+    for i in range(mat.shape[0]):
         for j in range(i + 1, mat.shape[0]):
             point_i = mat[i]
             point_j = mat[j]
@@ -52,20 +64,25 @@ def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_ti
             compute_weight_and_add_edge(graph, dataframe.columns, i, j, point_i, point_j,  graph_type, epsilon, f_tilde, bn, chunks)'''
     return graph
 
+def compute_path(graph, source_node, target_node) :
+    try:
+        shortest_path = nx.shortest_path(graph, source=source_node, target=target_node, weight='weight')
+        shortest_distance = nx.shortest_path_length(graph, source=source_node, target=target_node,
+                                                    weight='weight')
+        return (target_node, {'path': shortest_path, 'distance': shortest_distance})
+    # If no path is found, not a problem, just keep iterating
+    except nx.NetworkXNoPath:
+        return None
 
 def find_closest_paths(graph, source_node, target_nodes):
     # Use Dijkstra's algorithm to find the shortest paths
     all_shortest_paths = {}
-    for target_node in target_nodes:
-        try:
-            shortest_path = nx.shortest_path(graph, source=source_node, target=target_node, weight='weight')
-            shortest_distance = nx.shortest_path_length(graph, source=source_node, target=target_node,
-                                                        weight='weight')
-            all_shortest_paths[target_node] = {'path': shortest_path, 'distance': shortest_distance}
-        # If no path is found, not a problem, just keep iterating
-        except nx.NetworkXNoPath:
-            pass
-
+    pool = mp.Pool(mp.cpu_count())
+    result = pool.starmap_async(compute_path, [(graph,source_node, target_node) for target_node in target_nodes])
+    pool.close()
+    for i in result.get():
+        if i is not None :
+            all_shortest_paths[i[0]] = i[1]
     return all_shortest_paths
 
 
@@ -90,11 +107,24 @@ class FACE(ACE):
         mat = self.dataset.to_numpy()
         new_point = instance.values[0]
 
-        for i in range(mat.shape[0]):
+        pool = mp.Pool(mp.cpu_count())
+
+        result = pool.starmap_async(compute_weight_and_add_edge, [
+            (self.graph, self.dataset.columns, i, len(self.dataset.index), mat[i], new_point, self.graph_type, self.epsilon, self.f_tilde, self.bayesian_network,
+             self.chunks) for i in self.dataset.index])
+
+        pool.close()
+        for i in result.get():
+            if i is not None:
+                self.graph.add_edge(i[0], i[1], weight=i[2])
+
+        '''for i in range(mat.shape[0]):
             point_i = mat[i]
-            compute_weight_and_add_edge(self.graph, self.dataset.columns, i, len(self.dataset.index), point_i,
+            tuple = compute_weight_and_add_edge(self.graph, self.dataset.columns, i, len(self.dataset.index), point_i,
                                         new_point, self.graph_type, self.epsilon, self.f_tilde, self.bayesian_network,
                                         self.chunks)
+            if tuple is not None :
+                self.graph.add_edge(i, len(self.dataset.index), weight = tuple[2])'''
 
     def run(self, instance: pd.DataFrame):
         x_og = instance.drop("class", axis=1)
@@ -116,6 +146,7 @@ class FACE(ACE):
 
         if len(target_nodes) == 0:
             return ACEResult(None, x_og, np.inf)
+
 
         closest_paths = find_closest_paths(self.graph, source_node, target_nodes)
 
