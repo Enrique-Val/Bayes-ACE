@@ -42,7 +42,7 @@ def delta_distance(x_cfx, x_og, eps=0.1):
     return sum(map(lambda i: i > eps, abs_distance[0]))
 
 
-def likelihood(x_cfx: pd.DataFrame, bn):
+def likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
     class_cpd = bn.cpd("class")
     class_values = class_cpd.variable_values()
     cfx = x_cfx.copy()
@@ -54,8 +54,12 @@ def likelihood(x_cfx: pd.DataFrame, bn):
     return likelihood_val
 
 
-def log_likelihood(x_cfx: pd.DataFrame, bn):
-    return np.log(likelihood(x_cfx, bn))
+def log_likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
+    l = likelihood(x_cfx, bn)
+    if not ((l < 1).all()):
+        Warning(
+            "Likelihood of some points in the space is higher than 1. Computing the log likelihood may not make sense.")
+    return np.log(l)
 
 
 def accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):

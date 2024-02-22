@@ -23,6 +23,7 @@ def check_graph(bayesian_network, dataset : pd.DataFrame, graph_type, distance_t
     face = FACE(bayesian_network, dataset.columns[:-1], 3, dataset.drop("class", axis = 1), distance_threshold,
                  graph_type,
                  f_tilde=func, likelihood_threshold=likelihood_thresh, accuracy_threshold=acc_thresh)
+    cfx_path = round2(face.run(dataset.iloc[[0]]).path.values)
 
     edges = face.graph.edges(data = True)
     weights = round2(np.array(list(dict( (x[:-1], x[-1]["weight"]) for x in edges if "weight" in x[-1] ).values())))
@@ -35,7 +36,6 @@ def check_graph(bayesian_network, dataset : pd.DataFrame, graph_type, distance_t
         assert (pickle.load(file) == weights).all()
 
     ## CHECK THE RESULTING_PATH
-    cfx_path = round2(face.run(dataset.iloc[[0]]).path.values)
     path_file = os.path.dirname(__file__) + "/face_vars/cfxpath_" + str(graph_type) + "_" + str(
         distance_threshold) + "_" + str(likelihood_thresh) + "_" + str(acc_thresh) + ".pkl"
     #with open(path_file, "wb") as file :

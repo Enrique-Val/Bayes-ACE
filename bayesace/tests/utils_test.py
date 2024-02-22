@@ -35,6 +35,7 @@ def round2(x):
 
 
 if __name__ == "__main__":
+    assert pb.__version__ == "0.4.3"
     np.random.seed(0)
 
     file = os.path.dirname(__file__) + "/test_dataset.csv"
