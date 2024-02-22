@@ -69,7 +69,8 @@ class BayesACE(ACE):
         problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
                                  penalty=self.penalty, chunks=self.chunks,
                                  likelihood_threshold=self.likelihood_threshold,
-                                 accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range, elementwise_runner=runner)
+                                 accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range,
+                                 elementwise_runner=runner)
         algorithm = NSGA2(pop_size=self.population_size)
         res = minimize(problem,
                        algorithm,
