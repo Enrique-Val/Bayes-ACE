@@ -13,6 +13,8 @@ from bayesace.algorithms.face import FACE
 from sklearn.preprocessing import StandardScaler
 import openml as oml
 
+import multiprocessing as mp
+
 import time
 
 
@@ -21,6 +23,10 @@ def get_naive_structure(df: pd.DataFrame):
     for i in [i for i in df.columns if i != "class"]:
         naive.add_arc("class", i)
     return naive
+
+def check_copy(bn) :
+    return bn.fitted()
+
 
 
 if __name__ == "__main__":
@@ -45,9 +51,16 @@ if __name__ == "__main__":
     df_test = df.tail(5)
 
     # Train a conditional linear Gaussian network
-    clg_network = hc(df_train, bn_type=CLGNetworkType(), operators=["arcs"], score="bic", seed=0)
-    clg_network.fit(df_train)
-    assert clg_network.fitted()
+    fitted_flag = False
+    clg_network = None
+    while not fitted_flag :
+        clg_network = hc(df_train, bn_type=CLGNetworkType(), operators=["arcs"], score="bic", seed=0)
+        # Because of a Pybnesian bug, the copy method does not work properly. We have to retrain the network in that case
+        clg_network.fit(df_train)
+        pool = mp.Pool(1)
+        res = pool.starmap(check_copy, [(clg_network,)])
+        pool.close()
+        fitted_flag = res[0]
 
     # Train a semiparametric network
     start = get_naive_structure(df_train)
@@ -68,7 +81,7 @@ if __name__ == "__main__":
     for n_vertex in n_vertices[0:1]:
         alg = BayesACE(bayesian_network=clg_network, features=df_train.columns[:-1], n_vertex=n_vertex,
                        accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold, chunks=chunks, seed = 0)
-        result, res = alg.run(df_test.iloc[[0]], return_info=True)
+        result, res = alg.run(df_test.iloc[[0]], parallelize=True, return_info=True)
         print(res.F)
         print(result.distance)
     # Launch baseline
