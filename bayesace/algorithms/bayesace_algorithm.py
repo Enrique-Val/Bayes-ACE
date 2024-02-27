@@ -14,6 +14,10 @@ from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 
 
+class PybnesianParallelizationError(Exception):
+    pass
+
+
 class BestPathFinder(ElementwiseProblem):
     def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
                  accuracy_threshold=0.05, sampling_range=(-4, 4), **kwargs):
@@ -36,7 +40,12 @@ class BestPathFinder(ElementwiseProblem):
         self.accuracy_threshold = accuracy_threshold
 
     def _evaluate(self, x, out, *args, **kwargs):
-        assert self.bayesian_network.fitted()
+        if not self.bayesian_network.fitted():
+            raise PybnesianParallelizationError(
+                "As of version 0.4.3, PyBnesian Bayesian networks have internal and stochastic problems with the method \"copy()\"."
+                "As such, some parallelization efforts of the code may fail. We recommend either "
+                "a multiple restart approach after it randomly functions or"
+                "completely remove parallelization.")
         vertex_array = np.resize(np.append(self.x_og, x), new_shape=(self.n_vertex + 2, self.n_features))
         paths = path(vertex_array, chunks=self.chunks)
         sum_path = 0
@@ -68,28 +77,41 @@ class BayesACE(ACE):
         self.population_size = pop_size
         self.sampling_range = sampling_range
 
-    def run(self, instance: pd.DataFrame, n_processes=None, return_info=False):
-        # initialize the thread pool and create the runner
-        if n_processes is None:
-            n_processes = mp.cpu_count()
-        pool = mp.Pool(n_processes)
-        runner = StarmapParallelization(pool.starmap)
-        problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
-                                 penalty=self.penalty, chunks=self.chunks,
-                                 likelihood_threshold=self.likelihood_threshold,
-                                 accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range,
-                                 elementwise_runner=runner)
-        algorithm = NSGA2(pop_size=self.population_size)
+    def run(self, instance: pd.DataFrame, parallelize=False, return_info=False):
         termination = DefaultSingleObjectiveTermination(
-            ftol = 5,
-            period = 5
+            ftol=0.025,
+            period=10
         )
-        res = minimize(problem,
-                       algorithm,
-                       termination=termination,#('n_gen', self.generations),
-                       seed=self.seed,
-                       verbose=self.verbose)
-        pool.close()
+        # initialize the thread pool and create the runner
+        if parallelize:
+            n_processes = mp.cpu_count()
+            pool = mp.Pool(n_processes)
+            runner = StarmapParallelization(pool.starmap)
+            problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
+                                     penalty=self.penalty, chunks=self.chunks,
+                                     likelihood_threshold=self.likelihood_threshold,
+                                     accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range,
+                                     elementwise_runner=runner)
+            algorithm = NSGA2(pop_size=self.population_size)
+
+            res = minimize(problem,
+                           algorithm,
+                           termination=('n_gen', self.generations),
+                           seed=self.seed,
+                           verbose=self.verbose)
+            pool.close()
+        else :
+            problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
+                                     penalty=self.penalty, chunks=self.chunks,
+                                     likelihood_threshold=self.likelihood_threshold,
+                                     accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)
+            algorithm = NSGA2(pop_size=self.population_size)
+
+            res = minimize(problem,
+                           algorithm,
+                           termination=('n_gen', self.generations),
+                           seed=self.seed,
+                           verbose=self.verbose)
         if res.X is None:
             if return_info:
                 return (ACEResult(None, instance.drop("class", axis=1), np.inf), res)

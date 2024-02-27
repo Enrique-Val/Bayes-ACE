@@ -24,10 +24,8 @@ def data_likelihood(x: np.ndarray, dataset: np.ndarray, distance, k:int=1) -> fl
         dataset = dataset.drop("class", axis=1)'''
 
     distances = distance(dataset, x, axis=1)
-    print(distances)
     distances = np.sort(distances)[:k]
     return np.sum(distances)
 
 if __name__ == '__main__':
     ll = data_likelihood(np.array([[1,2,3],[4,5,6],[40,50,60],[10,20,30]]), np.array([1,1,1]), average_L1_distance, k=3)
-    print(ll)
