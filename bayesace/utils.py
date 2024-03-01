@@ -8,6 +8,10 @@ def identity(x):
     return x
 
 
+class PybnesianParallelizationError(Exception):
+    pass
+
+
 def separate_dataset_and_class(df: pd.DataFrame | pd.Series | np.ndarray, class_name=None):
     # If user passed a dataframe or series and no class_name, set it to "class"
     if isinstance(df, pd.DataFrame) or isinstance(df, pd.Series) and class_name is None:
@@ -56,6 +60,9 @@ def likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
 
 def log_likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
     l = likelihood(x_cfx, bn)
+
+    '''if l == 0:
+        return -np.inf'''
     if not ((l < 1).all()):
         Warning(
             "Likelihood of some points in the space is higher than 1. Computing the log likelihood may not make sense.")

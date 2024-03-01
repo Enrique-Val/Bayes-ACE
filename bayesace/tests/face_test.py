@@ -1,3 +1,6 @@
+import os
+import sys
+sys.path.append(os.getcwd())
 import pybnesian as pb
 import numpy as np
 import pandas as pd
@@ -7,7 +10,6 @@ from bayesace.utils import *
 from bayesace.algorithms.face import *
 from itertools import product
 import pickle
-import os
 import time
 
 def mlog(x) :
@@ -51,7 +53,7 @@ if __name__ == "__main__":
     t0 = time.time()
     np.random.seed(0)
 
-    df = pd.read_csv("./test_dataset.csv")
+    df = pd.read_csv(os.path.dirname(__file__) +"/test_dataset.csv")
     df["class"] = df["z"].astype('category')
     df = df.drop("z", axis=1)
     df = df.sample(frac = 1).iloc[0:100].reset_index(drop=True)
