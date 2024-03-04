@@ -76,8 +76,8 @@ class BayesACE(ACE):
 
     def run(self, instance: pd.DataFrame, parallelize=False, return_info=False):
         termination = DefaultSingleObjectiveTermination(
-            ftol=0.025,
-            period=5
+            ftol=0.0025*self.n_features**self.penalty,
+            period=20
         )
         # initialize the thread pool and create the runner
         if parallelize:
@@ -93,7 +93,7 @@ class BayesACE(ACE):
 
             res = minimize(problem,
                            algorithm,
-                           #termination=termination,
+                           termination=termination,
                            seed=self.seed,
                            verbose=self.verbose)
             pool.close()

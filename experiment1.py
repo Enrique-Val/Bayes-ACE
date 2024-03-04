@@ -61,7 +61,7 @@ if __name__ == "__main__":
     df[feature_columns] = StandardScaler().fit_transform(df[feature_columns].values)
 
     # Split the dataset into train and test. Test only contains the 5 counterfactuals to be evaluated
-    n_counterfactuals = 3
+    n_counterfactuals = 5
     df_train = df.head(len(df.index) - n_counterfactuals)
     df_test = df.tail(n_counterfactuals)
 
@@ -103,39 +103,47 @@ if __name__ == "__main__":
     # Algorithm parameters (relatively high restriction on accuracy and likelihood)
     likelihood_threshold = 0.2 ** (len(df_train.columns) - 1)
     accuracy_threshold = 0.01
-    n_vertices = [0, 1, 2, 3, 4, 5, 10]
-    penalties = [1,2,3,4,5,10,15]
+    n_vertices = [0, 1, 2, 3, 4, 5]
+    penalties = [1,2,3,4,5,7.5,10]#,15]
     chunks = 10
-
+    
+    np.seterr(divide='ignore')
     for penalty in penalties:
         # Result storage
         distances_mat = np.zeros((n_counterfactuals, len(n_vertices)))
         evaluations_mat = np.zeros((n_counterfactuals, len(n_vertices)))
-
+        print("Distances raw")
         for i in range(0, n_counterfactuals):
             distances = np.zeros(len(n_vertices))
             evaluations = np.zeros(len(n_vertices))
             for j, n_vertex in enumerate(n_vertices):
                 alg = BayesACE(bayesian_network=network, features=df_train.columns[:-1], n_vertex=n_vertex,
                                accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold,
-                               chunks=chunks,
+                               chunks=chunks, penalty=penalty,
                                seed=0, verbose=False)
                 result, res = alg.run(df_test.iloc[[i]], parallelize=True, return_info=True)
                 distances[j] = result.distance
                 evaluations[j] = res.algorithm.evaluator.n_eval
+            print(distances)
             distances -= distances.min()
             distances /= distances.ptp()
             distances_mat[i] = distances
             evaluations_mat[i] = evaluations
+        print()
 
-        #print(distances_mat)
+        print("Distances mat")
+        print(distances_mat)
+        print()
+        print("Evaluations mat")
+        print(evaluations_mat)
+        print()
+        print()
 
         distances_mean = distances_mat.mean(axis=0)
         distances_std = distances_mat.std(axis=0)
         evaluations_mean = evaluations_mat.mean(axis=0)
         evaluations_std = evaluations_mat.std(axis=0)
 
-        print(distances_mean)
         with open('./results/exp_1/data'+str(dataset_id)+'_net'+network_type+'_penalty'+str(penalty)+'.csv', 'w') as f:
             w = csv.writer(f)
             w.writerow(distances_mean)
