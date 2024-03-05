@@ -3,6 +3,7 @@ import time
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
+from scipy.stats import norm
 
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.moo.nsga2 import NSGA2
@@ -16,7 +17,7 @@ from bayesace.algorithms.algorithm import ACE, ACEResult
 
 class BestPathFinder(ElementwiseProblem):
     def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
-                 accuracy_threshold=0.05, sampling_range=(-4, 4), **kwargs):
+                 accuracy_threshold=0.05, sampling_range=(-3, 3), **kwargs):
         n_features = (len(instance.columns) - 1)
         super().__init__(n_var=n_features * (n_vertex + 1),
                          n_obj=1,
@@ -42,7 +43,7 @@ class BestPathFinder(ElementwiseProblem):
                 "As such, some parallelization efforts of the code may fail. We recommend either "
                 "a multiple restart approach after it randomly functions or"
                 "completely remove parallelization.")
-        assert len(np.append(self.x_og, x)) == (self.n_vertex + 2)*self.n_features
+        assert len(np.append(self.x_og, x)) == (self.n_vertex + 2) * self.n_features
         vertex_array = np.resize(np.append(self.x_og, x), new_shape=(self.n_vertex + 2, self.n_features))
         paths = path(vertex_array, chunks=self.chunks)
         sum_path = 0
@@ -76,9 +77,27 @@ class BayesACE(ACE):
 
     def run(self, instance: pd.DataFrame, parallelize=False, return_info=False):
         termination = DefaultSingleObjectiveTermination(
-            ftol=0.0025*self.n_features**self.penalty,
+            ftol=0.0025 * self.n_features ** self.penalty,
             period=20
         )
+        initial_sample = None
+        flag = False
+        if flag:
+            y_og = instance["class"].values[0]
+            var_probs = {self.bayesian_network.cpd("class").variable_values()[i]:
+                             self.bayesian_network.cpd("class").probabilities()[i] for i in
+                         range(len(self.bayesian_network.cpd("class").variable_values()))}
+            n_samples = int(self.population_size / (1 - var_probs[y_og]) * 1.2)
+            initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
+            initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
+                drop=True)
+            initial_sample = initial_sample.drop("class", axis=1)
+            initial_sample = initial_sample.to_numpy()
+            if self.n_vertex > 0:
+                unif_sample = np.resize(
+                    norm.rvs(size=self.n_vertex * self.population_size * self.n_features, random_state=self.seed),
+                    new_shape=(self.population_size, self.n_vertex * self.n_features))
+                initial_sample = np.hstack((unif_sample, initial_sample))
         # initialize the thread pool and create the runner
         if parallelize:
             n_processes = mp.cpu_count()
@@ -89,7 +108,7 @@ class BayesACE(ACE):
                                      likelihood_threshold=self.likelihood_threshold,
                                      accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range,
                                      elementwise_runner=runner)
-            algorithm = NSGA2(pop_size=self.population_size)
+            algorithm = NSGA2(pop_size=self.population_size)# , sampling=initial_sample)
 
             res = minimize(problem,
                            algorithm,
@@ -97,7 +116,7 @@ class BayesACE(ACE):
                            seed=self.seed,
                            verbose=self.verbose)
             pool.close()
-        else :
+        else:
             problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
                                      penalty=self.penalty, chunks=self.chunks,
                                      likelihood_threshold=self.likelihood_threshold,
@@ -114,7 +133,8 @@ class BayesACE(ACE):
                 return (ACEResult(None, instance.drop("class", axis=1), np.inf), res)
             return ACEResult(None, instance.drop("class", axis=1), np.inf)
 
-        total_path = np.resize(np.append(separate_dataset_and_class(instance)[0].values[0], res.X), new_shape=(self.n_vertex + 2, self.n_features))
+        total_path = np.resize(np.append(separate_dataset_and_class(instance)[0].values[0], res.X),
+                               new_shape=(self.n_vertex + 2, self.n_features))
         path_to_ret = pd.DataFrame(data=total_path,
                                    columns=self.features)
         counterfactual = path_to_ret.iloc[-1]
