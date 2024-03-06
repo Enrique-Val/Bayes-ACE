@@ -163,6 +163,7 @@ def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, seed=0):
         raise PybnesianParallelizationError(
             "Only valid types are CLG, SP and Gaussian. For more customization use the hc method of pybnesian")
     bn.fit(data)
+    bn.include_cpd = True
     pool = mp.Pool(1)
     res = pool.starmap(check_copy, [(bn,)])
     pool.close()

@@ -73,17 +73,27 @@ class BayesACE(ACE):
             drop=True)
         initial_sample = initial_sample.drop("class", axis=1)
         initial_sample = initial_sample.to_numpy()
-        if self.n_vertex < 0:
-            unif_sample = np.resize(
-                norm.rvs(size=self.n_vertex * self.population_size * self.n_features, random_state=self.seed),
-                new_shape=(self.population_size, self.n_vertex * self.n_features))
-            initial_sample = np.hstack((unif_sample, initial_sample))
-        if self.n_vertex > 0:
-            new_sample = []
-            for i in initial_sample:
-                new_sample.append(straight_path(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
-            initial_sample = np.array(new_sample)
-            initial_sample = initial_sample[:, self.n_features:]
+        unif_sample = np.resize(
+            norm.rvs(size=self.n_vertex * self.population_size * self.n_features, random_state=self.seed),
+            new_shape=(self.population_size, self.n_vertex * self.n_features))
+        initial_sample_1 = np.hstack((unif_sample, initial_sample))
+
+        initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
+        initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
+            drop=True)
+        initial_sample = initial_sample.drop("class", axis=1)
+        initial_sample_2 = initial_sample.to_numpy()
+        new_sample = []
+        for i in initial_sample_2:
+            new_sample.append(straight_path(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
+        initial_sample_2 = np.array(new_sample)
+        initial_sample_2 = initial_sample_2[:, self.n_features:]
+        noise = norm(0, 0.2).rvs(size=(initial_sample_2.shape[0], initial_sample_2.shape[1] - self.n_features))
+        noise = np.hstack((noise, np.zeros(shape=(initial_sample_2.shape[0], self.n_features))))
+        assert initial_sample_2.shape == noise.shape
+        initial_sample_2 = initial_sample_2 + noise
+        initial_sample = np.vstack((initial_sample_1, initial_sample_2))
+
         return initial_sample
 
     def __init__(self, bayesian_network, features, chunks, n_vertex, pop_size=100,
