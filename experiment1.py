@@ -57,7 +57,6 @@ if __name__ == "__main__":
         # Result storage
         distances_mat = np.zeros((n_counterfactuals, len(n_vertices)))
         evaluations_mat = np.zeros((n_counterfactuals, len(n_vertices)))
-        print("Distances raw")
         for i in range(0, n_counterfactuals):
             distances = np.zeros(len(n_vertices))
             evaluations = np.zeros(len(n_vertices))
@@ -69,13 +68,8 @@ if __name__ == "__main__":
                 result, res = alg.run(df_test.iloc[[i]], parallelize=True, return_info=True)
                 distances[j] = result.distance
                 evaluations[j] = res.algorithm.evaluator.n_eval
-            print(distances)
-            distances -= distances.min()
-            distances /= distances.ptp()
             distances_mat[i] = distances
             evaluations_mat[i] = evaluations
-        print()
-
         print("Distances mat")
         print(distances_mat)
         print()
@@ -84,15 +78,10 @@ if __name__ == "__main__":
         print()
         print()
 
-        distances_mean = distances_mat.mean(axis=0)
-        distances_std = distances_mat.std(axis=0)
-        evaluations_mean = evaluations_mat.mean(axis=0)
-        evaluations_std = evaluations_mat.std(axis=0)
+        to_ret = pd.DataFrame(data=distances_mat, columns=n_vertices)
+        to_ret.to_csv('./results/exp_1/distances_data' + str(dataset_id) + '_net' + network_type + '_penalty' + str(penalty) + '.csv')
 
-        with open('./results/exp_1/data' + str(dataset_id) + '_net' + network_type + '_penalty' + str(penalty) + '.csv',
-                  'w') as f:
-            w = csv.writer(f)
-            w.writerow(distances_mean)
-            w.writerow(evaluations_mean)
-            w.writerow(distances_std)
-            w.writerow(evaluations_std)
+        to_ret = pd.DataFrame(data=evaluations_mat, columns=n_vertices)
+        to_ret.to_csv('./results/exp_1/evaluations_data' + str(dataset_id) + '_net' + network_type + '_penalty' + str(penalty) + '.csv')
+
+
