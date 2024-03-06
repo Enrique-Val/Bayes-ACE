@@ -110,7 +110,7 @@ class BayesACE(ACE):
 
     def run(self, instance: pd.DataFrame, parallelize=False, return_info=False):
         termination = DefaultSingleObjectiveTermination(
-            ftol=0.0025 * self.n_features ** self.penalty,
+            ftol=0.05 * self.n_features ** self.penalty,
             period=20
         )
         initial_sample = self.get_initial_sample(instance)
