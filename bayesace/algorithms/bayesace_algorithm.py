@@ -14,7 +14,6 @@ from pymoo.termination.default import DefaultSingleObjectiveTermination
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 
-
 class BestPathFinder(ElementwiseProblem):
     def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
                  accuracy_threshold=0.05, sampling_range=(-3, 3), **kwargs):
@@ -63,6 +62,30 @@ class BestPathFinder(ElementwiseProblem):
 
 
 class BayesACE(ACE):
+    def get_initial_sample(self,instance):
+        y_og = instance["class"].values[0]
+        var_probs = {self.bayesian_network.cpd("class").variable_values()[i]:
+                         self.bayesian_network.cpd("class").probabilities()[i] for i in
+                     range(len(self.bayesian_network.cpd("class").variable_values()))}
+        n_samples = int(self.population_size / (1 - var_probs[y_og]) * 1.2)
+        initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
+        initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
+            drop=True)
+        initial_sample = initial_sample.drop("class", axis=1)
+        initial_sample = initial_sample.to_numpy()
+        if self.n_vertex < 0:
+            unif_sample = np.resize(
+                norm.rvs(size=self.n_vertex * self.population_size * self.n_features, random_state=self.seed),
+                new_shape=(self.population_size, self.n_vertex * self.n_features))
+            initial_sample = np.hstack((unif_sample, initial_sample))
+        if self.n_vertex > 0:
+            new_sample = []
+            for i in initial_sample:
+                new_sample.append(straight_path(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
+            initial_sample = np.array(new_sample)
+            initial_sample = initial_sample[:, self.n_features:]
+        return initial_sample
+
     def __init__(self, bayesian_network, features, chunks, n_vertex, pop_size=100,
                  generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=(-4, 4),
                  seed=0,
@@ -80,24 +103,7 @@ class BayesACE(ACE):
             ftol=0.0025 * self.n_features ** self.penalty,
             period=20
         )
-        initial_sample = None
-        flag = False
-        if flag:
-            y_og = instance["class"].values[0]
-            var_probs = {self.bayesian_network.cpd("class").variable_values()[i]:
-                             self.bayesian_network.cpd("class").probabilities()[i] for i in
-                         range(len(self.bayesian_network.cpd("class").variable_values()))}
-            n_samples = int(self.population_size / (1 - var_probs[y_og]) * 1.2)
-            initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
-            initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
-                drop=True)
-            initial_sample = initial_sample.drop("class", axis=1)
-            initial_sample = initial_sample.to_numpy()
-            if self.n_vertex > 0:
-                unif_sample = np.resize(
-                    norm.rvs(size=self.n_vertex * self.population_size * self.n_features, random_state=self.seed),
-                    new_shape=(self.population_size, self.n_vertex * self.n_features))
-                initial_sample = np.hstack((unif_sample, initial_sample))
+        initial_sample = self.get_initial_sample(instance)
         # initialize the thread pool and create the runner
         if parallelize:
             n_processes = mp.cpu_count()
@@ -108,7 +114,7 @@ class BayesACE(ACE):
                                      likelihood_threshold=self.likelihood_threshold,
                                      accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range,
                                      elementwise_runner=runner)
-            algorithm = NSGA2(pop_size=self.population_size)# , sampling=initial_sample)
+            algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
 
             res = minimize(problem,
                            algorithm,
@@ -121,7 +127,7 @@ class BayesACE(ACE):
                                      penalty=self.penalty, chunks=self.chunks,
                                      likelihood_threshold=self.likelihood_threshold,
                                      accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)
-            algorithm = NSGA2(pop_size=self.population_size)
+            algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
 
             res = minimize(problem,
                            algorithm,
