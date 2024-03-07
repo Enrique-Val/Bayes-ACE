@@ -190,4 +190,8 @@ def get_and_process_data(dataset_id: int):
     # Scale the rest of the dataset
     feature_columns = [i for i in data.columns if i != "class"]
     data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
+
+    for i in data.columns[:-1]:
+        data = data[data[i] < 3]
+        data = data[data[i] > -3]
     return data

@@ -3,7 +3,7 @@ import time
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
-from scipy.stats import norm
+from scipy.stats import norm, truncnorm
 
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.moo.nsga2 import NSGA2
@@ -74,7 +74,7 @@ class BayesACE(ACE):
         initial_sample = initial_sample.drop("class", axis=1)
         initial_sample = initial_sample.to_numpy()
         unif_sample = np.resize(
-            norm.rvs(size=self.n_vertex * self.population_size * self.n_features, random_state=self.seed),
+            truncnorm(-3,3).rvs(size=self.n_vertex * self.population_size * self.n_features, random_state=self.seed),
             new_shape=(self.population_size, self.n_vertex * self.n_features))
         initial_sample_1 = np.hstack((unif_sample, initial_sample))
 
@@ -92,6 +92,8 @@ class BayesACE(ACE):
         noise = np.hstack((noise, np.zeros(shape=(initial_sample_2.shape[0], self.n_features))))
         assert initial_sample_2.shape == noise.shape
         initial_sample_2 = initial_sample_2 + noise
+        initial_sample_2[initial_sample_2 < -3] = -3
+        initial_sample_2[initial_sample_2 > 3] = 3
         initial_sample = np.vstack((initial_sample_1, initial_sample_2))
 
         return initial_sample
