@@ -84,6 +84,10 @@ class BayesACE(ACE):
             new_sample.to_numpy(),
             new_shape=(self.population_size, self.n_vertex * self.n_features))
         initial_sample_1 = np.hstack((unif_sample, initial_sample))
+        # In semiparametrix networks, due to oversmoothing, samples my occur outside of the defined bounds. In this version, the bounds are fixed to -3 and 3.
+        # In future versions, it will be a parameter
+        initial_sample_1[initial_sample_1 <= -3] = -2.99999
+        initial_sample_1[initial_sample_1 >= 3] = 2.99999
         if self.initialization == "default":
             return initial_sample_1
         else:
