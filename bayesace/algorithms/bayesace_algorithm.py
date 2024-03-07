@@ -14,6 +14,7 @@ from pymoo.termination.default import DefaultSingleObjectiveTermination
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 
+
 class BestPathFinder(ElementwiseProblem):
     def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
                  accuracy_threshold=0.05, sampling_range=(-3, 3), **kwargs):
@@ -62,44 +63,55 @@ class BestPathFinder(ElementwiseProblem):
 
 
 class BayesACE(ACE):
-    def get_initial_sample(self,instance):
+    def get_initial_sample(self, instance):
+        assert self.initialization == "default" or self.initialization == "guided"
         y_og = instance["class"].values[0]
         var_probs = {self.bayesian_network.cpd("class").variable_values()[i]:
                          self.bayesian_network.cpd("class").probabilities()[i] for i in
                      range(len(self.bayesian_network.cpd("class").variable_values()))}
-        n_samples = int(self.population_size / (1 - var_probs[y_og]) * 1.2)
+        n_samples = int((self.population_size / (1 - var_probs[y_og])) * 2.5)
         initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
         initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
             drop=True)
         initial_sample = initial_sample.drop("class", axis=1)
         initial_sample = initial_sample.to_numpy()
+
+        new_sample = self.bayesian_network.sample(self.n_vertex * self.population_size, ordered=True,
+                                                  seed=self.seed).to_pandas()
+        new_sample = new_sample[new_sample["class"] != y_og].head(self.population_size).reset_index(drop=True)
+        new_sample = new_sample.drop("class", axis=1)
         unif_sample = np.resize(
-            truncnorm(-3,3).rvs(size=self.n_vertex * self.population_size * self.n_features, random_state=self.seed),
+            new_sample.to_numpy(),
             new_shape=(self.population_size, self.n_vertex * self.n_features))
         initial_sample_1 = np.hstack((unif_sample, initial_sample))
+        if self.initialization == "default":
+            return initial_sample_1
+        else:
 
-        initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
-        initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
-            drop=True)
-        initial_sample = initial_sample.drop("class", axis=1)
-        initial_sample_2 = initial_sample.to_numpy()
-        new_sample = []
-        for i in initial_sample_2:
-            new_sample.append(straight_path(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
-        initial_sample_2 = np.array(new_sample)
-        initial_sample_2 = initial_sample_2[:, self.n_features:]
-        noise = norm(0, 0.2).rvs(size=(initial_sample_2.shape[0], initial_sample_2.shape[1] - self.n_features))
-        noise = np.hstack((noise, np.zeros(shape=(initial_sample_2.shape[0], self.n_features))))
-        assert initial_sample_2.shape == noise.shape
-        initial_sample_2 = initial_sample_2 + noise
-        initial_sample_2[initial_sample_2 < -3] = -3
-        initial_sample_2[initial_sample_2 > 3] = 3
-        initial_sample = np.vstack((initial_sample_1, initial_sample_2))
+            initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed + 1).to_pandas()
+            initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
+                drop=True)
+            initial_sample = initial_sample.drop("class", axis=1)
+            initial_sample_2 = initial_sample.to_numpy()
+            new_sample = []
+            for i in initial_sample_2:
+                new_sample.append(straight_path(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
+            initial_sample_2 = np.array(new_sample)
+            initial_sample_2 = initial_sample_2[:, self.n_features:]
+            noise = norm(0, 0.2).rvs(size=(initial_sample_2.shape[0], initial_sample_2.shape[1] - self.n_features))
+            noise = np.hstack((noise, np.zeros(shape=(initial_sample_2.shape[0], self.n_features))))
+            assert initial_sample_2.shape == noise.shape
+            initial_sample_2 = initial_sample_2 + noise
+            initial_sample_2[initial_sample_2 <= -3] = -2.99999
+            initial_sample_2[initial_sample_2 >= 3] = 2.99999
+            initial_sample = np.vstack((initial_sample_1, initial_sample_2))
+            # initial_sample = initial_sample_1
 
-        return initial_sample
+            return initial_sample
 
     def __init__(self, bayesian_network, features, chunks, n_vertex, pop_size=100,
                  generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=(-4, 4),
+                 initialization="default",
                  seed=0,
                  verbose=True):
         super().__init__(bayesian_network, features, chunks, likelihood_threshold=likelihood_threshold,
@@ -109,6 +121,7 @@ class BayesACE(ACE):
         self.generations = generations
         self.population_size = pop_size
         self.sampling_range = sampling_range
+        self.initialization = initialization
 
     def run(self, instance: pd.DataFrame, parallelize=False, return_info=False):
         termination = DefaultSingleObjectiveTermination(
@@ -143,7 +156,7 @@ class BayesACE(ACE):
 
             res = minimize(problem,
                            algorithm,
-                           termination=('n_gen', self.generations),
+                           termination=termination,  # ('n_gen', self.generations),
                            seed=self.seed,
                            verbose=self.verbose)
         if res.X is None:
