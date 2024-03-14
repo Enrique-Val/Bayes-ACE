@@ -8,3 +8,21 @@
 pybensian_test.ipynb
 
 *.pyc
+
+*.CIG-Enrique
+
+bayesace/models/BNAF_base/checkpoin*
+
+bayesace/models/BNAF_base/data/BSDS300/BSDS300.hdf5
+
+bayesace/models/BNAF_base/data/gas/
+
+bayesace/models/BNAF_base/data/hepmass/
+
+bayesace/models/BNAF_base/data/miniboone/
+
+bayesace/models/BNAF_base/data/power/
+
+bayesace/models/checkpoint_a/44130_layers1_h10_flows5_gated_2024-03-12-21-14-03/args.json
+
+bayesace/models/checkpoint_a/44130_layers1_h10_flows5_gated_2024-03-12-21-14-03/checkpoint.pt
