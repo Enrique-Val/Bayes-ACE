@@ -8,3 +8,6 @@
 pybensian_test.ipynb
 
 *.pyc
+
+bayesace/models/tensorboard/checkpoint*
+bayesace/models/checkpoint*

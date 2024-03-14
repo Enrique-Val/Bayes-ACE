@@ -6,6 +6,7 @@ import math
 import multiprocessing as mp
 import openml as oml
 from sklearn.preprocessing import StandardScaler
+from collections import Counter
 
 
 def identity(x):
@@ -65,8 +66,6 @@ def likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
 def log_likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
     l = likelihood(x_cfx, bn)
 
-    '''if l == 0:
-        return -np.inf'''
     if not ((l < 1).all()):
         Warning(
             "Likelihood of some points in the space is higher than 1. Computing the log likelihood may not make sense.")
@@ -195,3 +194,8 @@ def get_and_process_data(dataset_id: int):
         data = data[data[i] < 3]
         data = data[data[i] > -3]
     return data
+
+
+def L0_norm(x_1, x_2, eps=0.01):
+    return Counter(np.abs(x_1 - x_2) > eps)[True]
+

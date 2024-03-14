@@ -85,7 +85,7 @@ class BNAF(torch.nn.Sequential):
             return outputs, grad.squeeze().sum(-1)
 
     def _get_name(self):
-        return "BNAF(res={})".format(self.res)
+        return "BNAF_base(res={})".format(self.res)
 
 
 class Permutation(torch.nn.Module):
