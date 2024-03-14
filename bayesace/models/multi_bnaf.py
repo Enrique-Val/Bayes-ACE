@@ -1,69 +1,92 @@
-import os
-import json
-import argparse
-import pprint
-import datetime
+import numpy as np
+import pandas as pd
 import torch
-from torch.utils import data
-from bnaf import *
+import torch.nn as nn
+from sklearn.preprocessing import StandardScaler
+from torch.utils.data import DataLoader
 from tqdm import tqdm
-from optim.adam import Adam
-from optim.lr_scheduler import ReduceLROnPlateau
 
-from data.gas import GAS
-from data.bsds300 import BSDS300
-from data.hepmass import HEPMASS
-from data.miniboone import MINIBOONE
-from data.power import POWER
+from bayesace import get_and_process_data
+# from models.BNAF_base.bnaf import BNAF
+import os
+import datetime
 
-NAF_PARAMS = {
-    "power": (414213, 828258),
-    "gas": (401741, 803226),
-    "hepmass": (9272743, 18544268),
-    "miniboone": (7487321, 14970256),
-    "bsds300": (36759591, 73510236),
-}
+from bayesace.models.BNAF_base.bnaf import MaskedWeight, Tanh, BNAF, Permutation, Sequential
+from bayesace.models.BNAF_base.optim.adam import Adam
+from bayesace.models.BNAF_base.optim.lr_scheduler import ReduceLROnPlateau
+import json
+import matplotlib.pyplot as plt
 
 
-def load_dataset(args):
-    if args.dataset == "gas":
-        dataset = GAS("data/gas/ethylene_CO.pickle")
-    elif args.dataset == "bsds300":
-        dataset = BSDS300("data/BSDS300/BSDS300.hdf5")
-    elif args.dataset == "hepmass":
-        dataset = HEPMASS("data/hepmass")
-    elif args.dataset == "miniboone":
-        dataset = MINIBOONE("data/miniboone/data.npy")
-    elif args.dataset == "power":
-        dataset = POWER("data/power/data.npy")
-    else:
-        raise RuntimeError()
+class Arguments():
+    def __init__(self, dataset_id):
+        self.device = "cpu"#"cuda:0"
+        self.dataset_id = dataset_id #44091 44130 44123 44122 44127
+        self.learning_rate = 1e-2
+        self.batch_dim = 20
+        self.clip_norm = 0.1
+        self.epochs = 100  # 1000
 
-    dataset_train = torch.utils.data.TensorDataset(
-        torch.from_numpy(dataset.trn.x).float().to(args.device)
-    )
-    data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, batch_size=args.batch_dim, shuffle=True
-    )
+        self.patience = 20
+        self.cooldown = 10
+        self.early_stopping = 100
+        self.decay = 0.5
+        self.min_lr = 5e-4
+        self.polyak = 0.998
 
-    dataset_valid = torch.utils.data.TensorDataset(
-        torch.from_numpy(dataset.val.x).float().to(args.device)
-    )
-    data_loader_valid = torch.utils.data.DataLoader(
-        dataset_valid, batch_size=args.batch_dim, shuffle=False
-    )
+        self.flows = 5
+        self.layers = 1
+        self.hidden_dim = 10
+        self.residual = "gated"  # choices=[None, "normal", "gated"]
 
-    dataset_test = torch.utils.data.TensorDataset(
-        torch.from_numpy(dataset.tst.x).float().to(args.device)
-    )
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=args.batch_dim, shuffle=False
-    )
+        self.expname = ""
+        self.load = None
+        self.save = True#True
+        self.tensorboard = "tensorboard"
 
-    args.n_dims = dataset.n_dims
+def load_dataset_oml(args):
+    #full_data = get_and_process_data(args.dataset_id)
+    print(os.getcwd())
+    full_data = pd.read_csv("../../toy-3class.csv")
+    full_data["class"] = full_data["z"].astype('category')
+    full_data = full_data.drop("z", axis=1)
+    feature_columns = [i for i in full_data.columns if i != "class"]
+    full_data[feature_columns] = StandardScaler().fit_transform(full_data[feature_columns].values)
 
-    return data_loader_train, data_loader_valid, data_loader_test
+    class_data_loaders = {}
+    class_dist = full_data["class"].value_counts(normalize = True).to_dict()
+    for i in np.unique(full_data["class"]):
+        dataset_class = full_data[full_data["class"] == i].drop(columns=["class"]).values
 
+        d_train, d_validate, d_test = np.split(dataset_class,
+                                               [int(.6 * len(dataset_class)), int(.8 * len(dataset_class))])
+
+        dataset_train = torch.utils.data.TensorDataset(
+            torch.from_numpy(d_train).float().to(args.device)
+        )
+        data_loader_train = torch.utils.data.DataLoader(
+            dataset_train, batch_size=args.batch_dim, shuffle=True
+        )
+
+        dataset_valid = torch.utils.data.TensorDataset(
+            torch.from_numpy(d_validate).float().to(args.device)
+        )
+        data_loader_valid = torch.utils.data.DataLoader(
+            dataset_valid, batch_size=args.batch_dim, shuffle=False
+        )
+
+        dataset_test = torch.utils.data.TensorDataset(
+            torch.from_numpy(d_test).float().to(args.device)
+        )
+        data_loader_test = torch.utils.data.DataLoader(
+            dataset_test, batch_size=args.batch_dim, shuffle=False
+        )
+
+        class_data_loaders[i]= (data_loader_train, data_loader_valid, data_loader_test)
+
+    args.n_dims = len(full_data.columns) - 1
+
+    return class_data_loaders, class_dist
 
 def create_model(args, verbose=False):
 
@@ -109,28 +132,6 @@ def create_model(args, verbose=False):
         for p in model.parameters()
     ).item()
 
-    if verbose:
-        print("{}".format(model))
-        print(
-            "Parameters={}, NAF/BNAF={:.2f}/{:.2f}, n_dims={}".format(
-                params,
-                NAF_PARAMS[args.dataset][0] / params,
-                NAF_PARAMS[args.dataset][1] / params,
-                args.n_dims,
-            )
-        )
-
-    if args.save and not args.load:
-        with open(os.path.join(args.load or args.path, "results.txt"), "a") as f:
-            print(
-                "Parameters={}, NAF/BNAF={:.2f}/{:.2f}, n_dims={}".format(
-                    params,
-                    NAF_PARAMS[args.dataset][0] / params,
-                    NAF_PARAMS[args.dataset][1] / params,
-                    args.n_dims,
-                ),
-                file=f,
-            )
 
     return model
 
@@ -153,13 +154,14 @@ def save_model(model, optimizer, epoch, args):
 
 def load_model(model, optimizer, args, load_start_epoch=False):
     def f():
-        print("Loading model..")
-        checkpoint = torch.load(os.path.join(args.load or args.path, "checkpoint.pt"))
-        model.load_state_dict(checkpoint["model"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
+        if args.save :
+            print("Loading model..")
+            checkpoint = torch.load(os.path.join(args.load or args.path, "checkpoint.pt"))
+            model.load_state_dict(checkpoint["model"])
+            optimizer.load_state_dict(checkpoint["optimizer"])
 
-        if load_start_epoch:
-            args.start_epoch = checkpoint["epoch"]
+            if load_start_epoch:
+                args.start_epoch = checkpoint["epoch"]
 
     return f
 
@@ -226,7 +228,7 @@ def train(
                 validation_loss.item(),
             )
         )
-
+        my_copy = model
         stop = scheduler.step(
             validation_loss,
             callback_best=save_model(model, optimizer, epoch + 1, args),
@@ -240,8 +242,7 @@ def train(
 
         if stop:
             break
-
-    load_model(model, optimizer, args)()
+    #load_model(model, optimizer, args)()
     optimizer.swap()
     validation_loss = -torch.stack(
         [compute_log_p_x(model, x_mb).mean().detach() for x_mb, in data_loader_valid],
@@ -261,51 +262,13 @@ def train(
             print("Validation loss: {:4.3f}".format(validation_loss.item()), file=f)
             print("Test loss:       {:4.3f}".format(test_loss.item()), file=f)
 
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument(
-        "--dataset",
-        type=str,
-        default="miniboone",
-        choices=["gas", "bsds300", "hepmass", "miniboone", "power"],
-    )
-
-    parser.add_argument("--learning_rate", type=float, default=1e-2)
-    parser.add_argument("--batch_dim", type=int, default=200)
-    parser.add_argument("--clip_norm", type=float, default=0.1)
-    parser.add_argument("--epochs", type=int, default=15)
-
-    parser.add_argument("--patience", type=int, default=20)
-    parser.add_argument("--cooldown", type=int, default=10)
-    parser.add_argument("--early_stopping", type=int, default=100)
-    parser.add_argument("--decay", type=float, default=0.5)
-    parser.add_argument("--min_lr", type=float, default=5e-4)
-    parser.add_argument("--polyak", type=float, default=0.998)
-
-    parser.add_argument("--flows", type=int, default=5)
-    parser.add_argument("--layers", type=int, default=1)
-    parser.add_argument("--hidden_dim", type=int, default=10)
-    parser.add_argument(
-        "--residual", type=str, default="gated", choices=[None, "normal", "gated"]
-    )
-
-    parser.add_argument("--expname", type=str, default="")
-    parser.add_argument("--load", type=str, default=None)
-    parser.add_argument("--save", type = bool, default=True)
-    parser.add_argument("--tensorboard", type=str, default="tensorboard")
-
-    args = parser.parse_args()
-
-    print("Arguments:")
-    pprint.pprint(args.__dict__)
+def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test):
 
     args.path = os.path.join(
-        "checkpoint",
+        "checkpoint_"+str(i),
         "{}{}_layers{}_h{}_flows{}{}_{}".format(
             args.expname + ("_" if args.expname != "" else ""),
-            args.dataset,
+            args.dataset_id,
             args.layers,
             args.hidden_dim,
             args.flows,
@@ -314,16 +277,14 @@ def main():
         ),
     )
 
-    print("Loading dataset..")
-    data_loader_train, data_loader_valid, data_loader_test = load_dataset(args)
-
     if args.save and not args.load:
         print("Creating directory experiment..")
+        os.mkdir("checkpoint_"+str(i))
         os.mkdir(args.path)
         with open(os.path.join(args.path, "args.json"), "w") as f:
             json.dump(args.__dict__, f, indent=4, sort_keys=True)
 
-    print("Creating BNAF model..")
+    print("Creating BNAF_base model..")
     model = create_model(args, verbose=True)
 
     print("Creating optimizer..")
@@ -357,7 +318,59 @@ def main():
         data_loader_test,
         args,
     )
+    return model
+
+class MultiBNAF:
+    def __init__(self, args):
+        self.args = args
+        class_data_loaders, self.class_dist = load_dataset_oml(self.args)
+        self.bnafs = {}
+        for i in class_data_loaders.keys():
+            data_loader_train, data_loader_valid, data_loader_test = class_data_loaders[i]
+            model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test)
+            self.bnafs[i] = model
 
 
 if __name__ == "__main__":
-    main()
+    args = Arguments(44130)
+    args.epochs = 2000
+    multi_bnaf = MultiBNAF(args)
+    print(multi_bnaf.class_dist)
+    #print(multi_bnaf.bnafs)
+    print(multi_bnaf.bnafs["a"](torch.from_numpy(np.array([[0,0]])).float()))
+    print("High",compute_log_p_x(multi_bnaf.bnafs["a"],torch.from_numpy(np.array([[-1,0]])).float()))
+    print("Low", compute_log_p_x(multi_bnaf.bnafs["a"],torch.from_numpy(np.array([[2,2]])).float()))
+    limit = 3
+    step = 0.01
+    for i in ["a","b","c"] :
+        model = multi_bnaf.bnafs[i]
+        grid = torch.Tensor(
+            [
+                [a, b]
+                for a in np.arange(-limit, limit, step)
+                for b in np.arange(-limit, limit, step)
+            ]
+        )
+        grid_dataset = torch.utils.data.TensorDataset(grid.to(args.device))
+        grid_data_loader = torch.utils.data.DataLoader(
+            grid_dataset, batch_size=1000, shuffle=False
+        )
+
+        prob = torch.cat(
+            [
+                torch.exp(compute_log_p_x(model, x_mb)).detach()
+                for x_mb, in grid_data_loader
+            ],
+            0,
+        )
+
+        prob = prob.view(int(2 * limit / step), int(2 * limit / step)).t()
+
+        if False:
+            prob = prob.clamp(max=prob.mean() + 3 * prob.std())
+
+        plt.figure(figsize=(12, 12))
+        plt.imshow(prob.cpu().data.numpy(), extent=(-limit, limit, -limit, limit))
+        plt.axis("off")
+        plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
+        plt.show()
