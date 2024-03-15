@@ -46,8 +46,8 @@ if __name__ == "__main__":
 
     np.random.seed(0)
     # Algorithm parameters (relatively high restriction on accuracy and likelihood)
-    likelihood_threshold = 0.2 ** (len(df_train.columns) - 1)
-    accuracy_threshold = 0.15
+    likelihood_threshold = 0.1 ** (len(df_train.columns) - 1)
+    accuracy_threshold = 0.25
     n_vertices = [0, 1, 2, 3, 4, 5]
     penalties = [1, 5, 10, 15, 20]
     # Number of points for approximating integrals:
