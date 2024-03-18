@@ -17,7 +17,7 @@ from bayesace.models.BNAF_base.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import matplotlib.pyplot as plt
 
-from models.BNAF_base.single_bnaf import BnafEstimator
+from BNAF_base.bnaf_estimator import BnafEstimator
 
 
 class Arguments():
@@ -25,7 +25,7 @@ class Arguments():
         self.device = "cpu" #"cuda:0"
         self.dataset_id = dataset_id #44091 44130 44123 44122 44127
         self.learning_rate = 1e-2
-        self.batch_dim = 20
+        self.batch_dim = 200
         self.clip_norm = 0.1
         self.epochs = 100  # 1000
 
