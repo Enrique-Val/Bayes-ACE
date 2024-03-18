@@ -77,9 +77,11 @@ def accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):
     class_values = class_cpd.variable_values()
     cfx = x_cfx.copy()
     if isinstance(y_og, str):
-        cfx["class"] = pd.Categorical([y_og]*len(x_cfx.index), categories=class_values)
+        assert len(x_cfx.index) == 1
+        cfx["class"] = pd.Categorical([y_og], categories=class_values)
     else:
-        cfx["class"] = pd.Categorical(y_og*len(x_cfx.index), categories=class_values)
+        assert len(y_og) == len(x_cfx.index)
+        cfx["class"] = pd.Categorical(y_og, categories=class_values)
     prob = math.e ** bn.logl(cfx)
     ll = likelihood(x_cfx, bn)
     to_ret = np.empty(shape=len(x_cfx.index))

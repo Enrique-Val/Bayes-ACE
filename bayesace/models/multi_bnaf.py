@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from bayesace import get_and_process_data
+from bayesace import get_and_process_data, hill_climbing
 # from models.BNAF_base.bnaf import BNAF
 import os
 import datetime
@@ -17,17 +17,17 @@ from bayesace.models.BNAF_base.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import matplotlib.pyplot as plt
 
-from BNAF_base.bnaf_estimator import BnafEstimator
-
+from models.BNAF_base.bnaf_estimator import BnafEstimator
+import pybnesian as pb
 
 class Arguments():
     def __init__(self, dataset_id):
         self.device = "cpu" #"cuda:0"
         self.dataset_id = dataset_id #44091 44130 44123 44122 44127
         self.learning_rate = 1e-2
-        self.batch_dim = 200
+        self.batch_dim = 20
         self.clip_norm = 0.1
-        self.epochs = 100  # 1000
+        self.epochs = 1000  # 1000
 
         self.patience = 20
         self.cooldown = 10
@@ -46,15 +46,8 @@ class Arguments():
         self.save = True#True
         self.tensorboard = "tensorboard"
 
-def load_dataset_oml(args):
-    full_data = get_and_process_data(args.dataset_id)
-    print(os.getcwd())
-    '''full_data = pd.read_csv("../../toy-3class.csv")
-    full_data["class"] = full_data["z"].astype('category')
-    full_data = full_data.drop("z", axis=1)
-    feature_columns = [i for i in full_data.columns if i != "class"]
-    full_data[feature_columns] = StandardScaler().fit_transform(full_data[feature_columns].values)'''
-
+def get_data_loaders(args, data):
+    full_data = data
     class_data_loaders = {}
     class_dist = full_data["class"].value_counts(normalize = True).to_dict()
     for i in np.unique(full_data["class"]):
@@ -90,7 +83,7 @@ def load_dataset_oml(args):
 
     return class_data_loaders, class_dist
 
-def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test):
+def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test) -> BnafEstimator:
     dir_data = "checkpoint_data"+str(args.dataset_id)
     dir_class = dir_data+"/"+dir_data+"_class_"+str(i)
     args.path = os.path.join(
@@ -130,13 +123,33 @@ def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loade
 class MultiBnaf:
     def __init__(self, args):
         self.args = args
-        class_data_loaders, self.class_dist = load_dataset_oml(self.args)
+        data = get_and_process_data(args.dataset_id)
+        print(os.getcwd())
+        df = pd.read_csv("toy-3class.csv")
+        df["class"] = df["z"].astype('category')
+        df = df.drop("z", axis=1)
+        feature_columns = [i for i in df.columns if i != "class"]
+        df[feature_columns] = StandardScaler().fit_transform(df[feature_columns].values)
+        data = df
+        class_data_loaders, self.class_dist = get_data_loaders(self.args, data)
         self.bnafs = {}
         for i in class_data_loaders.keys():
             data_loader_train, data_loader_valid, data_loader_test = class_data_loaders[i]
             model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test)
             self.bnafs[i] = model
+        self.sampler = hill_climbing(data=data, bn_type="CLG")
 
+    def sample(self, n_samples, ordered=True, seed=None):
+        return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
+
+    def logl(self, data):
+        to_ret = pd.DataFrame(index = data.index)
+        for i in np.unique(data["class"]):
+            data_i = data[data["class"] == i].drop("class", axis=1)
+            index_i = data_i.index
+            logl_i = self.bnafs[i].compute_log_p_x(data_i.values)
+            to_ret.loc[index_i] = logl_i
+        return to_ret
 
 if __name__ == "__main__":
     torch.manual_seed(0)

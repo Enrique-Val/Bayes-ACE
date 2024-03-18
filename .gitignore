@@ -71,3 +71,5 @@ bayesace/models/checkpoin*
 
 bayesace/models/tensorboard/checkpoin*
 
+
+results/exp_1_relaxed/

@@ -120,6 +120,8 @@ class BnafEstimator():
         return f
 
     def compute_log_p_x(self, x_mb):
+        if isinstance(x_mb, np.ndarray) :
+            x_mb = torch.from_numpy(x_mb).float()
         y_mb, log_diag_j_mb = self.model(x_mb)
         log_p_y_mb = (
             torch.distributions.Normal(torch.zeros_like(y_mb), torch.ones_like(y_mb))
@@ -136,7 +138,7 @@ class BnafEstimator():
     ):
         self.args.start_epoch = 0
 
-        if self.args.tensorboard:
+        if self.args.tensorboard :
             from tensorboardX import SummaryWriter
             writer = SummaryWriter(os.path.join(self.args.tensorboard, self.args.load or self.args.path))
 
@@ -169,21 +171,22 @@ class BnafEstimator():
             ).mean()
             self.optimizer.swap()
 
-            print(
-                "Epoch {:3}/{:3} -- train_loss: {:4.3f} -- validation_loss: {:4.3f}".format(
-                    epoch + 1,
-                    self.args.start_epoch + self.args.epochs,
-                    train_loss.item(),
-                    validation_loss.item(),
+            if False :
+                print(
+                    "Epoch {:3}/{:3} -- train_loss: {:4.3f} -- validation_loss: {:4.3f}".format(
+                        epoch + 1,
+                        self.args.start_epoch + self.args.epochs,
+                        train_loss.item(),
+                        validation_loss.item(),
+                    )
                 )
-            )
             stop = self.scheduler.step(
                 validation_loss,
                 callback_best=self.save_model(epoch + 1),
                 callback_reduce=self.load_model(),
             )
 
-            if self.args.tensorboard:
+            if self.args.tensorboard and False:
                 writer.add_scalar("lr", self.optimizer.param_groups[0]["lr"], epoch + 1)
                 writer.add_scalar("loss/validation", validation_loss.item(), epoch + 1)
                 writer.add_scalar("loss/train", train_loss.item(), epoch + 1)
@@ -200,9 +203,10 @@ class BnafEstimator():
             [self.compute_log_p_x(x_mb).mean().detach() for x_mb, in data_loader_test], -1
         ).mean()
 
-        print("###### Stop training after {} epochs!".format(epoch + 1))
-        print("Validation loss: {:4.3f}".format(validation_loss.item()))
-        print("Test loss:       {:4.3f}".format(test_loss.item()))
+        if False :
+            print("###### Stop training after {} epochs!".format(epoch + 1))
+            print("Validation loss: {:4.3f}".format(validation_loss.item()))
+            print("Test loss:       {:4.3f}".format(test_loss.item()))
 
         if self.args.save:
             with open(os.path.join(self.args.load or self.args.path, "results.txt"), "a") as f:
