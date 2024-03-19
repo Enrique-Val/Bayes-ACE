@@ -21,9 +21,8 @@ from models.BNAF_base.bnaf_estimator import BnafEstimator
 import pybnesian as pb
 
 class Arguments():
-    def __init__(self, dataset_id):
-        self.device = "cpu" #"cuda:0"
-        self.dataset_id = dataset_id #44091 44130 44123 44122 44127
+    def __init__(self) :
+        self.device = "cuda" #"cuda:0"
         self.learning_rate = 1e-2
         self.batch_dim = 20
         self.clip_norm = 0.1
@@ -44,7 +43,7 @@ class Arguments():
         self.expname = ""
         self.load = None
         self.save = True#True
-        self.tensorboard = "tensorboard"
+        self.tensorboard = False  #"tensorboard"
 
 def get_data_loaders(args, data):
     full_data = data
@@ -83,7 +82,7 @@ def get_data_loaders(args, data):
 
     return class_data_loaders, class_dist
 
-def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test) -> BnafEstimator:
+def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test, seed = 0) -> BnafEstimator:
     dir_data = "checkpoint_data"+str(args.dataset_id)
     dir_class = dir_data+"/"+dir_data+"_class_"+str(i)
     args.path = os.path.join(
@@ -116,26 +115,19 @@ def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loade
     bnaf.train(
         data_loader_train,
         data_loader_valid,
-        data_loader_test
+        data_loader_test,
+        seed=seed
     )
     return bnaf
 
 class MultiBnaf:
-    def __init__(self, args):
+    def __init__(self, args, data, seed = 0):
         self.args = args
-        data = get_and_process_data(args.dataset_id)
-        print(os.getcwd())
-        df = pd.read_csv("toy-3class.csv")
-        df["class"] = df["z"].astype('category')
-        df = df.drop("z", axis=1)
-        feature_columns = [i for i in df.columns if i != "class"]
-        df[feature_columns] = StandardScaler().fit_transform(df[feature_columns].values)
-        data = df
         class_data_loaders, self.class_dist = get_data_loaders(self.args, data)
         self.bnafs = {}
         for i in class_data_loaders.keys():
             data_loader_train, data_loader_valid, data_loader_test = class_data_loaders[i]
-            model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test)
+            model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test, seed = seed)
             self.bnafs[i] = model
         self.sampler = hill_climbing(data=data, bn_type="CLG")
 
@@ -143,12 +135,15 @@ class MultiBnaf:
         return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
 
     def logl(self, data):
-        to_ret = pd.DataFrame(index = data.index)
+        to_ret = np.zeros(data.shape[0])
         for i in np.unique(data["class"]):
             data_i = data[data["class"] == i].drop("class", axis=1)
             index_i = data_i.index
-            logl_i = self.bnafs[i].compute_log_p_x(data_i.values)
-            to_ret.loc[index_i] = logl_i
+            print(index_i)
+            logl_i = self.bnafs[i].compute_log_p_x(data_i.values).detach().cpu().numpy()
+            print(logl_i)
+            print(len(logl_i))
+            to_ret[index_i] = logl_i
         return to_ret
 
 if __name__ == "__main__":

@@ -121,7 +121,7 @@ class BnafEstimator():
 
     def compute_log_p_x(self, x_mb):
         if isinstance(x_mb, np.ndarray) :
-            x_mb = torch.from_numpy(x_mb).float()
+            x_mb = torch.from_numpy(x_mb).float().to(self.args.device)
         y_mb, log_diag_j_mb = self.model(x_mb)
         log_p_y_mb = (
             torch.distributions.Normal(torch.zeros_like(y_mb), torch.ones_like(y_mb))
@@ -135,7 +135,9 @@ class BnafEstimator():
             data_loader_train,
             data_loader_valid,
             data_loader_test,
+            seed = 0
     ):
+        torch.manual_seed(seed)
         self.args.start_epoch = 0
 
         if self.args.tensorboard :
@@ -186,7 +188,7 @@ class BnafEstimator():
                 callback_reduce=self.load_model(),
             )
 
-            if self.args.tensorboard and False:
+            if self.args.tensorboard:
                 writer.add_scalar("lr", self.optimizer.param_groups[0]["lr"], epoch + 1)
                 writer.add_scalar("loss/validation", validation_loss.item(), epoch + 1)
                 writer.add_scalar("loss/train", train_loss.item(), epoch + 1)
