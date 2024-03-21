@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import torch
+torch.backends.cudnn.deterministic=True
+
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
@@ -23,6 +25,7 @@ import pybnesian as pb
 class Arguments():
     def __init__(self) :
         self.device = "cuda" #"cuda:0"
+        self.dataset_id = 1
         self.learning_rate = 1e-2
         self.batch_dim = 20
         self.clip_norm = 0.1
@@ -43,7 +46,10 @@ class Arguments():
         self.expname = ""
         self.load = None
         self.save = True#True
-        self.tensorboard = False  #"tensorboard"
+        self.tensorboard = "tensorboard"
+        self.test_data = True
+        self.verbose = False
+
 
 def get_data_loaders(args, data):
     full_data = data
@@ -52,37 +58,34 @@ def get_data_loaders(args, data):
     for i in np.unique(full_data["class"]):
         dataset_class = full_data[full_data["class"] == i].drop(columns=["class"]).values
 
-        d_train, d_validate, d_test = np.split(dataset_class,
+        d_list = None
+        if args.test_data :
+            d_list = np.split(dataset_class,
                                                [int(.6 * len(dataset_class)), int(.8 * len(dataset_class))])
+        else  :
+            d_list = np.split(dataset_class,
+                                               [int(.8 * len(dataset_class))])
+        data_loaders = []
+        for d in d_list :
+            dataset_tensor = torch.utils.data.TensorDataset(
+                torch.from_numpy(d).float().to(args.device)
+            )
+            data_loader = torch.utils.data.DataLoader(
+                dataset_tensor, batch_size=args.batch_dim, shuffle=False, num_workers=0
+            )
+            data_loaders.append(data_loader)
 
-        dataset_train = torch.utils.data.TensorDataset(
-            torch.from_numpy(d_train).float().to(args.device)
-        )
-        data_loader_train = torch.utils.data.DataLoader(
-            dataset_train, batch_size=args.batch_dim, shuffle=True
-        )
+        # If there is no test, append a None value to mark it
+        if len(data_loaders) == 2 :
+            data_loaders.append(None)
 
-        dataset_valid = torch.utils.data.TensorDataset(
-            torch.from_numpy(d_validate).float().to(args.device)
-        )
-        data_loader_valid = torch.utils.data.DataLoader(
-            dataset_valid, batch_size=args.batch_dim, shuffle=False
-        )
-
-        dataset_test = torch.utils.data.TensorDataset(
-            torch.from_numpy(d_test).float().to(args.device)
-        )
-        data_loader_test = torch.utils.data.DataLoader(
-            dataset_test, batch_size=args.batch_dim, shuffle=False
-        )
-
-        class_data_loaders[i]= (data_loader_train, data_loader_valid, data_loader_test)
+        class_data_loaders[i]= tuple(data_loaders)
 
     args.n_dims = len(full_data.columns) - 1
 
     return class_data_loaders, class_dist
 
-def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test, seed = 0) -> BnafEstimator:
+def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test =None, seed = 0, verbose = False) -> BnafEstimator:
     dir_data = "checkpoint_data"+str(args.dataset_id)
     dir_class = dir_data+"/"+dir_data+"_class_"+str(i)
     args.path = os.path.join(
@@ -99,7 +102,8 @@ def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loade
     )
 
     if args.save and not args.load:
-        print("Creating directory experiment..")
+        if verbose :
+            print("Creating directory experiment..")
         if not os.path.exists(dir_data):
             os.mkdir(dir_data)
         if not os.path.exists(dir_class):
@@ -108,10 +112,12 @@ def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loade
         with open(os.path.join(args.path, "args.json"), "w") as f:
             json.dump(args.__dict__, f, indent=4, sort_keys=True)
 
-    print("Creating BNAF_base model..")
+    if verbose :
+        print("Creating BNAF model..")
     bnaf = BnafEstimator(args)
 
-    print("Training..")
+    if verbose :
+        print("Training..")
     bnaf.train(
         data_loader_train,
         data_loader_valid,
@@ -148,9 +154,12 @@ class MultiBnaf:
 
 if __name__ == "__main__":
     torch.manual_seed(0)
-    args = Arguments(44091)
-    args.epochs = 2000
-    multi_bnaf = MultiBnaf(args)
+    args = Arguments()
+    args.epochs = 5
+    args.verbose = True
+    args.test_data = True
+    data = get_and_process_data(44091)
+    multi_bnaf = MultiBnaf(args,data)
     print(multi_bnaf.class_dist)
     #print(multi_bnaf.bnafs)
     print(multi_bnaf.bnafs["a"].model(torch.from_numpy(np.array([[0,0]])).float()))

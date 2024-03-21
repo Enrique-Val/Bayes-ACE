@@ -38,16 +38,15 @@ def kfold_indices(data, k):
 # Define the number of folds (K)
 k = 2
 layers_list = [1,2]
-hid_units_list = [10,20,30,40]
+hid_units_list = [10,20]#,30,40]
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=44091, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=44122, type=int)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
-    network_type = args.network
 
     random.seed(0)
 
@@ -56,53 +55,58 @@ if __name__ == "__main__":
 
     # Get the fold indices
     fold_indices = kfold_indices(df, k)
-    mean_logls = np.zeros(2 + 2 * 4)
-    std_logl = np.zeros(2 + 2 * 4)
+    mean_logls = np.zeros(2 + 2 * 2)
+    std_logl = np.zeros(2 + 2 * 2)
     labels =  []
 
     # Validate Gaussian Bayesian network
     slogl = []
     for train_index, test_index in fold_indices:
-        df_train = df.loc[train_index].reset_index(drop=True)
-        df_test = df.loc[test_index].reset_index(drop = True)
+        df_train = df.iloc[train_index].reset_index(drop=True)
+        df_test = df.iloc[test_index].reset_index(drop = True)
         network = hill_climbing(data=df_train, bn_type="CLG")
         slogl_i = network.logl(df_test).mean()
         slogl.append(slogl_i)
     mean_logls[0] = np.mean(slogl)
     labels.append("CLG")
+    print(np.mean(slogl))
 
     # Validate a SP Bayesian network
     slogl = []
     for train_index, test_index in fold_indices:
-        df_train = df.loc[train_index].reset_index(drop=True)
-        df_test = df.loc[test_index].reset_index(drop=True)
+        df_train = df.iloc[train_index].reset_index(drop=True)
+        df_test = df.iloc[test_index].reset_index(drop=True)
         network = hill_climbing(data=df_train, bn_type="SP")
         slogl_i = network.logl(df_test).mean()
         slogl.append(slogl_i)
     mean_logls[1] = np.mean(slogl)
     labels.append("SP")
+    print(np.mean(slogl))
 
     # Validate a SP Bayesian network
     '''slogl = []
     for train_index, test_index in fold_indices:
-        df_train = df.loc[train_index].reset_index(drop=True)
-        df_test = df.loc[test_index].reset_index(drop=True)
+        df_train = df.iloc[train_index].reset_index(drop=True)
+        df_test = df.iloc[test_index].reset_index(drop=True)
         network = hill_climbing(data=df_train, bn_type="SP", score = "cv-lik")
         slogl_i = network.logl(df_test).mean()
         slogl.append(slogl_i)
-    mean_logls[2] = np.mean(slogl)'''
+    mean_logls[2] = np.mean(slogl)
+    print(np.mean(slogl))'''
 
     # Validate normalizing flow with different paramas
-    count = 2
+    '''count = 2
     for layers in layers_list :
         for hidden_units in hid_units_list :
             slogl = []
             args = Arguments()
             args.layers = layers
             args.hidden_sim= hidden_units
+            args.load =False
+            args.save = False
             for train_index, test_index in fold_indices:
-                df_train = df.loc[train_index].reset_index(drop=True)
-                df_test = df.loc[test_index].reset_index(drop=True)
+                df_train = df.iloc[train_index].reset_index(drop=True)
+                df_test = df.iloc[test_index].reset_index(drop=True)
                 mbnaf = MultiBnaf(args, df_train)
                 slogl_i = mbnaf.logl(df_test).mean()
                 slogl.append(slogl_i)
@@ -111,7 +115,9 @@ if __name__ == "__main__":
             count += 1
 
 
+    print(mean_logls)
     to_ret = pd.DataFrame(data=[mean_logls], columns=labels)
-    to_ret.to_csv('./results/exp_cv/mlogl' + str(dataset_id) + '.csv')
+    print(to_ret)
+    to_ret.to_csv('./results/exp_cv/mlogl' + str(dataset_id) + '.csv')'''
 
 
