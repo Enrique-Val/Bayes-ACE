@@ -7,7 +7,9 @@ from bayesace.algorithms.algorithm import ACE, ACEResult
 import multiprocessing as mp
 
 
-def compute_weight_and_add_edge(graph, variables, i, j, point_i, point_j, graph_type, epsilon, f_tilde, bn, chunks):
+NON_ZERO_CONST = 0.000001
+
+def compute_weight_and_add_edge(variables, i, j, point_i, point_j, graph_type, epsilon, f_tilde, bn, chunks):
     distance = euclidean_distance(point_i, point_j)
     if distance < epsilon:
         # Calculate the weight based on the provided function
@@ -26,9 +28,6 @@ def compute_weight_and_add_edge(graph, variables, i, j, point_i, point_j, graph_
 
 
 def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_tilde=None, bn=None, chunks=2):
-    # Initial checks
-    if f_tilde is None:
-        f_tilde = identity
 
     # Create an undirected graph
     graph = nx.Graph()
@@ -43,25 +42,13 @@ def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_ti
     pool = mp.Pool(mp.cpu_count())
 
     result = pool.starmap_async(compute_weight_and_add_edge, [
-        (graph, dataframe.columns, i[0], i[1], mat[i[0]], mat[i[1]], graph_type, epsilon, f_tilde, bn,
+        (dataframe.columns, i[0], i[1], mat[i[0]], mat[i[1]], graph_type, epsilon, f_tilde, bn,
          chunks) for i in combs])
 
     pool.close()
     for i in result.get():
         if i is not None :
             graph.add_edge(i[0], i[1], weight=i[2])
-    '''
-    
-    my_list = [(graph, dataframe.columns, i[0], i[1], mat[i[0]], mat[i[1]], graph_type, epsilon, f_tilde, bn,
-                chunks) for i in combs]
-    for i in my_list:
-        compute_weight_and_add_edge(i[0], i[1], i[2], i[3], i[4], i[5], i[6], i[7], i[8], i[9], i[10])
-    for i in range(mat.shape[0]):
-        for j in range(i + 1, mat.shape[0]):
-            point_i = mat[i]
-            point_j = mat[j]
-
-            compute_weight_and_add_edge(graph, dataframe.columns, i, j, point_i, point_j,  graph_type, epsilon, f_tilde, bn, chunks)'''
     return graph
 
 def compute_path(graph, source_node, target_node) :
@@ -74,22 +61,40 @@ def compute_path(graph, source_node, target_node) :
     except nx.NetworkXNoPath:
         return None
 
+
 def find_closest_paths(graph, source_node, target_nodes):
     # Use Dijkstra's algorithm to find the shortest paths
     all_shortest_paths = {}
+
+    # First check if all the weights are non negative
+    weights = []
+    for edge in graph.edges(data=True) :
+        weights.append(edge[2]["weight"])
+    minimum = np.min(weights)
+
+    if minimum < 0 :
+        for edge in graph.edges(data=True):
+            edge[2]["weight"] = edge[2]["weight"]-minimum + NON_ZERO_CONST
+
     pool = mp.Pool(mp.cpu_count())
-    result = pool.starmap_async(compute_path, [(graph,source_node, target_node) for target_node in target_nodes])
+    result = pool.starmap_async(compute_path, [(graph, source_node, target_node) for target_node in target_nodes])
     pool.close()
     for i in result.get():
-        if i is not None :
+        if i is not None:
             all_shortest_paths[i[0]] = i[1]
+
+    # Return weights to its original state
+    if minimum < 0 :
+        for i,edge in enumerate(graph.edges(data=True)):
+            edge[2]["weight"] = weights[i]
+
     return all_shortest_paths
 
 
 class FACE(ACE):
     def __init__(self, bayesian_network, features, chunks, dataset: pd.DataFrame, distance_threshold,
                  graph_type,
-                 f_tilde=identity, seed=0, verbose=False, likelihood_threshold=0.00, accuracy_threshold=0.50,
+                 f_tilde=None, seed=0, verbose=False, likelihood_threshold=0.00, accuracy_threshold=0.50,
                  penalty=1):
         super().__init__(bayesian_network, features, chunks, likelihood_threshold=likelihood_threshold,
                          accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose)
@@ -97,7 +102,9 @@ class FACE(ACE):
         self.epsilon = distance_threshold
         self.graph_type = graph_type
         self.f_tilde = f_tilde
-        self.graph = build_weighted_graph(dataset, graph_type, epsilon=self.epsilon, f_tilde=f_tilde,
+        if f_tilde is None:
+            self.f_tilde = neg_log
+        self.graph= build_weighted_graph(dataset, graph_type, epsilon=self.epsilon, f_tilde=self.f_tilde,
                                           bn=self.bayesian_network, chunks=self.chunks)
         self.y_pred = predict_class(self.dataset, self.bayesian_network)
 
@@ -110,7 +117,7 @@ class FACE(ACE):
         pool = mp.Pool(mp.cpu_count())
 
         result = pool.starmap_async(compute_weight_and_add_edge, [
-            (self.graph, self.dataset.columns, i, len(self.dataset.index), mat[i], new_point, self.graph_type, self.epsilon, self.f_tilde, self.bayesian_network,
+            (self.dataset.columns, i, len(self.dataset.index), mat[i], new_point, self.graph_type, self.epsilon, self.f_tilde, self.bayesian_network,
              self.chunks) for i in self.dataset.index])
 
         pool.close()
@@ -147,8 +154,10 @@ class FACE(ACE):
         if len(target_nodes) == 0:
             return ACEResult(None, x_og, np.inf)
 
-
         closest_paths = find_closest_paths(self.graph, source_node, target_nodes)
+        if len(closest_paths) == 0:
+            Warning("No paths found. Perhaps your point was too far from the data or you specified a low distance threshold")
+            return ACEResult(None, x_og, np.inf)
 
         min_len = np.inf
         closest_node = None
@@ -183,7 +192,7 @@ def epsilon_weight_function(point1, point2, epsilon, f_tilde):
     d = len(point1)
     dist = euclidean_distance(point1, point2)
     if not dist > 0:
-        return 0.0000001
+        return NON_ZERO_CONST
     return f_tilde(epsilon ** d / dist) * dist
 
 

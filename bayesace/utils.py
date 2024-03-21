@@ -12,6 +12,9 @@ from collections import Counter
 def identity(x):
     return x
 
+def neg_log(x) :
+    return -np.log(x)
+
 
 class PybnesianParallelizationError(Exception):
     pass
@@ -150,6 +153,9 @@ def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, seed=0):
     elif bn_type == "SP":
         if score is None:
             score = "validated-lik"
+        #est = MMHC()
+        #test = pb.MutualInformation(data, True)
+        #bn = pb.MMHC().estimate(hypot_test = test, operators = pb.OperatorPool([pb.ChangeNodeTypeSet(),pb.ArcOperatorSet()]), score = pb.CVLikelihood(data), bn_type = pb.SemiparametricBNType(), patience = 20) #, score = "cv-lik"
         bn = pb.hc(data, start=get_naive_structure(data, pb.SemiparametricBN), operators=["arcs", "node_type"],
                    score=score,
                    seed=seed)

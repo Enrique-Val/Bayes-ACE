@@ -21,6 +21,10 @@ class ACEResult():
     def __ne__(self, other):
         return not self == other
 
+    def __repr__(self):
+        return "BayesACEResult(counterfactual="+str(self.counterfactual.values[0])+", path=pandas.DataFrame(), distance="+str(self.distance)+")"
+
+
 
 class ACE(ABC):
     def __init__(self, bayesian_network, features, chunks, likelihood_threshold=0, accuracy_threshold=0.5, penalty=1,
