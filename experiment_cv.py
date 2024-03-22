@@ -3,7 +3,9 @@ import csv
 import os
 import sys
 
-from models.multi_bnaf import Arguments, MultiBnaf
+from bayesace.models.multi_bnaf import Arguments, MultiBnaf
+
+from bayesace.models.utils import hill_climbing
 
 sys.path.append(os.getcwd())
 import argparse
@@ -36,9 +38,9 @@ def kfold_indices(data, k):
     return folds
 
 # Define the number of folds (K)
-k = 2
+k = 10
 layers_list = [1,2]
-hid_units_list = [10,20]#,30,40]
+hid_units_list = [10,20,30,40]
 
 
 if __name__ == "__main__":
@@ -55,50 +57,37 @@ if __name__ == "__main__":
 
     # Get the fold indices
     fold_indices = kfold_indices(df, k)
-    mean_logls = np.zeros(2 + 2 * 2)
-    std_logl = np.zeros(2 + 2 * 2)
+    mean_logl= []
+    std_logl = []
+    mean_brier = []
+    std_brier = []
     labels =  []
 
-    # Validate Gaussian Bayesian network
-    slogl = []
-    for train_index, test_index in fold_indices:
-        df_train = df.iloc[train_index].reset_index(drop=True)
-        df_test = df.iloc[test_index].reset_index(drop = True)
-        network = hill_climbing(data=df_train, bn_type="CLG")
-        slogl_i = network.logl(df_test).mean()
-        slogl.append(slogl_i)
-    mean_logls[0] = np.mean(slogl)
-    labels.append("CLG")
-    print(np.mean(slogl))
+    # Validate Bayesian networks
+    for network_type in ["CLG"]:
+        slogl = []
+        brier = []
+        for train_index, test_index in fold_indices:
+            df_train = df.iloc[train_index].reset_index(drop=True)
+            df_test = df.iloc[test_index].reset_index(drop = True)
+            network = hill_climbing(data=df_train, bn_type=network_type)
+            slogl_i = network.logl(df_test).mean()
+            slogl.append(slogl_i)
+            brier_i = brier_score(df_test["class"].values, predict_class(df_test.drop("class",axis = 1), network))
+            brier.append(brier_i)
+        mean_logl.append(np.mean(slogl))
+        std_logl.append(np.std(slogl))
+        mean_brier.append(np.mean(brier))
+        std_brier.append(np.std(brier))
+        labels.append(network_type)
+        print(mean_logl)
+        print(mean_brier)
 
-    # Validate a SP Bayesian network
-    slogl = []
-    for train_index, test_index in fold_indices:
-        df_train = df.iloc[train_index].reset_index(drop=True)
-        df_test = df.iloc[test_index].reset_index(drop=True)
-        network = hill_climbing(data=df_train, bn_type="SP")
-        slogl_i = network.logl(df_test).mean()
-        slogl.append(slogl_i)
-    mean_logls[1] = np.mean(slogl)
-    labels.append("SP")
-    print(np.mean(slogl))
-
-    # Validate a SP Bayesian network
-    '''slogl = []
-    for train_index, test_index in fold_indices:
-        df_train = df.iloc[train_index].reset_index(drop=True)
-        df_test = df.iloc[test_index].reset_index(drop=True)
-        network = hill_climbing(data=df_train, bn_type="SP", score = "cv-lik")
-        slogl_i = network.logl(df_test).mean()
-        slogl.append(slogl_i)
-    mean_logls[2] = np.mean(slogl)
-    print(np.mean(slogl))'''
-
-    # Validate normalizing flow with different paramas
-    '''count = 2
+    # Validate normalizing flow with different params
     for layers in layers_list :
         for hidden_units in hid_units_list :
             slogl = []
+            brier = []
             args = Arguments()
             args.layers = layers
             args.hidden_sim= hidden_units
@@ -110,14 +99,20 @@ if __name__ == "__main__":
                 mbnaf = MultiBnaf(args, df_train)
                 slogl_i = mbnaf.logl(df_test).mean()
                 slogl.append(slogl_i)
-            mean_logls[count] = np.mean(slogl)
+                brier_i = brier_score(df_test["class"].values, predict_class(df_test.drop("class", axis = 1), mbnaf))
+                brier.append(brier_i)
+            mean_logl.append(np.mean(slogl))
+            std_logl.append(np.std(slogl))
+            mean_brier.append(np.mean(brier))
+            std_brier.append(np.std(brier))
             labels.append("BNAF_l"+str(layers)+"_hu"+str(hidden_units))
-            count += 1
+            print(mean_logl)
+            print(mean_brier)
 
 
-    print(mean_logls)
-    to_ret = pd.DataFrame(data=[mean_logls], columns=labels)
+    print(mean_logl)
+    to_ret = pd.DataFrame(data=[mean_logl, std_logl, mean_brier, std_brier], columns=labels, index=["mean_logl", "std_logl", "mean_brier", "std_brier"])
     print(to_ret)
-    to_ret.to_csv('./results/exp_cv/mlogl' + str(dataset_id) + '.csv')'''
+    to_ret.to_csv('./results/exp_cv/mlogl' + str(dataset_id) + '.csv')
 
 

@@ -5,7 +5,7 @@ import warnings
 import math
 import multiprocessing as mp
 import openml as oml
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from collections import Counter
 
 from bayesace.models.multi_bnaf import MultiBnaf
@@ -111,15 +111,22 @@ def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class")
     if class_var_name in data.columns:
         Warning("The class variable is already in the dataset. It will be removed for the prediction.")
         data = data.drop(class_var_name, axis=1)
-    class_values = None
     if isinstance(density_estimator, MultiBnaf):
-        class_values = density_estimator.get_class_labels()
+        return pd.DataFrame(density_estimator.predict(data.values), columns=density_estimator.get_class_labels())
     else:
         class_values = density_estimator.cpd(class_var_name).variable_values()
-    to_ret = pd.DataFrame(columns=class_values)
-    for i in class_values:
-        to_ret[i] = posterior_probability(data, [i] * len(data.index), density_estimator)
-    return to_ret
+        to_ret = pd.DataFrame(columns=class_values)
+        for i in class_values:
+            to_ret[i] = posterior_probability(data, [i] * len(data.index), density_estimator)
+        return to_ret
+
+
+def brier_score(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
+    encoder = OneHotEncoder(sparse_output=False)
+    y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
+    class_labels = encoder.categories_[0]
+    y_pred = y_pred[class_labels]
+    return np.sum((y_true_coded - y_pred.values) ** 2)/len(y_true)
 
 
 def straight_path(x_1: np.ndarray, x_2: np.ndarray, chunks=2):
@@ -190,7 +197,7 @@ def get_probability_plot(density_estimator, class_var_name="class", limit=3, ste
         post = np.e ** density_estimator.logl(grid_df)
         post -= np.min(post)
         post /= np.ptp(post)
-        post = np.flip(np.resize(post, (resolution, resolution)).transpose(), axis = 0)
+        post = np.flip(np.resize(post, (resolution, resolution)).transpose(), axis=0)
         prob_list.append(post)
     while len(prob_list) < 3:
         prob_list.append(np.zeros((resolution, resolution)))

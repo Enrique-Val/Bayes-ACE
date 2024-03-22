@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-#from bayesace.utils import get_and_process_data, hill_climbing
+# from bayesace.utils import get_and_process_data, hill_climbing
 # from models.BNAF_base.bnaf import BNAF
 import os
 import datetime
@@ -29,9 +29,9 @@ class Arguments():
         self.device = "cuda"  # "cuda:0"
         self.dataset_id = 1
         self.learning_rate = 1e-2
-        self.batch_dim = 20
+        self.batch_dim = 200
         self.clip_norm = 0.1
-        self.epochs = 1000  # 1000
+        self.epochs = 2000  # 1000
 
         self.patience = 20
         self.cooldown = 10
@@ -138,9 +138,9 @@ class MultiBnaf:
         self.bnafs = {}
         for i in class_data_loaders.keys():
             data_loader_train, data_loader_valid, data_loader_test = class_data_loaders[i]
-            model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test, seed=seed)
+            model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test, seed=seed, verbose=args.verbose)
             self.bnafs[i] = model
-        #self.sampler = hill_climbing(data=data, bn_type="CLG")
+        # self.sampler = hill_climbing(data=data, bn_type="CLG")
 
     def get_class_labels(self):
         return list(self.class_dist.keys()).copy()
@@ -162,12 +162,23 @@ class MultiBnaf:
     def likelihood(self, data, class_var_name="class"):
         # If the class variable is passed, remove it
         if class_var_name in data.columns:
-            data = data.drop(class_var_name, axis=1).values
+            data = data.drop(class_var_name, axis=1)
+        data = data.values
         to_ret = np.zeros(data.shape[0])
         for i in self.class_dist.keys():
             logl_i = self.bnafs[i].compute_log_p_x(data).detach().cpu().numpy()
             to_ret = to_ret + np.e ** (logl_i + np.log(self.class_dist[i]))
         return to_ret
+
+    def predict(self, data : np.ndarray):
+        ll = np.zeros(data.shape[0])
+        acc = np.zeros((len(self.class_dist.keys()), data.shape[0]))
+        for i, label in enumerate(self.class_dist.keys()):
+            logl_i = self.bnafs[label].compute_log_p_x(data).detach().cpu().numpy() + np.log(self.class_dist[label])
+            ll = ll + np.e ** logl_i
+            acc[i] = np.e ** logl_i
+        return acc.transpose() / ll[:, None]
+
 
 '''
 if __name__ == "__main__":
