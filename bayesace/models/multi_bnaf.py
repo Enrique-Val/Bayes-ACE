@@ -1,14 +1,15 @@
 import numpy as np
 import pandas as pd
 import torch
-torch.backends.cudnn.deterministic=True
+
+torch.backends.cudnn.deterministic = True
 
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from bayesace import get_and_process_data, hill_climbing
+#from bayesace.utils import get_and_process_data, hill_climbing
 # from models.BNAF_base.bnaf import BNAF
 import os
 import datetime
@@ -19,12 +20,13 @@ from bayesace.models.BNAF_base.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import matplotlib.pyplot as plt
 
-from models.BNAF_base.bnaf_estimator import BnafEstimator
+from bayesace.models.BNAF_base.bnaf_estimator import BnafEstimator
 import pybnesian as pb
 
+
 class Arguments():
-    def __init__(self) :
-        self.device = "cuda" #"cuda:0"
+    def __init__(self):
+        self.device = "cuda"  # "cuda:0"
         self.dataset_id = 1
         self.learning_rate = 1e-2
         self.batch_dim = 20
@@ -45,7 +47,7 @@ class Arguments():
 
         self.expname = ""
         self.load = None
-        self.save = True#True
+        self.save = True  # True
         self.tensorboard = "tensorboard"
         self.test_data = True
         self.verbose = False
@@ -54,19 +56,19 @@ class Arguments():
 def get_data_loaders(args, data):
     full_data = data
     class_data_loaders = {}
-    class_dist = full_data["class"].value_counts(normalize = True).to_dict()
+    class_dist = full_data["class"].value_counts(normalize=True).to_dict()
     for i in np.unique(full_data["class"]):
         dataset_class = full_data[full_data["class"] == i].drop(columns=["class"]).values
 
         d_list = None
-        if args.test_data :
+        if args.test_data:
             d_list = np.split(dataset_class,
-                                               [int(.6 * len(dataset_class)), int(.8 * len(dataset_class))])
-        else  :
+                              [int(.6 * len(dataset_class)), int(.8 * len(dataset_class))])
+        else:
             d_list = np.split(dataset_class,
-                                               [int(.8 * len(dataset_class))])
+                              [int(.8 * len(dataset_class))])
         data_loaders = []
-        for d in d_list :
+        for d in d_list:
             dataset_tensor = torch.utils.data.TensorDataset(
                 torch.from_numpy(d).float().to(args.device)
             )
@@ -76,18 +78,20 @@ def get_data_loaders(args, data):
             data_loaders.append(data_loader)
 
         # If there is no test, append a None value to mark it
-        if len(data_loaders) == 2 :
+        if len(data_loaders) == 2:
             data_loaders.append(None)
 
-        class_data_loaders[i]= tuple(data_loaders)
+        class_data_loaders[i] = tuple(data_loaders)
 
     args.n_dims = len(full_data.columns) - 1
 
     return class_data_loaders, class_dist
 
-def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test =None, seed = 0, verbose = False) -> BnafEstimator:
-    dir_data = "checkpoint_data"+str(args.dataset_id)
-    dir_class = dir_data+"/"+dir_data+"_class_"+str(i)
+
+def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test=None, seed=0,
+                       verbose=False) -> BnafEstimator:
+    dir_data = "checkpoint_data" + str(args.dataset_id)
+    dir_class = dir_data + "/" + dir_data + "_class_" + str(i)
     args.path = os.path.join(
         dir_class,
         "{}{}_layers{}_h{}_flows{}{}_{}".format(
@@ -102,7 +106,7 @@ def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loade
     )
 
     if args.save and not args.load:
-        if verbose :
+        if verbose:
             print("Creating directory experiment..")
         if not os.path.exists(dir_data):
             os.mkdir(dir_data)
@@ -112,11 +116,11 @@ def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loade
         with open(os.path.join(args.path, "args.json"), "w") as f:
             json.dump(args.__dict__, f, indent=4, sort_keys=True)
 
-    if verbose :
+    if verbose:
         print("Creating BNAF model..")
     bnaf = BnafEstimator(args)
 
-    if verbose :
+    if verbose:
         print("Training..")
     bnaf.train(
         data_loader_train,
@@ -126,32 +130,46 @@ def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loade
     )
     return bnaf
 
+
 class MultiBnaf:
-    def __init__(self, args, data, seed = 0):
+    def __init__(self, args, data, seed=0):
         self.args = args
         class_data_loaders, self.class_dist = get_data_loaders(self.args, data)
         self.bnafs = {}
         for i in class_data_loaders.keys():
             data_loader_train, data_loader_valid, data_loader_test = class_data_loaders[i]
-            model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test, seed = seed)
+            model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test, seed=seed)
             self.bnafs[i] = model
-        self.sampler = hill_climbing(data=data, bn_type="CLG")
+        #self.sampler = hill_climbing(data=data, bn_type="CLG")
+
+    def get_class_labels(self):
+        return list(self.class_dist.keys()).copy()
 
     def sample(self, n_samples, ordered=True, seed=None):
         return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
 
-    def logl(self, data):
+    def logl(self, data, class_var_name="class"):
         to_ret = np.zeros(data.shape[0])
-        for i in np.unique(data["class"]):
-            data_i = data[data["class"] == i].drop("class", axis=1)
+        for i in self.class_dist.keys():
+            data_i = data[data[class_var_name] == i].drop(class_var_name, axis=1)
             index_i = data_i.index
-            print(index_i)
+            if len(index_i) == 0:
+                continue
             logl_i = self.bnafs[i].compute_log_p_x(data_i.values).detach().cpu().numpy()
-            print(logl_i)
-            print(len(logl_i))
-            to_ret[index_i] = logl_i
+            to_ret[index_i] = logl_i + np.log(self.class_dist[i])
         return to_ret
 
+    def likelihood(self, data, class_var_name="class"):
+        # If the class variable is passed, remove it
+        if class_var_name in data.columns:
+            data = data.drop(class_var_name, axis=1).values
+        to_ret = np.zeros(data.shape[0])
+        for i in self.class_dist.keys():
+            logl_i = self.bnafs[i].compute_log_p_x(data).detach().cpu().numpy()
+            to_ret = to_ret + np.e ** (logl_i + np.log(self.class_dist[i]))
+        return to_ret
+
+'''
 if __name__ == "__main__":
     torch.manual_seed(0)
     args = Arguments()
@@ -159,15 +177,15 @@ if __name__ == "__main__":
     args.verbose = True
     args.test_data = True
     data = get_and_process_data(44091)
-    multi_bnaf = MultiBnaf(args,data)
+    multi_bnaf = MultiBnaf(args, data)
     print(multi_bnaf.class_dist)
-    #print(multi_bnaf.bnafs)
-    print(multi_bnaf.bnafs["a"].model(torch.from_numpy(np.array([[0,0]])).float()))
-    print("High",multi_bnaf.bnafs["a"].compute_log_p_x(torch.from_numpy(np.array([[-1,0]])).float()))
-    print("Low", multi_bnaf.bnafs["a"].compute_log_p_x(torch.from_numpy(np.array([[2,2]])).float()))
+    # print(multi_bnaf.bnafs)
+    print(multi_bnaf.bnafs["a"].model(torch.from_numpy(np.array([[0, 0]])).float()))
+    print("High", multi_bnaf.bnafs["a"].compute_log_p_x(torch.from_numpy(np.array([[-1, 0]])).float()))
+    print("Low", multi_bnaf.bnafs["a"].compute_log_p_x(torch.from_numpy(np.array([[2, 2]])).float()))
     limit = 3
     step = 0.01
-    for i in ["a","b","c"] :
+    for i in ["a", "b", "c"]:
         model = multi_bnaf.bnafs[i]
         grid = torch.Tensor(
             [
@@ -198,4 +216,4 @@ if __name__ == "__main__":
         plt.imshow(prob.cpu().data.numpy(), extent=(-limit, limit, -limit, limit))
         plt.axis("off")
         plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
-        plt.show()
+        plt.show()'''

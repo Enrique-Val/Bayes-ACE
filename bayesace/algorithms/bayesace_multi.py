@@ -11,6 +11,7 @@ from pymoo.optimize import minimize
 from pymoo.core.problem import StarmapParallelization
 from pymoo.termination.default import DefaultSingleObjectiveTermination
 
+from bayesace.models.utils import PybnesianParallelizationError
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 
@@ -52,10 +53,6 @@ class BestPathFinder(ElementwiseProblem):
                                                bayesian_network=self.bayesian_network, penalty=self.penalty)
         x_cfx = self.x_og.copy()
         x_cfx[:] = x[-self.n_features:]
-        x_reshaped = np.vstack([self.x_og.values, np.resize(x,(-1, self.n_features)))
-        func = np.min
-        for i in x_reshaped :
-            L0_norm(i,)
 
         f1 = sum_path
         f2 = -likelihood(pd.DataFrame(x_cfx, columns=self.features), self.bayesian_network)
@@ -63,8 +60,8 @@ class BestPathFinder(ElementwiseProblem):
         out["F"] = np.column_stack([f1,f2,f3])
 
         # print(accuracy(self.x_cfx, self.y_og, self.bayesian_network))
-        g1 = accuracy(pd.DataFrame(x_cfx, columns=self.features), self.y_og,
-                      self.bayesian_network) - self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
+        g1 = posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.y_og,
+                                   self.bayesian_network) - self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
         g2 = f2 + self.likelihood_threshold
         out["G"] = np.column_stack([g1, g2])
 

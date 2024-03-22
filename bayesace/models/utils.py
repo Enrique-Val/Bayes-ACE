@@ -1,0 +1,65 @@
+
+import pybnesian as pb
+import pandas as pd
+import multiprocessing as mp
+
+
+class PybnesianParallelizationError(Exception):
+    pass
+
+def get_naive_structure(data: pd.DataFrame, type):
+    naive = type(data.columns)
+    for i in [i for i in data.columns if i != "class"]:
+        naive.add_arc("class", i)
+    return naive
+
+
+def copy_structure(bn: pb.BayesianNetwork):
+    copy = type(bn)(bn.nodes())
+    for i in bn.arcs():
+        copy.add_arc(i[0], i[1])
+    return copy
+
+
+def check_copy(bn):
+    return bn.fitted()
+
+
+def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, seed=0):
+    bn = None
+    if bn_type == "CLG":
+        if score is None:
+            score = "bic"
+        bn = pb.hc(data, start=get_naive_structure(data, pb.CLGNetwork), operators=["arcs"], score=score,
+                   seed=seed)
+        bn = copy_structure(bn)
+    elif bn_type == "SP":
+        if score is None:
+            score = "validated-lik"
+        # est = MMHC()
+        # test = pb.MutualInformation(data, True)
+        # bn = pb.MMHC().estimate(hypot_test = test, operators = pb.OperatorPool([pb.ChangeNodeTypeSet(),pb.ArcOperatorSet()]), score = pb.CVLikelihood(data), bn_type = pb.SemiparametricBNType(), patience = 20) #, score = "cv-lik"
+        bn = pb.hc(data, start=get_naive_structure(data, pb.SemiparametricBN), operators=["arcs", "node_type"],
+                   score=score,
+                   seed=seed)
+        bn = copy_structure(bn)
+    elif bn_type == "Gaussian":
+        if score is None:
+            score = "bic"
+        bn = pb.hc(data, start=get_naive_structure(data, pb.GaussianNetwork), operators=["arcs"], score=score,
+                   seed=seed)
+        bn = copy_structure(bn)
+    else:
+        raise PybnesianParallelizationError(
+            "Only valid types are CLG, SP and Gaussian. For more customization use the hc method of pybnesian")
+    bn.fit(data)
+    bn.include_cpd = True
+    pool = mp.Pool(1)
+    res = pool.starmap(check_copy, [(bn,)])
+    pool.close()
+    if not res[0]:
+        raise PybnesianParallelizationError(
+            "As of version 0.4.3, PyBnesian Bayesian networks have internal and stochastic problems with the method "
+            "\"copy()\"."
+            "As such, the network is not parallelized correctly and experiments cannot be launched.")
+    return bn

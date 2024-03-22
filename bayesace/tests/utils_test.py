@@ -12,7 +12,7 @@ def test_likelihood(x_cfx: pd.DataFrame, bn):
 
 
 def test_accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):
-    assert round(accuracy(x_cfx.drop("class", axis=1), y_og, bn)[0], 2) == 0.13
+    assert round(posterior_probability(x_cfx.drop("class", axis=1), y_og, bn)[0], 2) == 0.13
 
 
 def test_predict_class(data: pd.DataFrame, bn):

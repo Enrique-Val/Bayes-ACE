@@ -8,16 +8,15 @@ import openml as oml
 from sklearn.preprocessing import StandardScaler
 from collections import Counter
 
+from bayesace.models.multi_bnaf import MultiBnaf
+
 
 def identity(x):
     return x
 
-def neg_log(x) :
+
+def neg_log(x):
     return -np.log(x)
-
-
-class PybnesianParallelizationError(Exception):
-    pass
 
 
 def separate_dataset_and_class(df: pd.DataFrame | pd.Series | np.ndarray, class_name=None):
@@ -54,15 +53,24 @@ def delta_distance(x_cfx, x_og, eps=0.1):
     return sum(map(lambda i: i > eps, abs_distance[0]))
 
 
-def likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
-    class_cpd = bn.cpd("class")
+def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class") -> np.ndarray:
+    '''
+    Computes the likelihood of the data given the density estimator, marginalizing over all possible values of the
+    class variable. Even if provided, the method will ignore it.
+
+    :param data: The data to compute the likelihood
+    '''
+    if class_var_name in data.columns:
+        data = data.drop(class_var_name, axis=1)
+    if isinstance(density_estimator, MultiBnaf):
+        return density_estimator.likelihood(data, class_var_name=class_var_name)
+    class_cpd = density_estimator.cpd(class_var_name)
     class_values = class_cpd.variable_values()
-    cfx = x_cfx.copy()
-    n_samples = x_cfx.shape[0]
+    n_samples = data.shape[0]
     likelihood_val = 0
     for v in class_values:
-        cfx["class"] = pd.Categorical([v] * n_samples, categories=class_values)
-        likelihood_val = likelihood_val + math.e ** bn.logl(cfx)
+        data[class_var_name] = pd.Categorical([v] * n_samples, categories=class_values)
+        likelihood_val = likelihood_val + math.e ** density_estimator.logl(data)
     return likelihood_val
 
 
@@ -75,18 +83,22 @@ def log_likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
     return np.log(l)
 
 
-def accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):
-    class_cpd = bn.cpd("class")
-    class_values = class_cpd.variable_values()
+def posterior_probability(x_cfx: pd.DataFrame, y_og: str | list, density_estimator, class_var_name="class"):
+    # Obtain the labels accesing either the MultiBNAF model or the cpd of the bn
+    class_labels = None
+    if isinstance(density_estimator, MultiBnaf):
+        class_labels = density_estimator.get_class_labels()
+    else:
+        class_cpd = density_estimator.cpd(class_var_name)
+        class_labels = class_cpd.variable_values()
     cfx = x_cfx.copy()
     if isinstance(y_og, str):
-        assert len(x_cfx.index) == 1
-        cfx["class"] = pd.Categorical([y_og], categories=class_values)
+        cfx[class_var_name] = pd.Categorical([y_og] * len(x_cfx.index), categories=class_labels)
     else:
         assert len(y_og) == len(x_cfx.index)
-        cfx["class"] = pd.Categorical(y_og, categories=class_values)
-    prob = math.e ** bn.logl(cfx)
-    ll = likelihood(x_cfx, bn)
+        cfx[class_var_name] = pd.Categorical(y_og, categories=class_labels)
+    prob = math.e ** density_estimator.logl(cfx)
+    ll = likelihood(x_cfx, density_estimator)
     to_ret = np.empty(shape=len(x_cfx.index))
     to_ret[ll < 0] = np.nan
     to_ret[ll > 0] = prob[ll > 0] / ll[ll > 0]
@@ -95,11 +107,18 @@ def accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):
     return to_ret
 
 
-def predict_class(data: pd.DataFrame, bayesian_network):
-    class_values = bayesian_network.cpd("class").variable_values()
+def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class"):
+    if class_var_name in data.columns:
+        Warning("The class variable is already in the dataset. It will be removed for the prediction.")
+        data = data.drop(class_var_name, axis=1)
+    class_values = None
+    if isinstance(density_estimator, MultiBnaf):
+        class_values = density_estimator.get_class_labels()
+    else:
+        class_values = density_estimator.cpd(class_var_name).variable_values()
     to_ret = pd.DataFrame(columns=class_values)
     for i in class_values:
-        to_ret[i] = accuracy(data, [i] * len(data.index), bayesian_network)
+        to_ret[i] = posterior_probability(data, [i] * len(data.index), density_estimator)
     return to_ret
 
 
@@ -122,64 +141,6 @@ def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
     medium_points = ((path + path.shift()) / 2).drop(0).reset_index()
     likelihood_path = (-log_likelihood(medium_points, bayesian_network)) ** penalty * separation
     return np.sum(likelihood_path)
-
-
-def get_naive_structure(data: pd.DataFrame, type):
-    naive = type(data.columns)
-    for i in [i for i in data.columns if i != "class"]:
-        naive.add_arc("class", i)
-    return naive
-
-
-def copy_structure(bn: pb.BayesianNetwork):
-    copy = type(bn)(bn.nodes())
-    for i in bn.arcs():
-        copy.add_arc(i[0], i[1])
-    return copy
-
-
-def check_copy(bn):
-    return bn.fitted()
-
-
-def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, seed=0):
-    bn = None
-    if bn_type == "CLG":
-        if score is None:
-            score = "bic"
-        bn = pb.hc(data, start=get_naive_structure(data, pb.CLGNetwork), operators=["arcs"], score=score,
-                   seed=seed)
-        bn = copy_structure(bn)
-    elif bn_type == "SP":
-        if score is None:
-            score = "validated-lik"
-        #est = MMHC()
-        #test = pb.MutualInformation(data, True)
-        #bn = pb.MMHC().estimate(hypot_test = test, operators = pb.OperatorPool([pb.ChangeNodeTypeSet(),pb.ArcOperatorSet()]), score = pb.CVLikelihood(data), bn_type = pb.SemiparametricBNType(), patience = 20) #, score = "cv-lik"
-        bn = pb.hc(data, start=get_naive_structure(data, pb.SemiparametricBN), operators=["arcs", "node_type"],
-                   score=score,
-                   seed=seed)
-        bn = copy_structure(bn)
-    elif bn_type == "Gaussian":
-        if score is None:
-            score = "bic"
-        bn = pb.hc(data, start=get_naive_structure(data, pb.GaussianNetwork), operators=["arcs"], score=score,
-                   seed=seed)
-        bn = copy_structure(bn)
-    else:
-        raise PybnesianParallelizationError(
-            "Only valid types are CLG, SP and Gaussian. For more customization use the hc method of pybnesian")
-    bn.fit(data)
-    bn.include_cpd = True
-    pool = mp.Pool(1)
-    res = pool.starmap(check_copy, [(bn,)])
-    pool.close()
-    if not res[0]:
-        raise PybnesianParallelizationError(
-            "As of version 0.4.3, PyBnesian Bayesian networks have internal and stochastic problems with the method "
-            "\"copy()\"."
-            "As such, the network is not parallelized correctly and experiments cannot be launched.")
-    return bn
 
 
 def get_and_process_data(dataset_id: int):
@@ -208,3 +169,29 @@ def L0_norm(x_1, x_2, eps=0.01):
     return Counter(np.abs(x_1 - x_2) > eps)[True]
 
 
+def get_probability_plot(density_estimator, class_var_name="class", limit=3, step=0.01):
+    grid = np.array([
+        [a, b]
+        for a in np.arange(-limit, limit, step)
+        for b in np.arange(-limit, limit, step)
+    ])
+    resolution = len(np.arange(-limit, limit, step))
+    class_labels = None
+    if isinstance(density_estimator, MultiBnaf):
+        class_labels = density_estimator.get_class_labels()
+    else:
+        class_labels = density_estimator.cpd(class_var_name).variable_values()
+    if len(class_labels) > 3:
+        raise ValueError("The number of classes is too high to plot the probability plot")
+    prob_list = []
+    for label in class_labels:
+        grid_df = pd.DataFrame(grid, columns=["x", "y"])
+        grid_df[class_var_name] = pd.Categorical([label] * len(grid), categories=class_labels)
+        post = np.e ** density_estimator.logl(grid_df)
+        post -= np.min(post)
+        post /= np.ptp(post)
+        post = np.flip(np.resize(post, (resolution, resolution)).transpose(), axis = 0)
+        prob_list.append(post)
+    while len(prob_list) < 3:
+        prob_list.append(np.zeros((resolution, resolution)))
+    return np.dstack(prob_list)
