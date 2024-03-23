@@ -32,13 +32,13 @@ class BestPathFinder(ElementwiseProblem):
         self.features = instance.drop("class", axis=1).columns
         self.n_features = n_features
         self.bayesian_network = bayesian_network
-        assert self.bayesian_network.fitted()
+        assert isinstance(bayesian_network, MultiBnaf) or self.bayesian_network.fitted()
         self.chunks = chunks
         self.likelihood_threshold = likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
 
     def _evaluate(self, x, out, *args, **kwargs):
-        if not self.bayesian_network.fitted():
+        if not isinstance(self.bayesian_network, MultiBnaf) and not self.bayesian_network.fitted():
             raise PybnesianParallelizationError(
                 "As of version 0.4.3, PyBnesian Bayesian networks have internal and stochastic problems with the method \"copy()\"."
                 "As such, some parallelization efforts of the code may fail. We recommend either "
@@ -67,9 +67,18 @@ class BayesACE(ACE):
     def get_initial_sample(self, instance):
         assert self.initialization == "default" or self.initialization == "guided"
         y_og = instance["class"].values[0]
-        var_probs = {self.bayesian_network.cpd("class").variable_values()[i]:
-                         self.bayesian_network.cpd("class").probabilities()[i] for i in
-                     range(len(self.bayesian_network.cpd("class").variable_values()))}
+        class_labels = None
+        probabilities = None
+        if isinstance(self.bayesian_network, MultiBnaf):
+            class_labels = self.bayesian_network.get_class_labels()
+            probabilities = list(self.bayesian_network.get_class_distribution().values())
+
+        else:
+            class_cpd = self.bayesian_network.cpd("class")
+            class_labels = class_cpd.variable_values()
+            probabilities = self.bayesian_network.cpd("class").probabilities()
+        var_probs = {class_labels[i]: probabilities[i] for i in
+                     range(len(class_labels))}
         n_samples = int((self.population_size / (1 - var_probs[y_og])) * 2.5)
         initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
         initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(

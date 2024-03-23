@@ -62,17 +62,14 @@ def create_model(args):
 
 
 class BnafEstimator():
-    def __init__(self, args, verbose = False):
+    def __init__(self, args):
         self.args = args
-        print("Create BNAF model...")
 
         self.model = create_model(self.args)
-        print("Creating optimizer..")
         self.optimizer = Adam(
             self.model.parameters(), lr=args.learning_rate, amsgrad=True, polyak=args.polyak
         )
 
-        print("Creating scheduler..")
         self.scheduler = ReduceLROnPlateau(
             self.optimizer,
             factor=args.decay,

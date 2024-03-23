@@ -61,16 +61,21 @@ if __name__ == "__main__":
     std_logl = []
     mean_brier = []
     std_brier = []
+    time_mean = []
+    time_std = []
     labels =  []
 
     # Validate Bayesian networks
     for network_type in ["CLG", "SP"]:
         slogl = []
         brier = []
+        times = []
         for train_index, test_index in fold_indices:
             df_train = df.iloc[train_index].reset_index(drop=True)
             df_test = df.iloc[test_index].reset_index(drop = True)
+            t0 = time.time()
             network = hill_climbing(data=df_train, bn_type=network_type)
+            times.append(time.time()-t0)
             slogl_i = network.logl(df_test).mean()
             slogl.append(slogl_i)
             brier_i = brier_score(df_test["class"].values, predict_class(df_test.drop("class",axis = 1), network))
@@ -79,6 +84,8 @@ if __name__ == "__main__":
         std_logl.append(np.std(slogl))
         mean_brier.append(np.mean(brier))
         std_brier.append(np.std(brier))
+        time_mean.append(np.mean(times))
+        time_std.append(np.std(times))
         labels.append(network_type)
         print(mean_logl)
         print(mean_brier)
@@ -88,15 +95,19 @@ if __name__ == "__main__":
         for hidden_units in hid_units_list :
             slogl = []
             brier = []
+            times = []
             args = Arguments()
             args.layers = layers
             args.hidden_sim= hidden_units
             args.load =False
             args.save = False
+            args.tensorboard = False
             for train_index, test_index in fold_indices:
                 df_train = df.iloc[train_index].reset_index(drop=True)
                 df_test = df.iloc[test_index].reset_index(drop=True)
+                t0 = time.time()
                 mbnaf = MultiBnaf(args, df_train)
+                times.append(time.time()-t0)
                 slogl_i = mbnaf.logl(df_test).mean()
                 slogl.append(slogl_i)
                 brier_i = brier_score(df_test["class"].values, predict_class(df_test.drop("class", axis = 1), mbnaf))
@@ -105,13 +116,15 @@ if __name__ == "__main__":
             std_logl.append(np.std(slogl))
             mean_brier.append(np.mean(brier))
             std_brier.append(np.std(brier))
+            time_mean.append(np.mean(times))
+            time_std.append(np.std(times))
             labels.append("BNAF_l"+str(layers)+"_hu"+str(hidden_units))
             print(mean_logl)
             print(mean_brier)
 
 
     print(mean_logl)
-    to_ret = pd.DataFrame(data=[mean_logl, std_logl, mean_brier, std_brier], columns=labels, index=["mean_logl", "std_logl", "mean_brier", "std_brier"])
+    to_ret = pd.DataFrame(data=[mean_logl, std_logl, mean_brier, std_brier, time_mean, time_std], columns=labels, index=["mean_logl", "std_logl", "mean_brier", "std_brier", "time_mean", "time_std"])
     print(to_ret)
     to_ret.to_csv('./results/exp_cv/mlogl' + str(dataset_id) + '.csv')
 

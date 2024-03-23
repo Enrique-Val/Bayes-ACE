@@ -145,7 +145,7 @@ def path(vertex_array: np.ndarray, chunks=2):
 
 def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
     separation = euclidean_distance(path.iloc[0], path.iloc[1])
-    medium_points = ((path + path.shift()) / 2).drop(0).reset_index()
+    medium_points = ((path + path.shift()) / 2).drop(0).reset_index(drop = True)
     likelihood_path = (-log_likelihood(medium_points, bayesian_network)) ** penalty * separation
     return np.sum(likelihood_path)
 

@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import torch
 
+from bayesace.models.utils import hill_climbing
+
 torch.backends.cudnn.deterministic = True
 
 import torch.nn as nn
@@ -19,6 +21,7 @@ from bayesace.models.BNAF_base.optim.adam import Adam
 from bayesace.models.BNAF_base.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import matplotlib.pyplot as plt
+import multiprocessing as mp
 
 from bayesace.models.BNAF_base.bnaf_estimator import BnafEstimator
 import pybnesian as pb
@@ -68,7 +71,7 @@ def get_data_loaders(args, data):
             d_list = np.split(dataset_class,
                               [int(.8 * len(dataset_class))])
         data_loaders = []
-        for j,d in enumerate(d_list):
+        for j, d in enumerate(d_list):
             dataset_tensor = torch.utils.data.TensorDataset(
                 torch.from_numpy(d).float().to(args.device)
             )
@@ -91,8 +94,9 @@ def get_data_loaders(args, data):
     return class_data_loaders, class_dist
 
 
-def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loader_test=None, seed=0,
+def create_single_bnaf(args, i, data_loaders, seed=0,
                        verbose=False) -> BnafEstimator:
+    data_loader_train, data_loader_valid, data_loader_test = data_loaders
     dir_data = "checkpoint_data" + str(args.dataset_id)
     dir_class = dir_data + "/" + dir_data + "_class_" + str(i)
     args.path = os.path.join(
@@ -135,18 +139,27 @@ def create_single_bnaf(args, i, data_loader_train, data_loader_valid, data_loade
 
 
 class MultiBnaf:
-    def __init__(self, args, data, seed=0):
+    def __init__(self, args, data, seed=0, parallelize=False):
         self.args = args
         class_data_loaders, self.class_dist = get_data_loaders(self.args, data)
         self.bnafs = {}
-        for i in class_data_loaders.keys():
-            data_loader_train, data_loader_valid, data_loader_test = class_data_loaders[i]
-            model = create_single_bnaf(self.args, i, data_loader_train, data_loader_valid, data_loader_test, seed=seed, verbose=args.verbose)
-            self.bnafs[i] = model
-        # self.sampler = hill_climbing(data=data, bn_type="CLG")
+        if parallelize:
+            pool = mp.Pool(len(class_data_loaders.keys()))
+            result = pool.starmap(create_single_bnaf, [(args, i, class_data_loaders[i], seed, args.verbose) for i in
+                                                       class_data_loaders.keys()])
+            pool.close()
+            for i, label in enumerate(class_data_loaders.keys()):
+                self.bnafs[label] = result[i]
+        else:
+            for label in class_data_loaders.keys():
+                self.bnafs[label] = create_single_bnaf(args, label, class_data_loaders[label], seed, args.verbose)
+        self.sampler = hill_climbing(data=data, bn_type="CLG")
 
     def get_class_labels(self):
         return list(self.class_dist.keys()).copy()
+
+    def get_class_distribution(self):
+        return self.class_dist.copy()
 
     def sample(self, n_samples, ordered=True, seed=None):
         return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
@@ -173,7 +186,7 @@ class MultiBnaf:
             to_ret = to_ret + np.e ** (logl_i + np.log(self.class_dist[i]))
         return to_ret
 
-    def predict(self, data : np.ndarray):
+    def predict(self, data: np.ndarray):
         ll = np.zeros(data.shape[0])
         acc = np.zeros((len(self.class_dist.keys()), data.shape[0]))
         for i, label in enumerate(self.class_dist.keys()):
