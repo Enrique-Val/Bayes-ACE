@@ -64,7 +64,7 @@ if __name__ == "__main__":
     labels =  []
 
     # Validate Bayesian networks
-    for network_type in ["CLG"]:
+    for network_type in ["CLG", "SP"]:
         slogl = []
         brier = []
         for train_index, test_index in fold_indices:
