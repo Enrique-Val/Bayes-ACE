@@ -68,12 +68,12 @@ def get_data_loaders(args, data):
             d_list = np.split(dataset_class,
                               [int(.8 * len(dataset_class))])
         data_loaders = []
-        for i,d in enumerate(d_list):
+        for j,d in enumerate(d_list):
             dataset_tensor = torch.utils.data.TensorDataset(
                 torch.from_numpy(d).float().to(args.device)
             )
             flag = False
-            if i == 0: 
+            if j == 0:
                 flag = True
             data_loader = torch.utils.data.DataLoader(
                 dataset_tensor, batch_size=args.batch_dim, shuffle=flag, num_workers=0
