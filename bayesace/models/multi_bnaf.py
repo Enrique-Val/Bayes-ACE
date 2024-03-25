@@ -34,7 +34,7 @@ class Arguments():
         self.learning_rate = 1e-2
         self.batch_dim = 200
         self.clip_norm = 0.1
-        self.epochs = 2000  # 1000
+        self.epochs = 1000  # 1000
 
         self.patience = 20
         self.cooldown = 10
@@ -42,6 +42,7 @@ class Arguments():
         self.decay = 0.5
         self.min_lr = 5e-4
         self.polyak = 0.998
+        self.weight_decay = 0
 
         self.flows = 5
         self.layers = 1
@@ -60,7 +61,7 @@ def get_data_loaders(args, data):
     full_data = data
     class_data_loaders = {}
     class_dist = full_data["class"].value_counts(normalize=True).to_dict()
-    for i in np.unique(full_data["class"]):
+    for i in class_dist.keys() :
         dataset_class = full_data[full_data["class"] == i].drop(columns=["class"]).values
 
         d_list = None
@@ -190,7 +191,7 @@ class MultiBnaf:
         ll = np.zeros(data.shape[0])
         acc = np.zeros((len(self.class_dist.keys()), data.shape[0]))
         for i, label in enumerate(self.class_dist.keys()):
-            logl_i = self.bnafs[label].compute_log_p_x(data).detach().cpu().numpy() + np.log(self.class_dist[label])
+            logl_i = self.bnafs[label].compute_log_p_x(data).detach().cpu().numpy().astype(float) + np.log(self.class_dist[label])
             ll = ll + np.e ** logl_i
             acc[i] = np.e ** logl_i
         return acc.transpose() / ll[:, None]

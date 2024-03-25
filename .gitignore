@@ -75,3 +75,5 @@ bayesace/models/tensorboard/checkpoin*
 results/exp_1_relaxed/
 
 checkpoint_data*
+
+.ipynb_checkpoints/opt_testing-checkpoint.ipynb

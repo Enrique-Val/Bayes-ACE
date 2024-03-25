@@ -3,9 +3,12 @@ import random
 import numpy as np
 import pandas as pd
 import torch
+
+from bayesace.models.utils import hill_climbing
+
 torch.backends.cudnn.deterministic=True
 import torch.nn as nn
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OrdinalEncoder
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -60,14 +63,79 @@ def create_model(args):
     return model
 
 
+def create_data_loaders(args, data):
+    args.n_dims = len(data.columns)
+    class_dist = data["class"].value_counts(normalize=True).to_dict()
+    oe = OrdinalEncoder()
+    data_c = data.copy()
+    data_c["class"] = oe.fit_transform(data_c["class"].values.reshape(-1, 1)).astype(float)
+    data = data_c.values
+    d_list = None
+    if args.test_data:
+        d_list = np.split(data,
+                          [int(.6 * len(data)), int(.8 * len(data))])
+    else:
+        d_list = np.split(data,
+                          [int(.8 * len(data))])
+    data_loaders = []
+    for j, d in enumerate(d_list):
+        dataset_tensor = torch.utils.data.TensorDataset(
+            torch.from_numpy(d).float().to(args.device)
+        )
+        flag = False
+        if j == 0:
+            flag = True
+        data_loader = torch.utils.data.DataLoader(
+            dataset_tensor, batch_size=args.batch_dim, shuffle=flag, num_workers=0
+        )
+        data_loaders.append(data_loader)
 
-class BnafEstimator():
-    def __init__(self, args):
+    # If there is no test, append a None value to mark it
+    if len(data_loaders) == 2:
+        data_loaders.append(None)
+
+    data_loaders = tuple(data_loaders)
+
+    return data_loaders, class_dist, oe
+
+
+
+class BnafJoint():
+    def __init__(self, args, data):
         self.args = args
+
+        dir_data = "checkpoint_data" + str(args.dataset_id)
+        dir_class = dir_data + "/" + dir_data
+        self.args.path = os.path.join(
+            dir_class,
+            "{}{}_layers{}_h{}_flows{}{}_{}".format(
+                args.expname + ("_" if args.expname != "" else ""),
+                args.dataset_id,
+                args.layers,
+                args.hidden_dim,
+                args.flows,
+                "_" + args.residual if args.residual else "",
+                str(datetime.datetime.now())[:-7].replace(" ", "-").replace(":", "-"),
+            ),
+        )
+
+        if args.save and not args.load:
+            if args.verbose:
+                print("Creating directory experiment..")
+            if not os.path.exists(dir_data):
+                os.mkdir(dir_data)
+            if not os.path.exists(dir_class):
+                os.mkdir(dir_class)
+            os.mkdir(args.path)
+            with open(os.path.join(args.path, "args.json"), "w") as f:
+                json.dump(args.__dict__, f, indent=4, sort_keys=True)
+
+        data_loader, self.class_dist, self.oe = create_data_loaders(args, data)
+        data_loader_train, data_loader_valid, data_loader_test = data_loader
 
         self.model = create_model(self.args)
         self.optimizer = Adam(
-            self.model.parameters(), lr=args.learning_rate, amsgrad=True, polyak=args.polyak, weight_decay=args.weight_decay
+            self.model.parameters(), lr=args.learning_rate, amsgrad=True, polyak=args.polyak
         )
 
         self.scheduler = ReduceLROnPlateau(
@@ -82,6 +150,9 @@ class BnafEstimator():
         )
 
         self.best_state = {"model" : None, "optimizer" : None, "epoch" : 0}
+        self.train(data_loader_train, data_loader_valid, data_loader_test)
+        self.sampler = hill_climbing(data=data, bn_type="CLG")
+
 
     def set_optimizer(self, optimizer):
         old_optimizer = self.optimizer
@@ -233,3 +304,41 @@ class BnafEstimator():
                 print("Validation loss: {:4.3f}".format(validation_loss.item()), file=f)
                 if data_loader_test is not None:
                     print("Test loss:       {:4.3f}".format(test_loss.item()), file=f)
+
+    def get_class_labels(self):
+        return list(self.class_dist.keys()).copy()
+
+    def get_class_distribution(self):
+        return self.class_dist.copy()
+
+    def sample(self, n_samples, ordered=True, seed=None):
+        return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
+
+    def logl(self, data, class_var_name="class"):
+        data_c = data.copy()
+        data_c[class_var_name] = self.oe.transform(data_c[class_var_name].values.reshape(-1, 1)).astype(float)
+        return self.compute_log_p_x(data_c.values).detach().cpu().numpy()
+
+    def likelihood(self, data, class_var_name="class"):
+        # If the class variable is passed, remove it
+        if class_var_name in data.columns:
+            data = data.drop(class_var_name, axis=1)
+        class_labels = self.oe.categories_[0]
+        ll = np.zeros(data.shape[0])
+        for label in range(len(class_labels)) :
+            data[class_var_name] = np.array([label] * len(data.index)).astype(float)
+            ll = ll + np.e ** self.compute_log_p_x(data.values).detach().cpu().numpy()
+        return ll
+
+    def predict(self, data: np.ndarray):
+        print("Cats",self.oe.categories_)
+        ll = np.zeros(data.shape[0])
+        acc = np.zeros((len(self.class_dist.keys()), data.shape[0]))
+        class_labels = self.oe.categories_[0]
+        for i, label in enumerate(class_labels):
+            data_i = np.hstack([data, np.array([i] * data.shape[0]).reshape(-1,1).astype(float)])
+            logl_i = self.compute_log_p_x(data_i).detach().cpu().numpy().astype(float)
+            print(logl_i[0:5])
+            ll = ll + np.e ** logl_i
+            acc[i] = np.e ** logl_i
+        return acc.transpose() / ll[:, None]

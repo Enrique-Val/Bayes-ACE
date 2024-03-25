@@ -5,9 +5,11 @@ import warnings
 import math
 import multiprocessing as mp
 import openml as oml
+from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from collections import Counter
 
+from bayesace.models.bnaf_joint import BnafJoint
 from bayesace.models.multi_bnaf import MultiBnaf
 
 
@@ -62,7 +64,7 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class") ->
     '''
     if class_var_name in data.columns:
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, MultiBnaf):
+    if isinstance(density_estimator, MultiBnaf)  or isinstance(density_estimator, BnafJoint) :
         return density_estimator.likelihood(data, class_var_name=class_var_name)
     class_cpd = density_estimator.cpd(class_var_name)
     class_values = class_cpd.variable_values()
@@ -86,7 +88,7 @@ def log_likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
 def posterior_probability(x_cfx: pd.DataFrame, y_og: str | list, density_estimator, class_var_name="class"):
     # Obtain the labels accesing either the MultiBNAF model or the cpd of the bn
     class_labels = None
-    if isinstance(density_estimator, MultiBnaf):
+    if isinstance(density_estimator, MultiBnaf)  or isinstance(density_estimator, BnafJoint) :
         class_labels = density_estimator.get_class_labels()
     else:
         class_cpd = density_estimator.cpd(class_var_name)
@@ -111,7 +113,7 @@ def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class")
     if class_var_name in data.columns:
         Warning("The class variable is already in the dataset. It will be removed for the prediction.")
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, MultiBnaf):
+    if isinstance(density_estimator, MultiBnaf) or isinstance(density_estimator, BnafJoint) :
         return pd.DataFrame(density_estimator.predict(data.values), columns=density_estimator.get_class_labels())
     else:
         class_values = density_estimator.cpd(class_var_name).variable_values()
@@ -125,8 +127,26 @@ def brier_score(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
     encoder = OneHotEncoder(sparse_output=False)
     y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
     class_labels = encoder.categories_[0]
-    y_pred = y_pred[class_labels]
-    return np.sum((y_true_coded - y_pred.values) ** 2)/len(y_true)
+    if len(y_pred.columns) == 2:
+        y_bin = y_true_coded[:, 0]
+        y_pred = y_pred[class_labels[0]]
+        return np.sum((y_bin - y_pred.values) ** 2) / len(y_true)
+    else :
+        y_pred = y_pred[class_labels]
+        return np.sum((y_true_coded - y_pred.values) ** 2) / len(y_true)
+
+
+def auc(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
+    encoder = OneHotEncoder(sparse_output=False)
+    y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
+    class_labels = encoder.categories_[0]
+    if len(y_pred.columns) == 2:
+        y_bin = y_true_coded[:, 0]
+        y_pred = y_pred[class_labels[0]]
+        return roc_auc_score(y_bin, y_pred.values)
+    else:
+        y_pred = y_pred[class_labels]
+        return roc_auc_score(y_true_coded, y_pred.values)
 
 
 def straight_path(x_1: np.ndarray, x_2: np.ndarray, chunks=2):
@@ -145,7 +165,7 @@ def path(vertex_array: np.ndarray, chunks=2):
 
 def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
     separation = euclidean_distance(path.iloc[0], path.iloc[1])
-    medium_points = ((path + path.shift()) / 2).drop(0).reset_index(drop = True)
+    medium_points = ((path + path.shift()) / 2).drop(0).reset_index(drop=True)
     likelihood_path = (-log_likelihood(medium_points, bayesian_network)) ** penalty * separation
     return np.sum(likelihood_path)
 
@@ -166,9 +186,9 @@ def get_and_process_data(dataset_id: int):
     feature_columns = [i for i in data.columns if i != "class"]
     data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
 
-    for i in data.columns[:-1]:
+    '''for i in data.columns[:-1]:
         data = data[data[i] < 3]
-        data = data[data[i] > -3]
+        data = data[data[i] > -3]'''
     return data
 
 
@@ -184,7 +204,7 @@ def get_probability_plot(density_estimator, class_var_name="class", limit=3, ste
     ])
     resolution = len(np.arange(-limit, limit, step))
     class_labels = None
-    if isinstance(density_estimator, MultiBnaf):
+    if isinstance(density_estimator, MultiBnaf)  or isinstance(density_estimator, BnafJoint) :
         class_labels = density_estimator.get_class_labels()
     else:
         class_labels = density_estimator.cpd(class_var_name).variable_values()
@@ -195,6 +215,27 @@ def get_probability_plot(density_estimator, class_var_name="class", limit=3, ste
         grid_df = pd.DataFrame(grid, columns=["x", "y"])
         grid_df[class_var_name] = pd.Categorical([label] * len(grid), categories=class_labels)
         post = np.e ** density_estimator.logl(grid_df)
+        post -= np.min(post)
+        post /= np.ptp(post)
+        post = np.flip(np.resize(post, (resolution, resolution)).transpose(), axis=0)
+        prob_list.append(post)
+    while len(prob_list) < 3:
+        prob_list.append(np.zeros((resolution, resolution)))
+    return np.dstack(prob_list)
+
+
+def get_decision_boundary_plot(density_estimator, class_var_name="class", limit=3, step=0.01):
+    grid = np.array([
+        [a, b]
+        for a in np.arange(-limit, limit, step)
+        for b in np.arange(-limit, limit, step)
+    ])
+    resolution = len(np.arange(-limit, limit, step))
+    class_labels = None
+    predictions = predict_class(pd.DataFrame(grid, columns=["x", "y"]), density_estimator)
+    prob_list = []
+    for label in predictions.columns:
+        post = predictions[label].values
         post -= np.min(post)
         post /= np.ptp(post)
         post = np.flip(np.resize(post, (resolution, resolution)).transpose(), axis=0)
