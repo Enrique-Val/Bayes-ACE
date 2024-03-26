@@ -89,7 +89,6 @@ def train_bnaf_model(model, optimizer, scheduler, data_loader_train, data_loader
             -1,
         ).mean()
         optimizer.swap()
-        print("Validation loss: ",validation_loss.item())
 
         if args.verbose:
             print(
@@ -114,4 +113,5 @@ def train_bnaf_model(model, optimizer, scheduler, data_loader_train, data_loader
         if stop:
             break
     load_model(model, optimizer, best_state, args)()
+    optimizer.swap()
     return epoch

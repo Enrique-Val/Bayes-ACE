@@ -21,7 +21,7 @@ from bayesace.models.BNAF_base.optim.adam import Adam
 from bayesace.models.BNAF_base.optim.lr_scheduler import ReduceLROnPlateau
 import json
 import matplotlib.pyplot as plt
-import multiprocessing as mp
+import torch.multiprocessing as mp
 
 from bayesace.models.BNAF_base.bnaf_estimator import BnafEstimator
 import pybnesian as pb
@@ -145,6 +145,7 @@ class MultiBnaf:
         class_data_loaders, self.class_dist = get_data_loaders(self.args, data)
         self.bnafs = {}
         if parallelize:
+            mp.set_start_method("spawn", force=True)
             pool = mp.Pool(len(class_data_loaders.keys()))
             result = pool.starmap(create_single_bnaf, [(args, i, class_data_loaders[i], seed, args.verbose) for i in
                                                        class_data_loaders.keys()])

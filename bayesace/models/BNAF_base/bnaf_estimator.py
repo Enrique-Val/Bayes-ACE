@@ -119,7 +119,6 @@ class BnafEstimator():
             self.args,
         )
 
-        self.optimizer.swap()
         validation_loss = -torch.stack(
             [self.compute_log_p_x(x_mb).mean().detach() for x_mb, in data_loader_valid],
             -1,

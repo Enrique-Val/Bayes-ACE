@@ -39,10 +39,11 @@ def kfold_indices(data, k):
     return folds
 
 
-# Define the number of folds (K)
+# Define the number of folds (K) and parameters of our grid search for the normalizing flow
 k = 10
 layers_list = [1, 2]
 hid_units_list = [10, 20, 30, 40]
+regularization_list = [0, 1e-4, 1e-3]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
@@ -100,43 +101,44 @@ if __name__ == "__main__":
         labels.append(network_type)
 
     # Validate normalizing flow with different params
-    for layers in layers_list:
-        for hidden_units in hid_units_list:
-            slogl = []
-            brier = []
-            times = []
-            aucs = []
-            bnaf_args = Arguments()
-            bnaf_args.load = False
-            bnaf_args.save = False
-            bnaf_args.tensorboard = False
-            bnaf_args.test_data = False
-            # bnaf_args.device = "cpu"
-            bnaf_args.layers = layers
-            bnaf_args.hidden_dim = hidden_units
-            bnaf_args.weight_decay = 1e-3
-            for train_index, test_index in fold_indices:
-                df_train = df.iloc[train_index].reset_index(drop=True)
-                df_test = df.iloc[test_index].reset_index(drop=True)
-                t0 = time.time()
-                mbnaf = MultiBnaf(bnaf_args, df_train, parallelize=True)
-                times.append(time.time() - t0)
-                slogl_i = mbnaf.logl(df_test).mean()
-                slogl.append(slogl_i)
-                predictions = predict_class(df_test.drop("class", axis=1), mbnaf)
-                brier_i = brier_score(df_test["class"].values, predictions)
-                brier.append(brier_i)
-                auc_i = auc(df_test["class"].values, predictions)
-                aucs.append(auc_i)
-            mean_logl.append(np.mean(slogl))
-            std_logl.append(np.std(slogl))
-            mean_brier.append(np.mean(brier))
-            std_brier.append(np.std(brier))
-            auc_mean.append(np.mean(aucs))
-            auc_std.append(np.std(aucs))
-            time_mean.append(np.mean(times))
-            time_std.append(np.std(times))
-            labels.append("MBNAF_l" + str(layers) + "_hu" + str(hidden_units))
+    for reg in regularization_list :
+        for layers in layers_list:
+            for hidden_units in hid_units_list:
+                slogl = []
+                brier = []
+                times = []
+                aucs = []
+                bnaf_args = Arguments()
+                bnaf_args.load = False
+                bnaf_args.save = False
+                bnaf_args.tensorboard = False
+                bnaf_args.test_data = False
+                # bnaf_args.device = "cpu"
+                bnaf_args.layers = layers
+                bnaf_args.hidden_dim = hidden_units
+                bnaf_args.weight_decay = reg
+                for train_index, test_index in fold_indices:
+                    df_train = df.iloc[train_index].reset_index(drop=True)
+                    df_test = df.iloc[test_index].reset_index(drop=True)
+                    t0 = time.time()
+                    mbnaf = MultiBnaf(bnaf_args, df_train, parallelize=True)
+                    times.append(time.time() - t0)
+                    slogl_i = mbnaf.logl(df_test).mean()
+                    slogl.append(slogl_i)
+                    predictions = predict_class(df_test.drop("class", axis=1), mbnaf)
+                    brier_i = brier_score(df_test["class"].values, predictions)
+                    brier.append(brier_i)
+                    auc_i = auc(df_test["class"].values, predictions)
+                    aucs.append(auc_i)
+                mean_logl.append(np.mean(slogl))
+                std_logl.append(np.std(slogl))
+                mean_brier.append(np.mean(brier))
+                std_brier.append(np.std(brier))
+                auc_mean.append(np.mean(aucs))
+                auc_std.append(np.std(aucs))
+                time_mean.append(np.mean(times))
+                time_std.append(np.std(times))
+                labels.append("MBNAF_reg"+str(reg)+"_l" + str(layers) + "_hu" + str(hidden_units))
 
     '''for layers in layers_list:
         for hidden_units in hid_units_list:
