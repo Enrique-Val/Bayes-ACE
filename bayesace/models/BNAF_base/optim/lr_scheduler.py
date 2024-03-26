@@ -7,7 +7,7 @@ class ReduceLROnPlateau(torch.optim.lr_scheduler.ReduceLROnPlateau):
         self.early_stopping = early_stopping
         self.early_stopping_counter = 0
 
-    def step(self, metrics, epoch=None, callback_best=None, callback_reduce=None):
+    def step(self, metrics, epoch=None, callback_best=None, callback_reduce=None) -> bool :
         current = metrics
         if epoch is None:
             epoch = self.last_epoch = self.last_epoch + 1
