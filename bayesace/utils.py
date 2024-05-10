@@ -10,7 +10,8 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from collections import Counter
 
 from bayesace.models.bnaf_joint import BnafJoint
-from bayesace.models.multi_bnaf import MultiBnaf
+from bayesace.models.multi_bnaf import MultiBnaf, Arguments
+from models.utils import hill_climbing
 
 
 def identity(x):
@@ -64,7 +65,7 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class") ->
     '''
     if class_var_name in data.columns:
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, MultiBnaf)  or isinstance(density_estimator, BnafJoint) :
+    if isinstance(density_estimator, MultiBnaf) or isinstance(density_estimator, BnafJoint) :
         return density_estimator.likelihood(data, class_var_name=class_var_name)
     class_cpd = density_estimator.cpd(class_var_name)
     class_values = class_cpd.variable_values()
@@ -243,3 +244,47 @@ def get_decision_boundary_plot(density_estimator, class_var_name="class", limit=
     while len(prob_list) < 3:
         prob_list.append(np.zeros((resolution, resolution)))
     return np.dstack(prob_list)
+
+def get_mean_sd_logl(data, model_type, folds = 10) :
+    def kfold_indices(data, k):
+        fold_size = len(data) // k
+        indices = np.arange(len(data))
+        folds = []
+        for i in range(k):
+            test_indices = indices[i * fold_size: (i + 1) * fold_size]
+            train_indices = np.concatenate([indices[:i * fold_size], indices[(i + 1) * fold_size:]])
+            folds.append((train_indices, test_indices))
+        return folds
+
+    # Define the number of folds (K) and parameters of our grid search for the normalizing flow
+    k = folds
+
+    fold_indices = kfold_indices(data, k)
+
+    mean_logl = {}
+    std_logl = {}
+    for label in data["class"].cat.categories:
+        mean_logl[label] = []
+        std_logl[label] = []
+
+    for train_index, test_index in fold_indices:
+        # Train a model for this fold
+        df_train = data.iloc[train_index].reset_index(drop=True)
+        df_test = data.iloc[test_index].reset_index(drop=True)
+        network = None
+        if model_type == 'CLG' or model_type == 'SP':
+            network = hill_climbing(data=df_train, bn_type=model_type)
+        elif model_type == "NN":
+            args = Arguments()
+            network = MultiBnaf(args, df_train)
+        # Iterate for all classes
+        for label in df_test["class"].cat.categories:
+            slogl_i = network.logl(df_test[df_test["class"] == label])
+            # Store the mean and std logl for this fold and for this class
+            mean_logl[label].append(slogl_i.mean())
+            std_logl[label].append(slogl_i.std())
+
+    for label in data["class"].cat.categories:
+        mean_logl[label] = np.mean(mean_logl[label])
+        std_logl[label] = np.mean(std_logl[label])
+    return mean_logl, std_logl

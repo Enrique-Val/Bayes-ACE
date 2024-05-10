@@ -23,6 +23,20 @@ import multiprocessing as mp
 
 import time
 
+def check_existance(data, bn, ll_thresh, acc_thresh) :
+    print("Length of data is ", len(data.index))
+    data_no_class = data.drop("class",axis=1)
+    ll = likelihood(data_no_class, bn)
+    data_no_class = data_no_class[ll > ll_thresh]
+    assert not data_no_class.empty
+    for y in np.unique(data["class"]) :
+        acc = accuracy(x_cfx=data_no_class, y_og=y, bn=bn)
+        assert (acc < acc_thresh).any()
+        data_no_class_bis = data_no_class[acc < acc_thresh]
+        print("Available", y, "cfx:", len(data_no_class_bis.index))
+
+
+
 if __name__ == "__main__":
     t0 = time.time()
     parser = argparse.ArgumentParser(description="Arguments")
@@ -33,66 +47,58 @@ if __name__ == "__main__":
     dataset_id = args.dataset_id
     network_type = args.network
 
-    random.seed(0)
+    for dataset_id in [44091, 44123, 44122, 44127, 44130] :
+        print("Dataset:", dataset_id)
+        for network_type in ["CLG"] :#, "SP"]:
+            print("Network:", network_type)
+            random.seed(0)
 
-    # Load the dataset
-    df = get_and_process_data(dataset_id)
+            # Load the dataset
+            df = get_and_process_data(dataset_id)
 
-    # Split the dataset into train and test. Test only contains the 5 counterfactuals to be evaluated
-    n_counterfactuals = 5
-    df_train = df.head(len(df.index) - n_counterfactuals)
-    df_test = df.tail(n_counterfactuals)
+            # Split the dataset into train and test. Test only contains the 5 counterfactuals to be evaluated
+            n_counterfactuals = 5
+            df_train = df.head(len(df.index) - n_counterfactuals)
+            df_test = df.tail(n_counterfactuals)
 
-    network = hill_climbing(data=df_train, bn_type=network_type)
+            network = hill_climbing(data=df_train, bn_type=network_type)
 
-    np.random.seed(0)
-    # Algorithm parameters (relatively high restriction on accuracy and likelihood)
-    likelihood_threshold = 0.2 ** (len(df_train.columns) - 1)
-    accuracy_threshold = 0.01
-    n_vertices = [0, 1,2]
-    penalties = [1, 10]
-    chunks = 10
+            np.random.seed(0)
+            # Algorithm parameters (relatively high restriction on accuracy and likelihood)
+            likelihood_threshold = 0.2 ** (len(df_train.columns) - 1)
+            accuracy_threshold = 0.05
+            n_vertices = [0]
+            penalties = [1]
+            chunks = 10
+            check_existance(df_train, bn=network, acc_thresh=accuracy_threshold, ll_thresh=likelihood_threshold)
+            print("Data exists!")
 
-    np.seterr(divide='ignore')
-    for penalty in penalties:
-        # Result storage
-        distances_mat = np.zeros((n_counterfactuals, len(n_vertices)))
-        evaluations_mat = np.zeros((n_counterfactuals, len(n_vertices)))
-        print("Distances raw")
-        for i in range(0, n_counterfactuals):
-            distances = np.zeros(len(n_vertices))
-            evaluations = np.zeros(len(n_vertices))
-            for j, n_vertex in enumerate(n_vertices):
-                alg = BayesACE(bayesian_network=network, features=df_train.columns[:-1], n_vertex=n_vertex,
-                               accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold,
-                               chunks=chunks, penalty=penalty,
-                               seed=0, verbose=False)
-                result, res = alg.run(df_test.iloc[[i]], parallelize=True, return_info=True)
-                distances[j] = result.distance
-                evaluations[j] = res.algorithm.evaluator.n_eval
-            print(distances)
-            distances_mat[i] = distances
-            evaluations_mat[i] = evaluations
-        print()
+            '''np.seterr(divide='ignore')
+            for penalty in penalties:
+                # Result storage
+                distances_mat = np.zeros((n_counterfactuals, len(n_vertices)))
+                evaluations_mat = np.zeros((n_counterfactuals, len(n_vertices)))
+                for i in range(0, n_counterfactuals):
+                    distances = np.zeros(len(n_vertices))
+                    evaluations = np.zeros(len(n_vertices))
+                    for j, n_vertex in enumerate(n_vertices):
+                        alg = BayesACE(bayesian_network=network, features=df_train.columns[:-1], n_vertex=n_vertex,
+                                       accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold,
+                                       chunks=chunks, penalty=penalty,
+                                       seed=0, verbose=False)
+                        result, res = alg.run(df_test.iloc[[i]], parallelize=True, return_info=True)
+                        distances[j] = result.distance
+                        evaluations[j] = res.algorithm.evaluator.n_eval
+                    distances_mat[i] = distances
+                    evaluations_mat[i] = evaluations
 
-        print("Distances mat")
-        print(distances_mat)
-        print()
-        print("Evaluations mat")
-        print(evaluations_mat)
-        print()
-        print()
+                print("Distances mat")
+                print(distances_mat)
+                print()
 
-        distances_mean = distances_mat.mean(axis=0)
-        distances_std = distances_mat.std(axis=0)
-        evaluations_mean = evaluations_mat.mean(axis=0)
-        evaluations_std = evaluations_mat.std(axis=0)
+                distances_mean = distances_mat.mean(axis=0)
+                distances_std = distances_mat.std(axis=0)
+                evaluations_mean = evaluations_mat.mean(axis=0)
+                evaluations_std = evaluations_mat.std(axis=0)'''
 
-        with open('./results/init/like' '_penalty' + str(penalty) + '.csv',
-                  'w') as f:
-            w = csv.writer(f)
-            w.writerow(distances_mean)
-            w.writerow(evaluations_mean)
-            w.writerow(distances_std)
-            w.writerow(evaluations_std)
     print(time.time()- t0)

@@ -167,6 +167,7 @@ class MultiBnaf:
         return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
 
     def logl(self, data, class_var_name="class"):
+        data = data.reset_index(drop=True)
         to_ret = np.zeros(data.shape[0])
         for i in self.class_dist.keys():
             data_i = data[data[class_var_name] == i].drop(class_var_name, axis=1)

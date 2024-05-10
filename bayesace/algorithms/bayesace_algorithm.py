@@ -15,16 +15,26 @@ from bayesace.models.utils import PybnesianParallelizationError
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 
+MAX_VALUE_FLOAT = 1e+307
+
 
 class BestPathFinder(ElementwiseProblem):
     def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
                  accuracy_threshold=0.05, sampling_range=(-3, 3), **kwargs):
         n_features = (len(instance.columns) - 1)
+        xl = None
+        xu = None
+        if sampling_range is None:
+            xl = np.array([-3] * (n_features * (n_vertex + 1)))
+            xu = np.array([3] * (n_features * (n_vertex + 1)))
+        else:
+            xl = np.repeat(sampling_range[0], n_vertex + 1)
+            xu = np.repeat(sampling_range[1], n_vertex + 1)
         super().__init__(n_var=n_features * (n_vertex + 1),
                          n_obj=1,
                          n_ieq_constr=2,
-                         xl=np.array([sampling_range[0]] * (n_features * (n_vertex + 1))),
-                         xu=np.array([sampling_range[1]] * (n_features * (n_vertex + 1))), **kwargs)
+                         xl=xl,
+                         xu=xu, **kwargs)
         self.x_og = instance.drop("class", axis=1).values
         self.y_og = instance["class"].values[0]
         self.n_vertex = n_vertex
@@ -52,6 +62,8 @@ class BestPathFinder(ElementwiseProblem):
             sum_path += path_likelihood_length(pd.DataFrame(path_i, columns=self.features),
                                                bayesian_network=self.bayesian_network, penalty=self.penalty)
         f1 = sum_path
+        if f1 > MAX_VALUE_FLOAT:
+            f1 = MAX_VALUE_FLOAT
         out["F"] = np.column_stack([f1])
 
         x_cfx = self.x_og.copy()
@@ -79,33 +91,53 @@ class BayesACE(ACE):
             probabilities = self.bayesian_network.cpd("class").probabilities()
         var_probs = {class_labels[i]: probabilities[i] for i in
                      range(len(class_labels))}
-        n_samples = int((self.population_size / (1 - var_probs[y_og])) * 2.5)
-        initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
+        n_samples = int((self.population_size / (1 - var_probs[y_og])) * 2.5*2)
+        completed = False
+        initial_sample = pd.DataFrame(columns=self.features)
+        tmp_seed = self.seed
+        while not completed :
+            candidate_initial = self.bayesian_network.sample(n_samples, ordered=True, seed=tmp_seed).to_pandas()
+            ##print(np.e ** self.bayesian_network.logl(candidate_initial[candidate_initial["class"] == y_og]))
+            candidate_initial = candidate_initial[candidate_initial["class"] != y_og]
+            # Filter by likelihood
+            ll = likelihood(candidate_initial, self.bayesian_network)
+            #print(np.e**self.bayesian_network.logl(candidate_initial))
+            #print(ll)
+            #print(self.likelihood_threshold)
+            ll = ll > self.likelihood_threshold
+            candidate_initial = candidate_initial[ll].reset_index(drop=True)
+            candidate_initial = candidate_initial.drop("class", axis = 1)
+            initial_sample = pd.concat([initial_sample, candidate_initial])
+            tmp_seed += 1
+            if len(initial_sample) > self.population_size:
+                completed = True
+
+        '''initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
         initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
             drop=True)
-        initial_sample = initial_sample.drop("class", axis=1)
+        initial_sample = initial_sample.drop("class", axis=1)'''
+        initial_sample = initial_sample.head(self.population_size).reset_index(drop = True)
+        initial_sample = initial_sample.clip(self.sampling_range[0], self.sampling_range[1])
         initial_sample = initial_sample.to_numpy()
 
         new_sample = self.bayesian_network.sample(self.n_vertex * self.population_size, ordered=True,
                                                   seed=self.seed).to_pandas()
-        new_sample = new_sample[new_sample["class"] != y_og].head(self.population_size).reset_index(drop=True)
         new_sample = new_sample.drop("class", axis=1)
+        new_sample = new_sample.clip(self.sampling_range[0], self.sampling_range[1])
+        # new_sample = new_sample[new_sample["class"] != y_og].head(self.population_size).reset_index(drop=True)
         unif_sample = np.resize(
             new_sample.to_numpy(),
             new_shape=(self.population_size, self.n_vertex * self.n_features))
         initial_sample_1 = np.hstack((unif_sample, initial_sample))
-        # In semiparametrix networks, due to oversmoothing, samples my occur outside of the defined bounds. In this version, the bounds are fixed to -3 and 3.
-        # In future versions, it will be a parameter
-        initial_sample_1[initial_sample_1 <= -3] = -2.99999
-        initial_sample_1[initial_sample_1 >= 3] = 2.99999
         if self.initialization == "default":
             return initial_sample_1
         else:
-
+            # TODO This implementation might be flawed
             initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed + 1).to_pandas()
             initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
                 drop=True)
             initial_sample = initial_sample.drop("class", axis=1)
+            initial_sample = initial_sample.clip(self.sampling_range[0], self.sampling_range[1])
             initial_sample_2 = initial_sample.to_numpy()
             new_sample = []
             for i in initial_sample_2:
@@ -124,7 +156,7 @@ class BayesACE(ACE):
             return initial_sample
 
     def __init__(self, bayesian_network, features, chunks, n_vertex, pop_size=100,
-                 generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=(-4, 4),
+                 generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=None,
                  initialization="default",
                  seed=0,
                  verbose=True):
@@ -134,7 +166,10 @@ class BayesACE(ACE):
         self.n_vertex = n_vertex
         self.generations = generations
         self.population_size = pop_size
-        self.sampling_range = sampling_range
+        if sampling_range is None:
+            self.sampling_range = (np.array([-3] * self.n_features), np.array([3] * self.n_features))
+        else:
+            self.sampling_range = sampling_range
         self.initialization = initialization
 
     def run(self, instance: pd.DataFrame, parallelize=False, return_info=False):
@@ -142,6 +177,7 @@ class BayesACE(ACE):
             ftol=0.05 * self.n_features ** self.penalty,
             period=20
         )
+        # termination = ("n_gen",20)
         initial_sample = self.get_initial_sample(instance)
         # initialize the thread pool and create the runner
         if parallelize:
@@ -173,7 +209,7 @@ class BayesACE(ACE):
                            termination=termination,  # ('n_gen', self.generations),
                            seed=self.seed,
                            verbose=self.verbose)
-        if res.X is None:
+        if res.X is None or res.F > MAX_VALUE_FLOAT:
             if return_info:
                 return (ACEResult(None, instance.drop("class", axis=1), np.inf), res)
             return ACEResult(None, instance.drop("class", axis=1), np.inf)
