@@ -181,6 +181,11 @@ class BayesACE(ACE):
         initial_sample = self.get_initial_sample(instance)
         # initialize the thread pool and create the runner
         if parallelize:
+            # The sampler cannot be parallelize if using a scipy.stats.gaussian_kde
+            sampler_copy = None
+            if isinstance(self.bayesian_network, MultiBnaf):
+                sampler_copy = self.bayesian_network.sampler
+                self.bayesian_network.sampler = None
             n_processes = mp.cpu_count()
             pool = mp.Pool(n_processes)
             runner = StarmapParallelization(pool.starmap)
@@ -197,6 +202,9 @@ class BayesACE(ACE):
                            seed=self.seed,
                            verbose=self.verbose)
             pool.close()
+            # Recover the sampler after paralleliization
+            if isinstance(self.bayesian_network, MultiBnaf) :
+                self.bayesian_network.sampler = sampler_copy
         else:
             problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
                                      penalty=self.penalty, chunks=self.chunks,

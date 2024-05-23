@@ -73,7 +73,15 @@ if __name__ == "__main__":
         args = Arguments()
         network = MultiBnaf(args, df_train)
 
-    mean_logl, std_logl = get_mean_sd_logl(df_train, network_type, folds=2)
+    #mean_logl, std_logl = get_mean_sd_logl(df_train, network_type, folds=10)
+
+    mean_logl, std_logl = (dict(),dict())
+    for i in df_train["class"].cat.categories :
+        df_class = df_train[df_train["class"] == i]
+        logls = network.logl(df_class)
+        mean_logl[i] = logls.mean()
+        std_logl[i] = logls.std()
+
 
     np.random.seed(0)
 

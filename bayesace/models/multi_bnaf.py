@@ -1,6 +1,10 @@
+import time
+
 import numpy as np
 import pandas as pd
 import torch
+from scipy.stats import gaussian_kde
+import pyarrow as pa
 
 from bayesace.models.utils import hill_climbing
 
@@ -61,7 +65,7 @@ def get_data_loaders(args, data):
     full_data = data
     class_data_loaders = {}
     class_dist = full_data["class"].value_counts(normalize=True).to_dict()
-    for i in class_dist.keys() :
+    for i in class_dist.keys():
         dataset_class = full_data[full_data["class"] == i].drop(columns=["class"]).values
 
         d_list = None
@@ -144,6 +148,21 @@ class MultiBnaf:
         self.args = args
         class_data_loaders, self.class_dist = get_data_loaders(self.args, data)
         self.bnafs = {}
+        self.columns = list(data.columns[:-1])
+        self.categories = list(data["class"].cat.categories)
+        self.sampler = {}
+        '''
+        for i in self.categories:
+            data_cat = data[data["class"] == i].drop("class",axis = 1)
+            self.sampler[i] = gaussian_kde(data_cat.values.transpose(), bw_method=(len(data_cat)**(-1./(len(data_cat.columns)+4)))/100)
+            sample = self.sampler[i].resample(10000)
+            for j in range(sample.shape[0]) :
+                plt.hist(sample[j], alpha = 0.5, bins=400)
+                plt.hist(data_cat[self.columns[j]], alpha = 0.5, bins = 400)
+                plt.legend()
+                plt.title("Sample "+str(self.columns[j]))
+                plt.show()'''
+            #raise Exception()
         if parallelize:
             mp.set_start_method("spawn", force=True)
             pool = mp.Pool(len(class_data_loaders.keys()))
@@ -155,7 +174,34 @@ class MultiBnaf:
         else:
             for label in class_data_loaders.keys():
                 self.bnafs[label] = create_single_bnaf(args, label, class_data_loaders[label], seed, args.verbose)
-        self.sampler = hill_climbing(data=data, bn_type="CLG")
+        t0 = time.time()
+        for i in self.categories:
+            data_cat = data[data["class"] == i].drop("class", axis=1)
+            best_logl = -np.inf
+            for div_const in range(10,510,10) :
+                print(div_const)
+                sampler = gaussian_kde(data_cat.values.transpose(),
+                                               bw_method=(len(data_cat) ** (-1. / (len(data_cat.columns) + 4))) / div_const)
+                sample = sampler.resample(1000).transpose()
+                logl = self.bnafs[i].compute_log_p_x(sample).mean()
+                if logl >= best_logl :
+                    best_logl = logl
+                    self.sampler[i] =  sampler
+                else :
+                    break
+            self.sampler[i] = gaussian_kde(data_cat.values.transpose(), bw_method=
+                                           (len(data_cat) ** (-1. / (len(data_cat.columns) + 4))) / 2)
+        for i in self.categories:
+            data_cat = data[data["class"] == i].drop("class", axis=1)
+            sample = self.sampler[i].resample(len(data_cat))
+            for j in range(sample.shape[0]):
+                plt.hist(sample[j], alpha=0.5, bins=100, color = "red")
+                plt.hist(data_cat[self.columns[j]], alpha=0.5, bins=100, color="skyblue")
+                plt.legend()
+                plt.title("Sample " + str(self.columns[j]))
+                plt.show()
+        print(time.time()-t0)
+        #self.sampler = hill_climbing(data=data, bn_type="CLG")
 
     def get_class_labels(self):
         return list(self.class_dist.keys()).copy()
@@ -164,7 +210,17 @@ class MultiBnaf:
         return self.class_dist.copy()
 
     def sample(self, n_samples, ordered=True, seed=None):
-        return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
+        gen_data = np.empty(shape = len(self.columns))
+        classes = []
+        for i in self.class_dist.keys():
+            gen_data = np.vstack((gen_data,self.sampler[i].resample(int(n_samples * self.class_dist[i] + 1)).transpose()))
+            tmp = [i]*int(n_samples * self.class_dist[i] + 1)
+            classes = classes + tmp
+        gen_data = np.delete(gen_data,0,0)
+        dataframe = pd.DataFrame(data=gen_data, columns=self.columns)
+        dataframe["class"] = pd.Categorical(classes, categories=self.categories)
+        return pa.Table.from_pandas(dataframe.head(n_samples))
+        ##return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
 
     def logl(self, data, class_var_name="class"):
         data = data.reset_index(drop=True)
@@ -193,7 +249,8 @@ class MultiBnaf:
         ll = np.zeros(data.shape[0])
         acc = np.zeros((len(self.class_dist.keys()), data.shape[0]))
         for i, label in enumerate(self.class_dist.keys()):
-            logl_i = self.bnafs[label].compute_log_p_x(data).detach().cpu().numpy().astype(float) + np.log(self.class_dist[label])
+            logl_i = self.bnafs[label].compute_log_p_x(data).detach().cpu().numpy().astype(float) + np.log(
+                self.class_dist[label])
             ll = ll + np.e ** logl_i
             acc[i] = np.e ** logl_i
         return acc.transpose() / ll[:, None]
