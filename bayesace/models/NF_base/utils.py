@@ -2,6 +2,8 @@ import os
 import torch
 import numpy as np
 from tqdm import tqdm
+import pyro.distributions as dist
+import pyro.distributions.transforms as T
 
 
 def save_model(model, optimizer, epoch, best_state, args):
@@ -52,66 +54,72 @@ def compute_log_p_x(model, x_mb):
     return log_p_y_mb + log_diag_j_mb
 
 
-def train_bnaf_model(model, optimizer, scheduler, data_loader_train, data_loader_valid, args):
+def train_nf_model(model : dist.TransformedDistribution, optimizer, scheduler, data_loader_train, data_loader_valid, args):
     best_state = {"model": None, "optimizer": None, "epoch": 0}
-
-    if args.tensorboard:
-        from tensorboardX import SummaryWriter
-        writer = SummaryWriter(os.path.join(args.tensorboard, args.load or args.path))
+    early_stopping_patience = args.early_stopping
+    early_stopping_counter = 0
 
     epoch = args.start_epoch
     for epoch in range(args.start_epoch, args.start_epoch + args.epochs):
-        t = data_loader_train
-        if args.verbose:
-            t = tqdm(data_loader_train, smoothing=0, ncols=80)
-        train_loss = []
-
-        for (x_mb,) in t:
-            loss = -compute_log_p_x(model, x_mb).mean()
-
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.clip_norm)
-
-            optimizer.step()
+        total_loss = 0
+        for batch_data in data_loader_train:
             optimizer.zero_grad()
+            loss = -model.log_prob(batch_data[0]).mean()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+            model.clear_cache()
 
-            if args.verbose:
-                t.set_postfix(loss="{:.2f}".format(loss.item()), refresh=False)
-            train_loss.append(loss)
+        if True:  # epoch % 500 == 0:
+            print('step: {}, loss: {}'.format(epoch, total_loss / len(data_loader_train)))
 
-        train_loss = torch.stack(train_loss).mean()
-        optimizer.swap()
+        # Validation loop
         validation_loss = -torch.stack(
             [
-                compute_log_p_x(model,x_mb).mean().detach()
-                for x_mb, in data_loader_valid
+                model.log_prob(batch_data[0]).mean()
+                for batch_data in data_loader_train
             ],
             -1,
         ).mean()
-        optimizer.swap()
 
-        if args.verbose:
-            print(
-                "Epoch {:3}/{:3} -- train_loss: {:4.3f} -- validation_loss: {:4.3f}".format(
-                    epoch + 1,
-                    args.start_epoch + args.epochs,
-                    train_loss.item(),
-                    validation_loss.item(),
-                )
-            )
-        stop = scheduler.step(
-            validation_loss,
-            callback_best=save_model(model, optimizer, epoch + 1, best_state, args),
-            callback_reduce=load_model(model, optimizer, best_state, args),
-        )
+        print(f'Epoch {epoch}, Validation Loss: {validation_loss}')
 
-        if args.tensorboard:
-            writer.add_scalar("lr", optimizer.param_groups[0]["lr"], epoch + 1)
-            writer.add_scalar("loss/validation", validation_loss.item(), epoch + 1)
-            writer.add_scalar("loss/train", train_loss.item(), epoch + 1)
+        # Update learning rate scheduler
+        scheduler.step(validation_loss)
 
-        if stop:
-            break
-    load_model(model, optimizer, best_state, args)()
-    optimizer.swap()
+        # Early stopping check
+        if validation_loss < best_loss:
+            best_loss = validation_loss
+            early_stopping_counter = 0
+            best_model_params = model.base_dist.mean.detach().clone(), flow_dist.base_dist.stddev.detach().clone()
+            for transform in model.transforms:
+                best_model_params += tuple(param.detach().clone() for param in transform.parameters())
+
+            print("Updated!")
+        else:
+            early_stopping_counter += 1
+            if early_stopping_counter >= early_stopping_patience:
+                print(
+                    "Validation loss hasn't improved for {} epochs. Early stopping...".format(early_stopping_patience))
+                break
+
+    # Restore best model parameters
+    if best_model_params:
+        model.base_dist.loc = best_model_params[0]
+        model.base_dist.scale = best_model_params[1]
+        current_param = 2
+        for transform in model.transforms:
+            for param in transform.parameters():
+                param.data = best_model_params[current_param]
+                current_param += 1
+
+    validation_loss = -torch.stack(
+        [
+            model.log_prob(batch_data[0])
+            for batch_data in data_loader_valid
+        ],
+        -1,
+    ).mean()
+
+    print(f'Final {1000}, Validation Loss: {validation_loss}')
     return epoch
