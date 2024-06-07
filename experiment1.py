@@ -55,7 +55,7 @@ if __name__ == "__main__":
     random.seed(0)
 
     # Load the dataset
-    df = get_and_process_data(dataset_id)
+    df = get_data(dataset_id)
 
     # Get the bounds for the optimization problem. The initial sampling will rely on this, so we call it sampling_range
     xu = df.drop(columns=['class']).max().values + 0.0001
@@ -73,15 +73,23 @@ if __name__ == "__main__":
         args = Arguments()
         network = MultiBnaf(args, df_train)
 
-    #mean_logl, std_logl = get_mean_sd_logl(df_train, network_type, folds=10)
+    print("Train mean", network.logl(df_train).mean())
+    print("Test", network.logl(df_test).mean())
+    print("Test median", np.median(network.logl(df_train)))
+    print("Test std",network.logl(df_train).std())
+    print("Test p90", np.percentile(network.logl(df_train),90))
+    # mean_logl, std_logl = get_mean_sd_logl(df_train, network_type, folds=2)
 
-    mean_logl, std_logl = (dict(),dict())
-    for i in df_train["class"].cat.categories :
+    print("COMPARE MBNAF AND KDE")
+    print("Test mean mbnaf", np.log(likelihood(df_test,network)).mean())
+    print("Test mean kde", network.sampler.score_samples(df_test.drop("class",axis=1)).mean())
+
+    mean_logl, std_logl = (dict(), dict())
+    for i in df_train["class"].cat.categories:
         df_class = df_train[df_train["class"] == i]
         logls = network.logl(df_class)
         mean_logl[i] = logls.mean()
         std_logl[i] = logls.std()
-
 
     np.random.seed(0)
 

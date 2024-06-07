@@ -1,4 +1,4 @@
-
+import numpy as np
 import pybnesian as pb
 import pandas as pd
 import multiprocessing as mp
@@ -24,9 +24,24 @@ def copy_structure(bn: pb.BayesianNetwork):
 def check_copy(bn):
     return bn.fitted()
 
+def preprocess_train_data(data: pd.DataFrame | np.ndarray):
+    array_flag = False
+    if isinstance(data, np.ndarray):
+        # The following code but for an array instead of a dataframe:
+        data = pd.DataFrame(data)
+        array_flag = True
+    for i in data.columns[:-1]:
+        data = data[data[i] < data[i].std() * 3]
+        data = data[data[i] > -data[i].std() * 3]
+        data[i] = data[i] + np.random.normal(0, 0.9 / (len(data) ** (1 / 5)), data[i].shape)
+    if array_flag:
+        return data.values
+    else:
+        return data
 
 def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, seed=0):
     bn = None
+    data = preprocess_train_data(data)
     if bn_type == "CLG":
         if score is None:
             score = "bic"

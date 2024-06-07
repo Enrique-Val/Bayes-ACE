@@ -35,7 +35,7 @@ if __name__ == "__main__":
     random.seed(0)
 
     # Load the dataset
-    df = get_and_process_data(dataset_id)
+    df = get_data(dataset_id)
 
     # Split the dataset into train and test. Test only contains the 5 counterfactuals to be evaluated
     n_counterfactuals = 5

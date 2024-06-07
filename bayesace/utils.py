@@ -114,8 +114,8 @@ def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class")
     if class_var_name in data.columns:
         Warning("The class variable is already in the dataset. It will be removed for the prediction.")
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, MultiBnaf) or isinstance(density_estimator, BnafJoint) :
-        return pd.DataFrame(density_estimator.predict(data.values), columns=density_estimator.get_class_labels())
+    if isinstance(density_estimator, MultiBnaf):
+        return pd.DataFrame(density_estimator.predict_proba(data.values), columns=density_estimator.get_class_labels())
     else:
         class_values = density_estimator.cpd(class_var_name).variable_values()
         to_ret = pd.DataFrame(columns=class_values)
@@ -171,13 +171,16 @@ def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
     return np.sum(likelihood_path)
 
 
-def get_and_process_data(dataset_id: int):
+def get_data(dataset_id: int):
     # Load the dataset
     data = oml.datasets.get_dataset(dataset_id, download_data=True, download_qualities=False,
                                     download_features_meta_data=False).get_data()[0]
 
     # Shuffle the dataset
     data = data.sample(frac=1, random_state=0)
+
+    # Reset the index
+    data = data.reset_index(drop=True)
 
     # Transform the class into a categorical variable
     data["class"] = data[data.columns[-1]].astype('string').astype('category')
@@ -188,10 +191,9 @@ def get_and_process_data(dataset_id: int):
     data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
 
     '''for i in data.columns[:-1]:
-        data = data[data[i] < 3]
-        data = data[data[i] > -3]'''
+        data = data[data[i] < data[i].std()*3]
+        data = data[data[i] > -data[i].std()*3]'''
     return data
-
 
 def L0_norm(x_1, x_2, eps=0.01):
     return Counter(np.abs(x_1 - x_2) > eps)[True]

@@ -23,18 +23,18 @@ import multiprocessing as mp
 
 import time
 
-def check_existance(data, bn, ll_thresh, acc_thresh) :
+
+def check_existance(data, bn, ll_thresh, acc_thresh):
     print("Length of data is ", len(data.index))
-    data_no_class = data.drop("class",axis=1)
+    data_no_class = data.drop("class", axis=1)
     ll = likelihood(data_no_class, bn)
     data_no_class = data_no_class[ll > ll_thresh]
     assert not data_no_class.empty
-    for y in np.unique(data["class"]) :
-        acc = accuracy(x_cfx=data_no_class, y_og=y, bn=bn)
+    for y in np.unique(data["class"]):
+        acc = posterior_probability(x_cfx=data_no_class, y_og=y, bn=bn)
         assert (acc < acc_thresh).any()
         data_no_class_bis = data_no_class[acc < acc_thresh]
         print("Available", y, "cfx:", len(data_no_class_bis.index))
-
 
 
 if __name__ == "__main__":
@@ -47,29 +47,45 @@ if __name__ == "__main__":
     dataset_id = args.dataset_id
     network_type = args.network
 
-    for dataset_id in [44091, 44123, 44122, 44127, 44130] :
+    for dataset_id in [44091, 44123, 44122, 44127, 44130]:
         print("Dataset:", dataset_id)
-        for network_type in ["CLG"] :#, "SP"]:
+        for network_type in ["CLG"]:  # , "SP"]:
             print("Network:", network_type)
             random.seed(0)
 
             # Load the dataset
-            df = get_and_process_data(dataset_id)
+            df = get_data(dataset_id)
 
             # Split the dataset into train and test. Test only contains the 5 counterfactuals to be evaluated
             n_counterfactuals = 5
             df_train = df.head(len(df.index) - n_counterfactuals)
             df_test = df.tail(n_counterfactuals)
 
-            network = hill_climbing(data=df_train, bn_type=network_type)
+            network = None
+            if network_type == 'CLG' or network_type == 'SP':
+                network = hill_climbing(data=df_train, bn_type=network_type)
+            elif network_type == "NN":
+                args = Arguments()
+                network = MultiBnaf(args, df_train)
+
+            mean_logl, std_logl = get_mean_sd_logl(df_train, network_type, folds=10)
 
             np.random.seed(0)
             # Algorithm parameters (relatively high restriction on accuracy and likelihood)
-            likelihood_threshold = 0.2 ** (len(df_train.columns) - 1)
+            likelihood_threshold = mean_logl + 0*std_logl
             accuracy_threshold = 0.05
             n_vertices = [0]
             penalties = [1]
             chunks = 10
+            for value in df_train["class"].cat.categories :
+                df_class = df_train[df_train["class"] == value]
+                opposite_class_mean_logl = np.mean(
+                    [mean_logl[i] for i in mean_logl.keys() if i != instance["class"].values[0]])
+                print("Opposite class", opposite_class_mean_logl)
+                opposite_class_std_logl = np.sqrt(
+                    np.mean([std_logl[i] for i in std_logl.keys() if i != instance["class"].values[0]]))
+                likelihood_threshold = np.e ** (
+                        opposite_class_mean_logl + likelihood_threshold_sigma * opposite_class_std_logl)
             check_existance(df_train, bn=network, acc_thresh=accuracy_threshold, ll_thresh=likelihood_threshold)
             print("Data exists!")
 
@@ -101,4 +117,4 @@ if __name__ == "__main__":
                 evaluations_mean = evaluations_mat.mean(axis=0)
                 evaluations_std = evaluations_mat.std(axis=0)'''
 
-    print(time.time()- t0)
+    print(time.time() - t0)

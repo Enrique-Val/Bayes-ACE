@@ -56,7 +56,7 @@ if __name__ == "__main__":
     random.seed(0)
 
     # Load the dataset
-    df = get_and_process_data(dataset_id)
+    df = get_data(dataset_id)
 
     # Get the fold indices
     fold_indices = kfold_indices(df, k)

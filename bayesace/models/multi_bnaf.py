@@ -5,6 +5,8 @@ import pandas as pd
 import torch
 from scipy.stats import gaussian_kde
 import pyarrow as pa
+from sklearn.model_selection import GridSearchCV
+from sklearn.neighbors import KernelDensity
 
 from bayesace.models.utils import hill_climbing
 
@@ -162,7 +164,7 @@ class MultiBnaf:
                 plt.legend()
                 plt.title("Sample "+str(self.columns[j]))
                 plt.show()'''
-            #raise Exception()
+        # raise Exception()
         if parallelize:
             mp.set_start_method("spawn", force=True)
             pool = mp.Pool(len(class_data_loaders.keys()))
@@ -175,33 +177,33 @@ class MultiBnaf:
             for label in class_data_loaders.keys():
                 self.bnafs[label] = create_single_bnaf(args, label, class_data_loaders[label], seed, args.verbose)
         t0 = time.time()
-        for i in self.categories:
-            data_cat = data[data["class"] == i].drop("class", axis=1)
-            best_logl = -np.inf
-            for div_const in range(10,510,10) :
-                print(div_const)
-                sampler = gaussian_kde(data_cat.values.transpose(),
-                                               bw_method=(len(data_cat) ** (-1. / (len(data_cat.columns) + 4))) / div_const)
-                sample = sampler.resample(1000).transpose()
-                logl = self.bnafs[i].compute_log_p_x(sample).mean()
-                if logl >= best_logl :
-                    best_logl = logl
-                    self.sampler[i] =  sampler
-                else :
-                    break
-            self.sampler[i] = gaussian_kde(data_cat.values.transpose(), bw_method=
-                                           (len(data_cat) ** (-1. / (len(data_cat.columns) + 4))) / 2)
-        for i in self.categories:
-            data_cat = data[data["class"] == i].drop("class", axis=1)
-            sample = self.sampler[i].resample(len(data_cat))
-            for j in range(sample.shape[0]):
-                plt.hist(sample[j], alpha=0.5, bins=100, color = "red")
-                plt.hist(data_cat[self.columns[j]], alpha=0.5, bins=100, color="skyblue")
-                plt.legend()
-                plt.title("Sample " + str(self.columns[j]))
-                plt.show()
-        print(time.time()-t0)
-        #self.sampler = hill_climbing(data=data, bn_type="CLG")
+        # Define the grid of bandwidths to search
+        bandwidths = np.logspace(-1, 0, 5)
+
+        # Use GridSearchCV to perform cross-validation for KDE
+        params = {'bandwidth': bandwidths}
+        grid_search = GridSearchCV(KernelDensity(), params, cv=10)
+        grid_search.fit(data.drop("class", axis=1).values)
+
+        # Get the best bandwidth
+        best_bandwidth = grid_search.best_params_['bandwidth']
+        print(f"Optimal bandwidth: {best_bandwidth}")
+
+        # Fit the KDE with the best bandwidth
+        kde = KernelDensity(bandwidth=best_bandwidth)
+        kde.fit(data.drop("class", axis=1).values)
+        self.sampler = kde
+
+        data_cat = data.drop("class", axis=1)
+        sample = self.sampler.sample(len(data_cat)).transpose()
+        for j in range(sample.shape[0]):
+            plt.hist(sample[j], alpha=0.5, bins=100, color="red")
+            plt.hist(data_cat[self.columns[j]], alpha=0.5, bins=100, color="skyblue")
+            plt.legend()
+            plt.title("Sample " + str(self.columns[j]))
+            plt.show()
+        print(time.time() - t0)
+        # self.sampler = hill_climbing(data=data, bn_type="CLG")
 
     def get_class_labels(self):
         return list(self.class_dist.keys()).copy()
@@ -210,17 +212,10 @@ class MultiBnaf:
         return self.class_dist.copy()
 
     def sample(self, n_samples, ordered=True, seed=None):
-        gen_data = np.empty(shape = len(self.columns))
-        classes = []
-        for i in self.class_dist.keys():
-            gen_data = np.vstack((gen_data,self.sampler[i].resample(int(n_samples * self.class_dist[i] + 1)).transpose()))
-            tmp = [i]*int(n_samples * self.class_dist[i] + 1)
-            classes = classes + tmp
-        gen_data = np.delete(gen_data,0,0)
-        dataframe = pd.DataFrame(data=gen_data, columns=self.columns)
-        dataframe["class"] = pd.Categorical(classes, categories=self.categories)
-        return pa.Table.from_pandas(dataframe.head(n_samples))
-        ##return self.sampler.sample(n_samples, ordered=ordered, seed=seed)
+        samples = self.sampler.sample(n_samples, random_state=seed)
+        samples_df = pd.DataFrame(data=samples, columns=self.columns)
+        samples_df["class"] = self.predict(samples)
+        return pa.Table.from_pandas(samples_df)
 
     def logl(self, data, class_var_name="class"):
         data = data.reset_index(drop=True)
@@ -245,7 +240,7 @@ class MultiBnaf:
             to_ret = to_ret + np.e ** (logl_i + np.log(self.class_dist[i]))
         return to_ret
 
-    def predict(self, data: np.ndarray):
+    def predict_proba(self, data: np.ndarray) -> np.ndarray:
         ll = np.zeros(data.shape[0])
         acc = np.zeros((len(self.class_dist.keys()), data.shape[0]))
         for i, label in enumerate(self.class_dist.keys()):
@@ -254,6 +249,13 @@ class MultiBnaf:
             ll = ll + np.e ** logl_i
             acc[i] = np.e ** logl_i
         return acc.transpose() / ll[:, None]
+
+    def predict(self, data: np.ndarray) -> np.ndarray:
+        # Get posterior probabilities
+        posterior_probs = self.predict_proba(data)
+        # Choose the label with the highest probability
+        predicted_labels = np.argmax(posterior_probs, axis=1)
+        return np.array([self.categories[i] for i in predicted_labels])
 
 
 '''
