@@ -56,7 +56,7 @@ def cross_validate_nf(dataset, fold_indices=None, lr=None, wd=None, bins=None, h
         df_test = dataset.iloc[test_index].reset_index(drop=True)
         t0 = time.time()
         model = NormalizingFlowModel()
-        model.train(df_train, lr=lr, weight_decay=wd, count_bins=bins, hidden_units=hu, hidden_layers=layers,
+        model.train(df_train, lr=lr, weight_decay=wd, count_bins=bins, hidden_units=hu*len(df_train.columns)-1, hidden_layers=layers,
                     n_flows=n_flows)
         it_time = time.time() - t0
         times.append(it_time)
@@ -64,6 +64,8 @@ def cross_validate_nf(dataset, fold_indices=None, lr=None, wd=None, bins=None, h
         predictions = predict_class(df_test.drop("class", axis=1), model)
         brier.append(brier_score(df_test["class"].values, predictions))
         auc_list.append(auc(df_test["class"].values, predictions))
+    print(str( {"lr": lr, "weight_decay": wd, "bins": bins, "hidden_u": hu, "layers": layers,
+                                "n_flows": n_flows}), "normalizing flow learned")
     return np.mean(logl), np.std(logl), np.mean(brier), np.std(brier), np.mean(auc_list), np.std(auc_list), np.mean(
         times), np.std(times), {"lr": lr, "weight_decay": wd, "bins": bins, "hidden_u": hu, "layers": layers,
                                 "n_flows": n_flows}
@@ -71,7 +73,7 @@ def cross_validate_nf(dataset, fold_indices=None, lr=None, wd=None, bins=None, h
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=44130, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=44091, type=int)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -125,28 +127,20 @@ if __name__ == "__main__":
         time_std.append(np.std(times))
         labels.append(network_type)
 
+    print("Bayesian Networks learned")
+
     # Validate normalizing flow with different params
     dataset = df
     d = len(dataset.columns) - 1
-
-    real_hu = []
-    for i in param_grid["hidden_u"]:
-        real_hu.append(i * d)
-
-    param_grid["hidden_u"] = real_hu
 
     # Create a list of all parameter combinations
     param_combinations = list(
         product(param_grid["lr"], param_grid["weight_decay"], param_grid["bins"], param_grid["hidden_u"],
                 param_grid["layers"], param_grid["n_flows"]))
 
-    '''for i in param_combinations:
-        train_and_evaluate(dataset, dataset_test, *i)'''
-
-    # Use multiprocessing to speed up the grid search
-    with mp.Pool(mp.cpu_count()) as pool:
-        results = pool.starmap(cross_validate_nf, [(dataset, fold_indices, lr, wd, bins, hu, layers, n_flows) for
-                                                   lr, wd, bins, hu, layers, n_flows in param_combinations])
+    results = []
+    for i in param_combinations:
+        results.append(cross_validate_nf(dataset, fold_indices, *i))
     nf_logl_means, nf_logl_stds, nf_brier_means, nf_brier_stds, nf_auc_means, nf_auc_stds, nf_time_means, nf_time_stds, params = zip(
         *results)
     for i in range(len(nf_logl_means)):
