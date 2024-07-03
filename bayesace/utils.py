@@ -10,8 +10,9 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from collections import Counter
 
 from bayesace.models.bnaf_joint import BnafJoint
+from bayesace.models.conditional_normalizing_flow import NormalizingFlowModel
 from bayesace.models.multi_bnaf import MultiBnaf, Arguments
-from models.utils import hill_climbing
+from bayesace.models.utils import hill_climbing
 
 
 def identity(x):
@@ -65,7 +66,7 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class") ->
     '''
     if class_var_name in data.columns:
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, MultiBnaf) or isinstance(density_estimator, BnafJoint) :
+    if isinstance(density_estimator, MultiBnaf) or isinstance(density_estimator, NormalizingFlowModel) :
         return density_estimator.likelihood(data, class_var_name=class_var_name)
     class_cpd = density_estimator.cpd(class_var_name)
     class_values = class_cpd.variable_values()
@@ -85,11 +86,11 @@ def log_likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
             "Likelihood of some points in the space is higher than 1. Computing the log likelihood may not make sense.")
     return np.log(l)
 
-
+# Get the probability P(y|x)
 def posterior_probability(x_cfx: pd.DataFrame, y_og: str | list, density_estimator, class_var_name="class"):
     # Obtain the labels accesing either the MultiBNAF model or the cpd of the bn
     class_labels = None
-    if isinstance(density_estimator, MultiBnaf)  or isinstance(density_estimator, BnafJoint) :
+    if isinstance(density_estimator, MultiBnaf) or isinstance(density_estimator, NormalizingFlowModel) :
         class_labels = density_estimator.get_class_labels()
     else:
         class_cpd = density_estimator.cpd(class_var_name)
@@ -100,10 +101,11 @@ def posterior_probability(x_cfx: pd.DataFrame, y_og: str | list, density_estimat
     else:
         assert len(y_og) == len(x_cfx.index)
         cfx[class_var_name] = pd.Categorical(y_og, categories=class_labels)
-    prob = math.e ** density_estimator.logl(cfx)
+    prob = np.e ** density_estimator.logl(cfx)
     ll = likelihood(x_cfx, density_estimator)
     to_ret = np.empty(shape=len(x_cfx.index))
-    to_ret[ll < 0] = np.nan
+    # If the likelihood is 0, then classification is done with uniform probability
+    to_ret[ll <= 0] = 1/len(class_labels)
     to_ret[ll > 0] = prob[ll > 0] / ll[ll > 0]
     # if not (ll > 0).any():
     #    warnings("The instance with features "+str(x_cfx.iloc[0])+" and class " + str(y_og))
@@ -114,13 +116,16 @@ def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class")
     if class_var_name in data.columns:
         Warning("The class variable is already in the dataset. It will be removed for the prediction.")
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, MultiBnaf):
+    if isinstance(density_estimator, MultiBnaf) or isinstance(density_estimator, NormalizingFlowModel):
         return pd.DataFrame(density_estimator.predict_proba(data.values), columns=density_estimator.get_class_labels())
     else:
         class_values = density_estimator.cpd(class_var_name).variable_values()
         to_ret = pd.DataFrame(columns=class_values)
         for i in class_values:
             to_ret[i] = posterior_probability(data, [i] * len(data.index), density_estimator)
+        # Check that the sum of the probabilities is 1
+        sum_pred = to_ret.sum(axis=1)
+        assert((np.less.outer(sum_pred,1+0.001) & np.greater_equal.outer(sum_pred,1-0.001)).all())
         return to_ret
 
 
@@ -170,31 +175,6 @@ def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
     likelihood_path = (-log_likelihood(medium_points, bayesian_network)) ** penalty * separation
     return np.sum(likelihood_path)
 
-
-def get_data(dataset_id: int):
-    # Load the dataset
-    data = oml.datasets.get_dataset(dataset_id, download_data=True, download_qualities=False,
-                                    download_features_meta_data=False).get_data()[0]
-
-    # Shuffle the dataset
-    data = data.sample(frac=1, random_state=0)
-
-    # Reset the index
-    data = data.reset_index(drop=True)
-
-    # Transform the class into a categorical variable
-    data["class"] = data[data.columns[-1]].astype('string').astype('category')
-    data = data.drop(data.columns[-2], axis=1)
-
-    # Scale the rest of the dataset
-    feature_columns = [i for i in data.columns if i != "class"]
-    data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
-
-    '''for i in data.columns[:-1]:
-        data = data[data[i] < data[i].std()*3]
-        data = data[data[i] > -data[i].std()*3]'''
-    return data
-
 def L0_norm(x_1, x_2, eps=0.01):
     return Counter(np.abs(x_1 - x_2) > eps)[True]
 
@@ -207,7 +187,7 @@ def get_probability_plot(density_estimator, class_var_name="class", limit=3, ste
     ])
     resolution = len(np.arange(-limit, limit, step))
     class_labels = None
-    if isinstance(density_estimator, MultiBnaf)  or isinstance(density_estimator, BnafJoint) :
+    if isinstance(density_estimator, MultiBnaf)  or isinstance(density_estimator, NormalizingFlowModel) :
         class_labels = density_estimator.get_class_labels()
     else:
         class_labels = density_estimator.cpd(class_var_name).variable_values()

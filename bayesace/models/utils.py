@@ -3,6 +3,9 @@ import pybnesian as pb
 import pandas as pd
 import multiprocessing as mp
 
+from sklearn.preprocessing import StandardScaler
+import openml as oml
+
 
 class PybnesianParallelizationError(Exception):
     pass
@@ -24,7 +27,31 @@ def copy_structure(bn: pb.BayesianNetwork):
 def check_copy(bn):
     return bn.fitted()
 
-def preprocess_train_data(data: pd.DataFrame | np.ndarray):
+def get_data(dataset_id: int):
+    # Load the dataset
+    data = oml.datasets.get_dataset(dataset_id, download_data=True, download_qualities=False,
+                                    download_features_meta_data=False).get_data()[0]
+
+    # Shuffle the dataset
+    data = data.sample(frac=1, random_state=0)
+
+    # Reset the index
+    data = data.reset_index(drop=True)
+
+    # Transform the class into a categorical variable
+    data["class"] = data[data.columns[-1]].astype('string').astype('category')
+    data = data.drop(data.columns[-2], axis=1)
+
+    # Scale the rest of the dataset
+    feature_columns = [i for i in data.columns if i != "class"]
+    data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
+
+    '''for i in data.columns[:-1]:
+        data = data[data[i] < data[i].std()*3]
+        data = data[data[i] > -data[i].std()*3]'''
+    return data
+
+def preprocess_train_data(data: pd.DataFrame | np.ndarray, jit_coef = 0):
     array_flag = False
     if isinstance(data, np.ndarray):
         # The following code but for an array instead of a dataframe:
@@ -33,7 +60,7 @@ def preprocess_train_data(data: pd.DataFrame | np.ndarray):
     for i in data.columns[:-1]:
         data = data[data[i] < data[i].std() * 3]
         data = data[data[i] > -data[i].std() * 3]
-        data[i] = data[i] + np.random.normal(0, 0.9 / (len(data) ** (1 / 5)), data[i].shape)
+        data[i] = data[i] + np.random.normal(0, jit_coef*0.9 / (len(data) ** (1 / 5)), data[i].shape)
     if array_flag:
         return data.values
     else:
