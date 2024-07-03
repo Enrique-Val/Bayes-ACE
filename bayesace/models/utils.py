@@ -51,15 +51,16 @@ def get_data(dataset_id: int):
         data = data[data[i] > -data[i].std()*3]'''
     return data
 
-def preprocess_train_data(data: pd.DataFrame | np.ndarray, jit_coef = 0):
+def preprocess_train_data(data: pd.DataFrame | np.ndarray, jit_coef = 0, eliminate_outliers = False):
     array_flag = False
     if isinstance(data, np.ndarray):
         # The following code but for an array instead of a dataframe:
         data = pd.DataFrame(data)
         array_flag = True
     for i in data.columns[:-1]:
-        data = data[data[i] < data[i].std() * 3]
-        data = data[data[i] > -data[i].std() * 3]
+        if eliminate_outliers :
+            data = data[data[i] < data[i].std() * 3]
+            data = data[data[i] > -data[i].std() * 3]
         data[i] = data[i] + np.random.normal(0, jit_coef*0.9 / (len(data) ** (1 / 5)), data[i].shape)
     if array_flag:
         return data.values
