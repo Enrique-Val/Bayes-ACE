@@ -75,10 +75,10 @@ class NormalizingFlowModel:
 
         self.dist_base = dist.MultivariateNormal(torch.zeros(self.n_dims), torch.tensor(sigma))
         '''
-        dist_base = dist.MultivariateNormal(torch.zeros(self.n_dims), torch.eye(self.n_dims))
+        dist_base = dist.MultivariateNormal(torch.zeros(self.n_dims).to(self.device), torch.eye(self.n_dims).to(self.device))
         self.dist_x_given_class = dist.ConditionalTransformedDistribution(dist_base, x2_transforms)
 
-        modules = torch.nn.ModuleList(x2_transforms)
+        modules = torch.nn.ModuleList(x2_transforms)#.to(self.device)
 
         optimizer = torch.optim.Adam(modules.parameters(), lr=lr, weight_decay=weight_decay)
         lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', cooldown=10, factor=0.5, patience=20, min_lr=5e-5)
@@ -175,7 +175,7 @@ class NormalizingFlowModel:
         classes = class_sampler.sample((n_samples,))
         # Reshape the class sampling
         classes_res = torch.reshape(classes.float(), (-1, 1)).to(self.device)
-        X = self.dist_x_given_class.condition(classes_res).sample((n_samples,))  # .reshape(-1, self.n_dims).float()
+        X = self.dist_x_given_class.condition(classes_res).sample((n_samples,)).cpu()  # .reshape(-1, self.n_dims).float()
         sample_df = pd.DataFrame(X, columns=self.columns)
         sample_df["class"] = pd.Categorical([list(self.class_dist.keys())[i] for i in classes], categories=self.get_class_labels())
         # return pa.Table.from_pandas(samples_df)
