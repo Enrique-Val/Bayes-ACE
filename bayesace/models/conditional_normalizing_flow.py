@@ -1,36 +1,28 @@
-from itertools import product
-from multiprocessing import Pool, cpu_count
-
 import numpy as np
 import torch
-import pyro
 import pyro.distributions as dist
 import pyro.distributions.transforms as T
 import pandas as pd
-from matplotlib import pyplot as plt
-from sklearn.model_selection import GridSearchCV
-from sklearn.neighbors import KernelDensity
-from sklearn.preprocessing import StandardScaler
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import Dataset, DataLoader
-
-from bayesace.models.utils import preprocess_train_data, hill_climbing,get_data
+from torch.utils.data import Dataset
 
 
 class NormalizingFlowModel:
-    def __init__(self):
+    def __init__(self, gpu_acceleration=False):
         # Dict containing the marginal probability of tha target
         self.class_dist = {}
-        # For our NF, we need to work with a base distribution and the transformed one
-        self.dist_base = None
-        self.dist_x_given_class = None
+        # For our NF, we need to work with a conditional distribution
+        self.dist_x_given_class: dist.ConditionalTransformedDistribution = None
 
         # Auxiliary attributes filled the NF is trained. The columns exclude the class column
         self.columns = None
         self.n_dims = 0
 
+        # Check if CUDA is available
+        self.device = torch.device("cuda" if torch.cuda.is_available() and gpu_acceleration else "cpu")
+
     def train(self, dataset, steps=1000, batch_size=1028, lr=1e-3, weight_decay=1e-4, count_bins=6, hidden_units=150,
-              hidden_layers=1,
+              layers=1,
               n_flows=1):
         self.columns = dataset.columns[:-1]
         self.n_dims = len(self.columns)
@@ -53,14 +45,14 @@ class NormalizingFlowModel:
         # train_dataset = preprocess_train_data(train_dataset)
 
         train_dataset_tensor = torch.utils.data.TensorDataset(
-            torch.from_numpy(train_dataset).float()
+            torch.from_numpy(train_dataset).float().to(self.device)
         )
         train_loader = torch.utils.data.DataLoader(
             train_dataset_tensor, batch_size=batch_size, shuffle=True, num_workers=0
         )
 
         val_dataset_tensor = torch.utils.data.TensorDataset(
-            torch.from_numpy(val_dataset).float()
+            torch.from_numpy(val_dataset).float().to(self.device)
         )
         val_loader = torch.utils.data.DataLoader(
             val_dataset_tensor, batch_size=batch_size, shuffle=False, num_workers=0
@@ -68,10 +60,25 @@ class NormalizingFlowModel:
 
         # Create conditional transformations
         x2_transforms = [T.conditional_spline(input_dim=self.n_dims, context_dim=1, count_bins=count_bins,
-                                            hidden_dims=[hidden_units] * hidden_layers) for _ in range(n_flows)]
+                                            hidden_dims=[hidden_units] * layers).to(self.device) for _ in range(n_flows)]
+        '''
+        # Compute covariance matrix
+        dataset_numpy_no_class = dataset_numpy[:, :-1]
+        mu = dataset_numpy_no_class.mean(dim=0)
+
+        # Compute the covariance matrix (sigma)
+        # First, center the data by subtracting the mean
+        centered_data = dataset_numpy_no_class - mu
+
+        # Compute the covariance matrix
+        sigma = (centered_data.T @ centered_data) / (centered_data.shape[0])
+
+        self.dist_base = dist.MultivariateNormal(torch.zeros(self.n_dims), torch.tensor(sigma))
+        '''
+        dist_base = dist.MultivariateNormal(torch.zeros(self.n_dims), torch.eye(self.n_dims))
+        self.dist_x_given_class = dist.ConditionalTransformedDistribution(dist_base, x2_transforms)
+
         modules = torch.nn.ModuleList(x2_transforms)
-        self.dist_base = dist.MultivariateNormal(torch.zeros(self.n_dims), torch.eye(self.n_dims))
-        self.dist_x_given_class = dist.ConditionalTransformedDistribution(self.dist_base, x2_transforms)
 
         optimizer = torch.optim.Adam(modules.parameters(), lr=lr, weight_decay=weight_decay)
         lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', cooldown=10, factor=0.5, patience=20, min_lr=5e-5)
@@ -83,6 +90,7 @@ class NormalizingFlowModel:
 
         for step in range(steps):
             train_loss = 0.0
+            instances_evaled = 0
             for batch in train_loader:
                 batch = batch[0]
                 class_batch = torch.reshape(batch[:, -1], shape=(-1, 1))
@@ -90,10 +98,14 @@ class NormalizingFlowModel:
                 optimizer.zero_grad()
                 ln_p_x2_given_x1 = self.dist_x_given_class.condition(class_batch).log_prob(x_batch)
                 loss = -ln_p_x2_given_x1.mean()
-                loss.backward()
-                optimizer.step()
-                train_loss += loss.item() * len(x_batch)
-            train_loss /= len(train_loader.dataset)
+                if loss is not None:
+                    loss.backward()
+                    optimizer.step()
+                    instances_evaled += len(x_batch)
+                    train_loss += loss.item() * len(x_batch)
+                else :
+                    print("Loss is none at iteration {} and could not being backpropagated".format(step))
+            train_loss /= instances_evaled
             lr_scheduler.step(train_loss)
 
             if step % 10 == 0 and False:
@@ -162,20 +174,20 @@ class NormalizingFlowModel:
         class_sampler = dist.Categorical(torch.tensor(list(self.class_dist.values())))
         classes = class_sampler.sample((n_samples,))
         # Reshape the class sampling
-        classes_res = torch.reshape(classes.float(), (-1, 1))
+        classes_res = torch.reshape(classes.float(), (-1, 1)).to(self.device)
         X = self.dist_x_given_class.condition(classes_res).sample((n_samples,))  # .reshape(-1, self.n_dims).float()
         sample_df = pd.DataFrame(X, columns=self.columns)
-        sample_df["class"] = [list(self.class_dist.keys())[i] for i in classes]
+        sample_df["class"] = pd.Categorical([list(self.class_dist.keys())[i] for i in classes], categories=self.get_class_labels())
         # return pa.Table.from_pandas(samples_df)
         return sample_df
 
-    def logl_array(self, X: np.ndarray, y: np.ndarray) :
+    def logl_array(self, X: np.ndarray, y: np.ndarray):
         # Cast to tensor
-        y_tensor = torch.reshape(torch.tensor(y).float(), (-1, 1))
-        X_tensor = torch.tensor(X)
+        y_tensor = torch.reshape(torch.tensor(y).float(), (-1, 1)).to(self.device)
+        X_tensor = torch.tensor(X).to(self.device)
 
-        return self.dist_x_given_class.condition(y_tensor).log_prob(X_tensor).detach().numpy() + np.log(
-            np.array([list(self.class_dist.values())[i] for i in y]))
+        return (self.dist_x_given_class.condition(y_tensor).log_prob(X_tensor).cpu().detach().numpy() + np.log(
+            np.array([list(self.class_dist.values())[i] for i in y])))
 
     def logl(self, data: pd.DataFrame, class_var_name="class"):
         class_labels = list(self.class_dist.keys())
