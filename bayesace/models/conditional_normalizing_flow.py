@@ -6,6 +6,7 @@ import pandas as pd
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Dataset
 import pyarrow as pa
+import math
 
 
 
@@ -104,7 +105,8 @@ class NormalizingFlowModel:
                 optimizer.zero_grad()
                 ln_p_x2_given_x1 = self.dist_x_given_class.condition(class_batch).log_prob(x_batch)
                 loss = -ln_p_x2_given_x1.mean()
-                if loss is not None:
+
+                if not math.isnan(loss):
                     loss.backward()
                     optimizer.step()
                     instances_evaled += len(x_batch)
