@@ -19,7 +19,7 @@ MAX_VALUE_FLOAT = 1e+307
 
 
 class BestPathFinder(ElementwiseProblem):
-    def __init__(self, bayesian_network, instance, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
+    def __init__(self, bayesian_network, instance, target_label, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
                  accuracy_threshold=0.05, sampling_range=(-3, 3), **kwargs):
         n_features = (len(instance.columns) - 1)
         xl = None
@@ -37,18 +37,20 @@ class BestPathFinder(ElementwiseProblem):
                          xu=xu, **kwargs)
         self.x_og = instance.drop("class", axis=1).values
         self.y_og = instance["class"].values[0]
+        self.target_label = target_label
+        assert self.y_og != self.target_label
         self.n_vertex = n_vertex
         self.penalty = penalty
         self.features = instance.drop("class", axis=1).columns
         self.n_features = n_features
         self.bayesian_network = bayesian_network
-        assert isinstance(bayesian_network, MultiBnaf) or self.bayesian_network.fitted()
+        assert self.bayesian_network.fitted()
         self.chunks = chunks
         self.likelihood_threshold = likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
 
     def _evaluate(self, x, out, *args, **kwargs):
-        if not isinstance(self.bayesian_network, MultiBnaf) and not self.bayesian_network.fitted():
+        if not isinstance(self.bayesian_network, NormalizingFlowModel) and not self.bayesian_network.fitted():
             raise PybnesianParallelizationError(
                 "As of version 0.4.3, PyBnesian Bayesian networks have internal and stochastic problems with the method \"copy()\"."
                 "As such, some parallelization efforts of the code may fail. We recommend either "
@@ -68,20 +70,19 @@ class BestPathFinder(ElementwiseProblem):
 
         x_cfx = self.x_og.copy()
         x_cfx[:] = x[-self.n_features:]
-        # print(accuracy(self.x_cfx, self.y_og, self.bayesian_network))
-        g1 = posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.y_og,
-                                   self.bayesian_network) - self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
+        g1 = -posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.target_label,
+                                   self.bayesian_network) + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
         g2 = -likelihood(pd.DataFrame(x_cfx, columns=self.features), self.bayesian_network) + self.likelihood_threshold
         out["G"] = np.column_stack([g1, g2])
 
 
 class BayesACE(ACE):
-    def get_initial_sample(self, instance):
+    def get_initial_sample(self, instance, target_label):
         assert self.initialization == "default" or self.initialization == "guided"
         y_og = instance["class"].values[0]
         class_labels = None
         probabilities = None
-        if isinstance(self.bayesian_network, MultiBnaf):
+        if isinstance(self.bayesian_network, NormalizingFlowModel):
             class_labels = self.bayesian_network.get_class_labels()
             probabilities = list(self.bayesian_network.get_class_distribution().values())
 
@@ -91,69 +92,56 @@ class BayesACE(ACE):
             probabilities = self.bayesian_network.cpd("class").probabilities()
         var_probs = {class_labels[i]: probabilities[i] for i in
                      range(len(class_labels))}
-        n_samples = int((self.population_size / (1 - var_probs[y_og])) * 2.5*2)
+
+        # This first bit of code give us the initial sample, where every counterfactual is above the likelihood and probability (TODO) threshold
+        n_samples = int((self.population_size / var_probs[target_label]) * 2.5*2)
         completed = False
         initial_sample = pd.DataFrame(columns=self.features)
-        tmp_seed = self.seed
+        count = 0
         while not completed :
-            candidate_initial = self.bayesian_network.sample(n_samples, ordered=True, seed=tmp_seed).to_pandas()
-            ##print(np.e ** self.bayesian_network.logl(candidate_initial[candidate_initial["class"] == y_og]))
-            candidate_initial = candidate_initial[candidate_initial["class"] != y_og]
-            # Filter by likelihood
+            candidate_initial = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed+count).to_pandas()
+            candidate_initial = candidate_initial[candidate_initial["class"] == target_label]
+
+            # Get likelihood and probability of the class
             ll = likelihood(candidate_initial, self.bayesian_network)
-            #print(np.e**self.bayesian_network.logl(candidate_initial))
-            #print(ll)
-            #print(self.likelihood_threshold)
-            ll = ll > self.likelihood_threshold
-            candidate_initial = candidate_initial[ll].reset_index(drop=True)
+            post_prob = posterior_probability(candidate_initial, target_label, self.bayesian_network)
+
+            mask = (ll > self.likelihood_threshold) & (post_prob > self.accuracy_threshold)
+            candidate_initial = candidate_initial[mask].reset_index(drop=True)
             candidate_initial = candidate_initial.drop("class", axis = 1)
             initial_sample = pd.concat([initial_sample, candidate_initial])
-            tmp_seed += 1
+            count += 1
             if len(initial_sample) > self.population_size:
                 completed = True
+            print(count)
 
         '''initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
         initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
             drop=True)
         initial_sample = initial_sample.drop("class", axis=1)'''
+
         initial_sample = initial_sample.head(self.population_size).reset_index(drop = True)
         initial_sample = initial_sample.clip(self.sampling_range[0], self.sampling_range[1])
         initial_sample = initial_sample.to_numpy()
 
-        new_sample = self.bayesian_network.sample(self.n_vertex * self.population_size, ordered=True,
-                                                  seed=self.seed).to_pandas()
-        new_sample = new_sample.drop("class", axis=1)
-        new_sample = new_sample.clip(self.sampling_range[0], self.sampling_range[1])
-        # new_sample = new_sample[new_sample["class"] != y_og].head(self.population_size).reset_index(drop=True)
-        unif_sample = np.resize(
-            new_sample.to_numpy(),
-            new_shape=(self.population_size, self.n_vertex * self.n_features))
-        initial_sample_1 = np.hstack((unif_sample, initial_sample))
-        if self.initialization == "default":
-            return initial_sample_1
-        else:
-            # TODO This implementation might be flawed
-            initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed + 1).to_pandas()
-            initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
-                drop=True)
-            initial_sample = initial_sample.drop("class", axis=1)
-            initial_sample = initial_sample.clip(self.sampling_range[0], self.sampling_range[1])
-            initial_sample_2 = initial_sample.to_numpy()
-            new_sample = []
-            for i in initial_sample_2:
-                new_sample.append(straight_path(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
-            initial_sample_2 = np.array(new_sample)
-            initial_sample_2 = initial_sample_2[:, self.n_features:]
-            noise = norm(0, 0.2).rvs(size=(initial_sample_2.shape[0], initial_sample_2.shape[1] - self.n_features))
-            noise = np.hstack((noise, np.zeros(shape=(initial_sample_2.shape[0], self.n_features))))
-            assert initial_sample_2.shape == noise.shape
-            initial_sample_2 = initial_sample_2 + noise
-            initial_sample_2[initial_sample_2 <= -3] = -2.99999
-            initial_sample_2[initial_sample_2 >= 3] = 2.99999
-            initial_sample = np.vstack((initial_sample_1, initial_sample_2))
-            # initial_sample = initial_sample_1
-
-            return initial_sample
+        if self.initialization == "default" :
+            paths_sample = self.bayesian_network.sample(self.n_vertex * self.population_size, ordered=True,
+                                                      seed=self.seed).to_pandas()
+            paths_sample = paths_sample.drop("class", axis=1)
+            paths_sample = paths_sample.clip(self.sampling_range[0], self.sampling_range[1])
+            # new_sample = new_sample[new_sample["class"] != y_og].head(self.population_size).reset_index(drop=True)
+            path_sample = np.resize(
+                paths_sample.to_numpy(),
+                new_shape=(self.population_size, self.n_vertex * self.n_features))
+            return np.hstack((path_sample, initial_sample))
+        elif self.initialization == "guided":
+            paths_sample = []
+            for i in initial_sample:
+                paths_sample.append(straight_path(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
+            paths_sample = np.array(paths_sample)
+            paths_sample = paths_sample[:, self.n_features:]
+            # TODO optional, add a bit of noise to the paths
+            return np.hstack((paths_sample, initial_sample))
 
     def __init__(self, bayesian_network, features, chunks, n_vertex, pop_size=100,
                  generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=None,
@@ -172,24 +160,20 @@ class BayesACE(ACE):
             self.sampling_range = sampling_range
         self.initialization = initialization
 
-    def run(self, instance: pd.DataFrame, parallelize=False, return_info=False):
+    def run(self, instance: pd.DataFrame, target_label, parallelize=False, return_info=False):
         termination = DefaultSingleObjectiveTermination(
-            ftol=0.05 * self.n_features ** self.penalty,
+            ftol=0.5 * self.n_features ** self.penalty,
             period=20
         )
-        # termination = ("n_gen",20)
-        initial_sample = self.get_initial_sample(instance)
+        termination = ("n_gen",20)
+        initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)
         # initialize the thread pool and create the runner
         if parallelize:
-            # The sampler cannot be parallelize if using a scipy.stats.gaussian_kde
-            sampler_copy = None
-            if isinstance(self.bayesian_network, MultiBnaf):
-                sampler_copy = self.bayesian_network.sampler
-                self.bayesian_network.sampler = None
             n_processes = mp.cpu_count()
             pool = mp.Pool(n_processes)
             runner = StarmapParallelization(pool.starmap)
-            problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
+            problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance,
+                                     target_label=target_label, n_vertex=self.n_vertex,
                                      penalty=self.penalty, chunks=self.chunks,
                                      likelihood_threshold=self.likelihood_threshold,
                                      accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range,
@@ -202,11 +186,9 @@ class BayesACE(ACE):
                            seed=self.seed,
                            verbose=self.verbose)
             pool.close()
-            # Recover the sampler after paralleliization
-            if isinstance(self.bayesian_network, MultiBnaf) :
-                self.bayesian_network.sampler = sampler_copy
         else:
-            problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
+            problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance,
+                                     target_label=target_label, n_vertex=self.n_vertex,
                                      penalty=self.penalty, chunks=self.chunks,
                                      likelihood_threshold=self.likelihood_threshold,
                                      accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)

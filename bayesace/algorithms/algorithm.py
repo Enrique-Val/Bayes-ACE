@@ -42,5 +42,5 @@ class ACE(ABC):
         self.verbose = verbose
 
     @abstractmethod
-    def run(self, instance: pd.DataFrame | pd.Series) -> ACEResult:
+    def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
         return

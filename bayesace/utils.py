@@ -71,7 +71,7 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class") ->
     class_cpd = density_estimator.cpd(class_var_name)
     class_values = class_cpd.variable_values()
     n_samples = data.shape[0]
-    likelihood_val = 0
+    likelihood_val = 0.0
     for v in class_values:
         data[class_var_name] = pd.Categorical([v] * n_samples, categories=class_values)
         likelihood_val = likelihood_val + math.e ** density_estimator.logl(data)
