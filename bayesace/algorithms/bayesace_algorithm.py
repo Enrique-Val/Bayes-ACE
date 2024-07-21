@@ -1,24 +1,15 @@
-import time
-
-import numpy as np
-import pandas as pd
-import multiprocessing as mp
-from scipy.stats import norm, truncnorm
-
-from pymoo.core.problem import ElementwiseProblem
+from pymoo.core.problem import Problem
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
-from pymoo.core.problem import StarmapParallelization
 from pymoo.termination.default import DefaultSingleObjectiveTermination
 
-from bayesace.models.utils import PybnesianParallelizationError
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 
 MAX_VALUE_FLOAT = 1e+307
 
 
-class BestPathFinder(ElementwiseProblem):
+class BestPathFinder(Problem):
     def __init__(self, bayesian_network, instance, target_label, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
                  accuracy_threshold=0.05, sampling_range=(-3, 3), **kwargs):
         n_features = (len(instance.columns) - 1)
@@ -50,28 +41,21 @@ class BestPathFinder(ElementwiseProblem):
         self.accuracy_threshold = accuracy_threshold
 
     def _evaluate(self, x, out, *args, **kwargs):
-        if not isinstance(self.bayesian_network, ConditionalNF) and not self.bayesian_network.fitted():
-            raise PybnesianParallelizationError(
-                "As of version 0.4.3, PyBnesian Bayesian networks have internal and stochastic problems with the method \"copy()\"."
-                "As such, some parallelization efforts of the code may fail. We recommend either "
-                "a multiple restart approach after it randomly functions or"
-                "completely remove parallelization.")
-        assert len(np.append(self.x_og, x)) == (self.n_vertex + 2) * self.n_features
-        vertex_array = np.resize(np.append(self.x_og, x), new_shape=(self.n_vertex + 2, self.n_features))
-        paths = path(vertex_array, chunks=self.chunks)
-        sum_path = 0
-        for path_i in paths:
-            sum_path += path_likelihood_length(pd.DataFrame(path_i, columns=self.features),
-                                               bayesian_network=self.bayesian_network, penalty=self.penalty)
-        f1 = sum_path
-        if f1 > MAX_VALUE_FLOAT:
-            f1 = MAX_VALUE_FLOAT
-        out["F"] = np.column_stack([f1])
+        assert len(np.append(self.x_og, x[0])) == (self.n_vertex + 2) * self.n_features
+        f1 = []
+        for x_i in x:
+            vertex_array = np.resize(np.append(self.x_og, x_i), new_shape=(self.n_vertex + 2, self.n_features))
+            paths = path(vertex_array, chunks=self.chunks)
+            f1_i = path_likelihood_length(pd.DataFrame(paths, columns=self.features),
+                                        bayesian_network=self.bayesian_network, penalty=self.penalty)
+            if f1_i > MAX_VALUE_FLOAT:
+                f1_i = MAX_VALUE_FLOAT
+            f1.append(f1_i)
+        out["F"] = np.column_stack(f1)
 
-        x_cfx = self.x_og.copy()
-        x_cfx[:] = x[-self.n_features:]
+        x_cfx = pd.DataFrame(x[:,-self.n_features:], columns=self.features)
         g1 = -posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.target_label,
-                                   self.bayesian_network) + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
+                                    self.bayesian_network) + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
         g2 = -likelihood(pd.DataFrame(x_cfx, columns=self.features), self.bayesian_network) + self.likelihood_threshold
         out["G"] = np.column_stack([g1, g2])
 
@@ -93,7 +77,8 @@ class BayesACE(ACE):
         var_probs = {class_labels[i]: probabilities[i] for i in
                      range(len(class_labels))}
 
-        # This first bit of code give us the initial sample, where every counterfactual is above the likelihood and probability (TODO) threshold
+        # This first bit of code give us the initial sample, where every counterfactual is above the likelihood and
+        # probability
         n_samples = int((self.population_size / var_probs[target_label]) * 2.5*2)
         completed = False
         initial_sample = pd.DataFrame(columns=self.features)
@@ -113,16 +98,17 @@ class BayesACE(ACE):
             count += 1
             if len(initial_sample) > self.population_size:
                 completed = True
-            print(count)
-
-        '''initial_sample = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed).to_pandas()
-        initial_sample = initial_sample[initial_sample["class"] != y_og].head(self.population_size).reset_index(
-            drop=True)
-        initial_sample = initial_sample.drop("class", axis=1)'''
+            count += 1
+            if count > 50 and initial_sample.shape[0] < 2:
+                raise Exception("Could not find enough samples to start the optimization process. Please, try again "
+                                "with a lower likelihood or probability threshold.")
 
         initial_sample = initial_sample.head(self.population_size).reset_index(drop = True)
         initial_sample = initial_sample.clip(self.sampling_range[0], self.sampling_range[1])
         initial_sample = initial_sample.to_numpy()
+
+        if self.n_vertex == 0:
+            return initial_sample
 
         if self.initialization == "default" :
             paths_sample = self.bayesian_network.sample(self.n_vertex * self.population_size, ordered=True,
@@ -137,7 +123,7 @@ class BayesACE(ACE):
         elif self.initialization == "guided":
             paths_sample = []
             for i in initial_sample:
-                paths_sample.append(straight_path(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
+                paths_sample.append(np.linspace(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
             paths_sample = np.array(paths_sample)
             paths_sample = paths_sample[:, self.n_features:]
             # TODO optional, add a bit of noise to the paths
@@ -160,48 +146,29 @@ class BayesACE(ACE):
             self.sampling_range = sampling_range
         self.initialization = initialization
 
-    def run(self, instance: pd.DataFrame, target_label, parallelize=False, return_info=False):
+    def run(self, instance: pd.DataFrame, target_label, return_info=False):
         termination = DefaultSingleObjectiveTermination(
             ftol=0.5 * self.n_features ** self.penalty,
             period=20
         )
         termination = ("n_gen",20)
         initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)
-        # initialize the thread pool and create the runner
-        if parallelize:
-            n_processes = mp.cpu_count()
-            pool = mp.Pool(n_processes)
-            runner = StarmapParallelization(pool.starmap)
-            problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance,
-                                     target_label=target_label, n_vertex=self.n_vertex,
-                                     penalty=self.penalty, chunks=self.chunks,
-                                     likelihood_threshold=self.likelihood_threshold,
-                                     accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range,
-                                     elementwise_runner=runner)
-            algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
 
-            res = minimize(problem,
-                           algorithm,
-                           termination=termination,
-                           seed=self.seed,
-                           verbose=self.verbose)
-            pool.close()
-        else:
-            problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance,
-                                     target_label=target_label, n_vertex=self.n_vertex,
-                                     penalty=self.penalty, chunks=self.chunks,
-                                     likelihood_threshold=self.likelihood_threshold,
-                                     accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)
-            algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
+        problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance,
+                                 target_label=target_label, n_vertex=self.n_vertex,
+                                 penalty=self.penalty, chunks=self.chunks,
+                                 likelihood_threshold=self.likelihood_threshold,
+                                 accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)
+        algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
 
-            res = minimize(problem,
-                           algorithm,
-                           termination=termination,  # ('n_gen', self.generations),
-                           seed=self.seed,
-                           verbose=self.verbose)
+        res = minimize(problem,
+                       algorithm,
+                       termination=termination,  # ('n_gen', self.generations),
+                       seed=self.seed,
+                       verbose=self.verbose)
         if res.X is None or res.F > MAX_VALUE_FLOAT:
             if return_info:
-                return (ACEResult(None, instance.drop("class", axis=1), np.inf), res)
+                return ACEResult(None, instance.drop("class", axis=1), np.inf), res
             return ACEResult(None, instance.drop("class", axis=1), np.inf)
 
         total_path = np.resize(np.append(separate_dataset_and_class(instance)[0].values[0], res.X),
@@ -210,10 +177,8 @@ class BayesACE(ACE):
                                    columns=self.features)
         counterfactual = path_to_ret.iloc[-1]
         path_to_compute = path(total_path, chunks=self.chunks)
-        distance = 0
-        for path_i in path_to_compute:
-            distance += path_likelihood_length(pd.DataFrame(path_i, columns=self.features),
-                                               bayesian_network=self.bayesian_network, penalty=self.penalty)
+        distance = path_likelihood_length(pd.DataFrame(path_to_compute, columns=self.features),
+                                            bayesian_network=self.bayesian_network, penalty=self.penalty)
         if return_info:
-            return (ACEResult(counterfactual, path_to_ret, distance), res)
+            return ACEResult(counterfactual, path_to_ret, distance), res
         return ACEResult(counterfactual, path_to_ret, distance)

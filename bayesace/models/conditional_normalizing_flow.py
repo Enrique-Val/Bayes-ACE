@@ -17,10 +17,9 @@ class ConditionalNF(ABC):
 
         # Check if CUDA is available
         self.device = torch.device("cuda" if torch.cuda.is_available() and gpu_acceleration else "cpu")
-        self.fitted = False
+        self.trained = False
 
     def train(self, dataset):
-        dataset = dataset.copy()
         self.columns = dataset.columns[:-1]
         self.n_dims = len(self.columns)
 
@@ -29,6 +28,7 @@ class ConditionalNF(ABC):
         self.class_dist = {label: len(dataset[dataset["class"] == label]) / len(dataset) for label in class_labels}
 
     def get_loaders(self, dataset, batch_size):
+        dataset = dataset.copy()
         # Transform dataset to numpy and cast class from string to numerical
         class_column = np.zeros(len(dataset))
         for i, label in enumerate(self.class_dist.keys()):
@@ -63,7 +63,7 @@ class ConditionalNF(ABC):
         return self.class_dist.copy()
 
     def fitted(self):
-        return self.fitted
+        return self.trained
 
     def sample(self, n_samples, ordered=True, seed=None):
         pass

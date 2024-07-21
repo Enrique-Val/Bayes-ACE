@@ -103,7 +103,7 @@ class ConditionalSpline(ConditionalNF):
                     for param in transform.parameters():
                         param.data = best_model_params[current_param]
                         current_param += 1
-        self.fitted = True
+        self.trained = True
 
         '''n_samples = 2340
         y_sample = torch.reshape(torch.from_numpy(dataset_numpy[:n_samples, -1]).float(), (-1, 1))

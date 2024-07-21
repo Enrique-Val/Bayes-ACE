@@ -119,7 +119,7 @@ class ConditionalNVP(ConditionalNF):
                                                              use_cuda=False)
 
         # Build SVI object
-        optimizer = pyro.optim.Adam({"lr": lr, "weight_decay": weight_decay, })
+        optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, })
         svi = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer, Trace_ELBO(num_particles=1))
 
         best_val_loss = float('inf')
@@ -184,7 +184,7 @@ class ConditionalNVP(ConditionalNF):
             plt.plot(val_losses, label='Validation Loss')
             plt.legend()
             plt.show()
-        self.fitted = True
+        self.trained = True
 
     def get_class_labels(self):
         return list(self.class_dist.keys()).copy()

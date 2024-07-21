@@ -80,7 +80,6 @@ def preprocess_train_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate
 
 def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, seed=0):
     bn = None
-    data = preprocess_train_data(data)
     if bn_type == "CLG":
         if score is None:
             score = "bic"

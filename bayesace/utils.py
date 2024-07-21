@@ -153,19 +153,17 @@ def auc(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
         y_pred = y_pred[class_labels]
         return roc_auc_score(y_true_coded, y_pred.values)
 
-
-def straight_path(x_1: np.ndarray, x_2: np.ndarray, chunks=2):
+def path(vertex_array: np.ndarray, chunks=2) -> np.ndarray:
     assert chunks > 1
-    return np.linspace(x_1, x_2, chunks)
-
-
-def path(vertex_array: np.ndarray, chunks=2):
-    straight_path_list = list()
-    for i in range(vertex_array.shape[0] - 1):
-        x_1 = vertex_array[i]
-        x_2 = vertex_array[i + 1]
-        straight_path_list.append(straight_path(x_1, x_2, chunks))
-    return straight_path_list
+    assert vertex_array.shape[0] > 1
+    if vertex_array.shape[0] == 2 :
+        return np.linspace(vertex_array[0], vertex_array[1], chunks)
+    to_ret_path = np.linspace(vertex_array[0], vertex_array[1], chunks)
+    for i in range(vertex_array.shape[0] - 2):
+        x_1 = vertex_array[i + 1]
+        x_2 = vertex_array[i + 2]
+        to_ret_path = np.vstack((to_ret_path, np.linspace(x_1, x_2, chunks)[1:]))
+    return to_ret_path
 
 
 def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
