@@ -9,7 +9,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from collections import Counter
 
-from bayesace.models.conditional_normalizing_flow import NormalizingFlowModel
+from bayesace.models.conditional_normalizing_flow import ConditionalNF
 from bayesace.models.utils import hill_climbing
 import time
 
@@ -65,7 +65,7 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class") ->
     '''
     if class_var_name in data.columns:
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, NormalizingFlowModel) :
+    if isinstance(density_estimator, ConditionalNF) :
         return density_estimator.likelihood(data, class_var_name=class_var_name)
     class_cpd = density_estimator.cpd(class_var_name)
     class_values = class_cpd.variable_values()
@@ -89,7 +89,7 @@ def log_likelihood(x_cfx: pd.DataFrame, bn) -> np.ndarray:
 def posterior_probability(x_cfx: pd.DataFrame, y_og: str | list, density_estimator, class_var_name="class"):
     # Obtain the labels accesing either the MultiBNAF model or the cpd of the bn
     class_labels = None
-    if isinstance(density_estimator, NormalizingFlowModel) :
+    if isinstance(density_estimator, ConditionalNF) :
         class_labels = density_estimator.get_class_labels()
     else:
         class_cpd = density_estimator.cpd(class_var_name)
@@ -115,7 +115,7 @@ def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class")
     if class_var_name in data.columns:
         Warning("The class variable is already in the dataset. It will be removed for the prediction.")
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, NormalizingFlowModel):
+    if isinstance(density_estimator, ConditionalNF):
         return pd.DataFrame(density_estimator.predict_proba(data.values), columns=density_estimator.get_class_labels())
     else:
         class_values = density_estimator.cpd(class_var_name).variable_values()
@@ -186,7 +186,7 @@ def get_probability_plot(density_estimator, class_var_name="class", limit=3, ste
     ])
     resolution = len(np.arange(-limit, limit, step))
     class_labels = None
-    if isinstance(density_estimator, NormalizingFlowModel) :
+    if isinstance(density_estimator, ConditionalNF) :
         class_labels = density_estimator.get_class_labels()
     else:
         class_labels = density_estimator.cpd(class_var_name).variable_values()

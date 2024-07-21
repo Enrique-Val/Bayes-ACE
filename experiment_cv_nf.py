@@ -9,9 +9,12 @@ from skopt.plots import plot_convergence, plot_evaluations
 from skopt.space import Real, Integer
 from skopt.utils import use_named_args
 
+from bayesace.models.conditional_nvp import ConditionalNVP
+from bayesace.models.conditional_spline import ConditionalSpline
 from bayesace.models.utils import get_data, preprocess_train_data
 
 import pickle
+import dill
 
 sys.path.append(os.getcwd())
 import argparse
@@ -19,7 +22,6 @@ import argparse
 from bayesace.utils import *
 
 import time
-
 
 def kfold_indices(data, k):
     fold_size = len(data) // k
@@ -33,12 +35,13 @@ def kfold_indices(data, k):
 
 
 # Define the number of folds (K)
-k = 5
+k = 10
 steps = 1000
+batch_size = 1028
 
 # Define how the preprocessing will be done
 JIT_COEF = 0.2
-ELIM_OUTL = False
+ELIM_OUTL = True
 
 # Define a time limit (in hours) for execution
 TIME_LIMIT = np.inf
@@ -65,45 +68,54 @@ param_space = [
 ]
 
 
-def cross_validate_nf(dataset, fold_indices=None, lr=None, weight_decay=None, count_bins=None, hidden_units=None,
-                      layers=None,
+def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=1028, lr=None, weight_decay=None, count_bins=None, hidden_units=None,
+                      layers=None, split_dim=None,
                       n_flows=None):
     logl = []
     brier = []
     auc_list = []
     times = []
+    param_dict = None
+    if model_type == "NVP":
+        param_dict = {"lr": lr, "weight_decay": weight_decay, "split_dim": split_dim, "hidden_u": hidden_units, "layers": layers, "n_flows": n_flows}
+    elif model_type == "Spline":
+        param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units, "layers": layers}
     for train_index, test_index in fold_indices:
         df_train = dataset.iloc[train_index].reset_index(drop=True)
         # df_train = preprocess_train_data(df_train, jit_coef=JIT_COEF, eliminate_outliers=ELIM_OUTL)
         df_test = dataset.iloc[test_index].reset_index(drop=True)
         t0 = time.time()
-        model = NormalizingFlowModel()
-        model.train(df_train, lr=lr, weight_decay=weight_decay, count_bins=count_bins,
-                    hidden_units=hidden_units * (len(df_train.columns) - 1), layers=layers,
-                    n_flows=n_flows, steps=steps)
-        pickle.dump(model, open("model.pkl", "wb"))
+        model = None
+        if model_type == "NVP":
+            model = ConditionalNVP(graphics=False)
+            model.train(df_train, lr=lr, weight_decay=weight_decay, split_dim=split_dim,
+                        hidden_units=hidden_units * (len(df_train.columns) - 1), layers=layers,
+                        n_flows=n_flows, steps=steps, batch_size=batch_size)
+        elif model_type == "Spline":
+            model = ConditionalSpline()
+            model.train(df_train, lr=lr, weight_decay=weight_decay, count_bins=count_bins,
+                        hidden_units=hidden_units * (len(df_train.columns) - 1), layers=layers,
+                        steps=steps, batch_size=batch_size)
+        dill.dump(model, open("nf_" + str(dataset_id) + ".pkl", "wb"))
         it_time = time.time() - t0
         times.append(it_time)
         logl.append(model.logl(df_test).mean())
         predictions = predict_class(df_test.drop("class", axis=1), model)
         brier.append(brier_score(df_test["class"].values, predictions))
         auc_list.append(auc(df_test["class"].values, predictions))
-    print(str({"lr": lr, "weight_decay": weight_decay, "bins": count_bins, "hidden_u": hidden_units, "layers": layers,
-               "n_flows": n_flows}), "normalizing flow learned")
+    print(str(param_dict), "normalizing flow learned")
     print(str({"Logl": np.mean(logl), "Brier": np.mean(brier), "AUC": np.mean(auc_list), "Time": np.mean(times)}))
     print()
     return np.mean(logl), np.std(logl), np.mean(brier), np.std(brier), np.mean(auc_list), np.std(auc_list), np.mean(
-        times), np.std(times), {"lr": lr, "weight_decay": weight_decay, "bins": count_bins, "hidden_u": hidden_units,
-                                "layers": layers,
-                                "n_flows": n_flows}
+        times), np.std(times), param_dict
 
 
-def get_best_normalizing_flow(dataset, fold_indices):
+def get_best_normalizing_flow(dataset, fold_indices, model_type = "NVP"):
     # Bayesian optimization
     # Define the objective function
     @use_named_args(param_space)
     def objective(**params):
-        result = cross_validate_nf(dataset, fold_indices, **params)
+        result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size, **params)
         nf_logl_means = result[0]
         return -nf_logl_means  # Assuming we want to maximize loglikelihood
 
@@ -117,10 +129,14 @@ def get_best_normalizing_flow(dataset, fold_indices):
     print("Best parameters: ", best_params)
     print("Gt params:", gt_params)
 
-    metrics = cross_validate_nf(dataset, fold_indices, **gt_params)
+    metrics = cross_validate_nf(dataset, fold_indices, batch_size=batch_size, **gt_params)
 
     # Train once again to return the object
-    model = NormalizingFlowModel()
+    model = None
+    if model_type == "NVP":
+        model = ConditionalNVP()
+    elif model_type == "Splines":
+        model = ConditionalSpline()
     params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
     params["hidden_units"] = d * gt_params["hidden_units"]
     model.train(dataset, **gt_params, steps=steps)
@@ -133,8 +149,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
     parser.add_argument('--no_graphics', action=argparse.BooleanOptionalAction)
+    parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
     parser.add_argument('--search', choices=['grid', 'bayesian'], default='bayesian')
-    parser.add_argument('--n_iter', nargs='?', default=10, type=int)
+    parser.add_argument('--n_iter', nargs='?', default=100, type=int)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -148,7 +165,11 @@ if __name__ == "__main__":
 
     # Load the dataset
     dataset = get_data(dataset_id)
+
     d = len(dataset.columns) - 1
+
+    if args.type == "NVP" :
+        param_space[2] = Integer(0, int(d/2), name='split_dim')
 
     # Preprocess the dataset
     dataset = preprocess_train_data(dataset, jit_coef=JIT_COEF, eliminate_outliers=ELIM_OUTL)
@@ -166,11 +187,11 @@ if __name__ == "__main__":
         index=cartesian_product+["params"])
 
     # First, learn a normalizing now and sample new synthetic data
-    gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices)
+    gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices, model_type=args.type)
     results_df["GT_RD"] = metrics
 
-    pickle.dump(gt_model, open("gt_nf_" + str(dataset_id) + ".pkl", "wb"))
-    resampled_dataset = gt_model.sample(len(dataset))
+    dill.dump(gt_model, open("gt_nf_" + str(dataset_id) + ".pkl", "wb"))
+    resampled_dataset = gt_model.sample(len(dataset)).to_pandas()
 
     # Check the metrics of the model given the resampled data
     resampled_dataset_metrics =np.zeros(len(results_df)-1)
@@ -235,10 +256,10 @@ if __name__ == "__main__":
             results_df["NF" + str(nf_params)] = metrics[:-1]
 
     else:
-        nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices)
+        nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type)
         results_df["NF"] = metrics
 
-        pickle.dump(nf_model, open("nf_" + str(dataset_id) + ".pkl", "wb"))
+        dill.dump(nf_model, open("nf_" + str(dataset_id) + ".pkl", "wb"))
 
         if GRAPHIC:
             # Visualize the convergence of the objective function
@@ -251,4 +272,4 @@ if __name__ == "__main__":
 
         # Train neural net using the best parameters to get metrics
     print(results_df.drop("params"))
-    results_df.to_csv('./results/exp_cv_2/data' + str(dataset_id) + '.csv')
+    results_df.to_csv('./results/exp_cv_2/data' + str(dataset_id) + '_bis.csv')

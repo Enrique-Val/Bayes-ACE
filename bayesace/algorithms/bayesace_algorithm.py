@@ -50,7 +50,7 @@ class BestPathFinder(ElementwiseProblem):
         self.accuracy_threshold = accuracy_threshold
 
     def _evaluate(self, x, out, *args, **kwargs):
-        if not isinstance(self.bayesian_network, NormalizingFlowModel) and not self.bayesian_network.fitted():
+        if not isinstance(self.bayesian_network, ConditionalNF) and not self.bayesian_network.fitted():
             raise PybnesianParallelizationError(
                 "As of version 0.4.3, PyBnesian Bayesian networks have internal and stochastic problems with the method \"copy()\"."
                 "As such, some parallelization efforts of the code may fail. We recommend either "
@@ -82,7 +82,7 @@ class BayesACE(ACE):
         y_og = instance["class"].values[0]
         class_labels = None
         probabilities = None
-        if isinstance(self.bayesian_network, NormalizingFlowModel):
+        if isinstance(self.bayesian_network, ConditionalNF):
             class_labels = self.bayesian_network.get_class_labels()
             probabilities = list(self.bayesian_network.get_class_distribution().values())
 

@@ -1,0 +1,144 @@
+import numpy as np
+import torch
+import pyro.distributions as dist
+import pyro.distributions.transforms as T
+import pandas as pd
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import Dataset
+import pyarrow as pa
+import math
+
+from bayesace.models.conditional_normalizing_flow import ConditionalNF
+
+
+class ConditionalSpline(ConditionalNF):
+    def __init__(self, gpu_acceleration=False):
+        # Call the parent constructor
+        super().__init__(gpu_acceleration)
+
+        # For our NF, we need to work with a conditional distribution
+        self.dist_x_given_class: dist.ConditionalTransformedDistribution = None
+
+    def train(self, dataset, batch_size=1028, steps=1000, lr=1e-3, weight_decay=1e-4, count_bins=6, hidden_units=150,
+              layers=1,
+              n_flows=1):
+        super().train(dataset)
+        train_loader, val_loader = self.get_loaders(dataset, batch_size)
+
+        # Create conditional transformations
+        x2_transforms = [T.conditional_spline(input_dim=self.n_dims, context_dim=1, count_bins=count_bins,
+                                              hidden_dims=[hidden_units] * layers).to(self.device) for _ in
+                         range(n_flows)]
+
+        dist_base = dist.MultivariateNormal(torch.zeros(self.n_dims).to(self.device),
+                                            torch.eye(self.n_dims).to(self.device))
+        self.dist_x_given_class = dist.ConditionalTransformedDistribution(dist_base, x2_transforms)
+
+        modules = torch.nn.ModuleList(x2_transforms)  #.to(self.device)
+
+        optimizer = torch.optim.Adam(modules.parameters(), lr=lr, weight_decay=weight_decay)
+        lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', cooldown=10, factor=0.5, patience=20, min_lr=5e-5)
+
+        best_val_loss = float('inf')
+        epochs_since_improvement = 0
+        best_model_params = None
+        patience_epochs = 50
+
+        for step in range(steps):
+            train_loss = 0.0
+            instances_evaled = 0
+            for batch in train_loader:
+                batch = batch[0]
+                class_batch = torch.reshape(batch[:, -1], shape=(-1, 1))
+                x_batch = batch[:, :-1]
+                optimizer.zero_grad()
+                ln_p_x2_given_x1 = self.dist_x_given_class.condition(class_batch).log_prob(x_batch)
+                loss = -ln_p_x2_given_x1.mean()
+
+                if not math.isnan(loss):
+                    loss.backward()
+                    optimizer.step()
+                    instances_evaled += len(x_batch)
+                    train_loss += loss.item() * len(x_batch)
+                else:
+                    print("Loss is none at iteration {} and could not being backpropagated".format(step))
+            train_loss /= instances_evaled
+            lr_scheduler.step(train_loss)
+
+            if step % 10 == 0 and False:
+                print('step: {}, train_loss: {}'.format(step, train_loss))
+
+            # Evaluate on validation set
+            val_loss = 0.0
+            with torch.no_grad():
+                for val_batch in val_loader:
+                    val_batch = val_batch[0]
+                    class_val_batch = torch.reshape(val_batch[:, -1], shape=(-1, 1))
+                    x_val_batch = val_batch[:, :-1]
+                    optimizer.zero_grad()
+                    ln_p_x2_given_x1_val = self.dist_x_given_class.condition(class_val_batch).log_prob(x_val_batch)
+                    val_loss += -ln_p_x2_given_x1_val.mean().item() * len(x_val_batch)
+                val_loss /= len(val_loader.dataset)
+                if step % 10 == 0 and False:
+                    print('Validation loss: {}'.format(val_loss))
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    epochs_since_improvement = 0
+                    best_model_params = self.dist_x_given_class.base_dist.base_dist.mean.detach().clone(), self.dist_x_given_class.base_dist.base_dist.stddev.detach().clone()
+                    for transform in self.dist_x_given_class.transforms:
+                        best_model_params += tuple(param.detach().clone() for param in transform.parameters())
+                    # print("Updated!")
+                else:
+                    epochs_since_improvement += 1
+                    if epochs_since_improvement >= patience_epochs:
+                        # print("Validation loss hasn't improved for {} epochs. Early stopping...".format(patience_epochs))
+                        break
+            # Restore best model parameters
+            if best_model_params:
+                self.dist_x_given_class.base_dist.base_dist.loc = best_model_params[0]
+                self.dist_x_given_class.base_dist.base_dist.scale = best_model_params[1]
+                current_param = 2
+                for transform in self.dist_x_given_class.transforms:
+                    for param in transform.parameters():
+                        param.data = best_model_params[current_param]
+                        current_param += 1
+        self.fitted = True
+
+        '''n_samples = 2340
+        y_sample = torch.reshape(torch.from_numpy(dataset_numpy[:n_samples, -1]).float(), (-1, 1))
+        # y_sample = torch.from_numpy(dataset_numpy[:, -1]).float()
+        # print(y_sample)
+        # print(x_sample)
+        new_sample = self.dist_x_given_class.condition(y_sample).sample((n_samples,)).reshape(-1, n_dims).float()
+
+        for j, att in enumerate(dataset.columns[:-1]):
+            plt.hist(dataset[att], bins=200, alpha=0.5, color="red", density=True)
+            plt.hist(new_sample[:, j], bins=200, alpha=0.5, color="skyblue", density=True)
+            plt.title(str(att))
+            plt.show()
+        plt.scatter(dataset[dataset.columns[0]],dataset[dataset.columns[1]], c="red", alpha=0.5)
+        plt.scatter(new_sample[:,0],new_sample[:,1])
+        plt.show()'''
+
+    def sample(self, n_samples, ordered=True, seed=None):
+        class_sampler = dist.Categorical(torch.tensor(list(self.class_dist.values())))
+        classes = class_sampler.sample((n_samples,))
+        # Reshape the class sampling
+        classes_res = torch.reshape(classes.float(), (-1, 1)).to(self.device)
+        X = self.dist_x_given_class.condition(classes_res).sample(
+            (n_samples,)).cpu()  # .reshape(-1, self.n_dims).float()
+        sample_df = pd.DataFrame(X, columns=self.columns)
+        sample_df["class"] = pd.Categorical([list(self.class_dist.keys())[i] for i in classes],
+                                            categories=self.get_class_labels())
+        return pa.Table.from_pandas(sample_df)
+        return sample_df
+
+    def logl_array(self, X: np.ndarray, y: np.ndarray):
+        # Cast to tensor
+        y_tensor = torch.reshape(torch.tensor(y).float(), (-1, 1)).to(self.device)
+        X_tensor = torch.tensor(X).to(self.device)
+
+        return (self.dist_x_given_class.condition(y_tensor).log_prob(X_tensor).cpu().detach().numpy() + np.log(
+            np.array([list(self.class_dist.values())[i] for i in y])))
+
