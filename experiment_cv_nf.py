@@ -59,11 +59,11 @@ param_grid = {
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
     Real(1e-4, 1e-2, name='lr', prior='log-uniform'),
-    Real(0, 1e-3, name='weight_decay'),
+    Real(0, 1e-2, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
     Integer(2, 10, name='hidden_units'),
-    Integer(1, 2, name='layers'),
-    Integer(1, 5, name='n_flows')
+    Integer(1, 5, name='layers'),
+    Integer(1, 10, name='n_flows')
 ]
 
 def cross_validate_bn(dataset, fold_indices=None):
@@ -201,7 +201,7 @@ if __name__ == "__main__":
 
     # Load the dataset and preprocess it
     dataset = get_data(dataset_id, standardize=False)
-    dataset = preprocess_data(dataset, jit_coef=JIT_COEF, eliminate_outliers=ELIM_OUTL)
+    dataset = preprocess_data(dataset, jit_coef=JIT_COEF, eliminate_outliers=ELIM_OUTL, min_unique_vals=50)
     d = len(dataset.columns) - 1
 
     if args.type == "NVP" :

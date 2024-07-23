@@ -40,6 +40,10 @@ def get_data(dataset_id: int, standardize=True):
         data = oml.datasets.get_dataset(dataset_id, download_data=True, download_qualities=False,
                                         download_features_meta_data=False).get_data()[0]
 
+    # Print warning if there are missing values
+    if data.isnull().values.any():
+        Warning("There are missing values in the dataset. They will be removed.")
+
     # Shuffle the dataset
     data = data.sample(frac=1, random_state=0)
 
@@ -58,12 +62,19 @@ def get_data(dataset_id: int, standardize=True):
     return data
 
 
-def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True):
+def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True, min_unique_vals=50):
     array_flag = False
     if isinstance(data, np.ndarray):
         # The following code but for an array instead of a dataframe:
         data = pd.DataFrame(data)
         array_flag = True
+    # Separate the target column (last column) from the features
+    target_column = data.columns[-1]
+    features = data.columns[:-1]
+
+    feature_data = data[features]
+    feature_data = feature_data.loc[:, feature_data.nunique() >= min_unique_vals]
+    data = pd.concat([feature_data, data[target_column]], axis=1)
     for i in data.columns[:-1]:
         if eliminate_outliers:
             data = data[data[i] < (data[i].mean()+data[i].std() * 3)]
@@ -71,6 +82,9 @@ def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outli
         data[i] = data[i] + np.random.normal(0, jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
     if standardize:
         data[data.columns[:-1]] = StandardScaler().fit_transform(data[data.columns[:-1]].values)
+    # Assert that there are no missing values
+    if data.isnull().values.any():
+        raise ValueError("There are missing values in the post-processed dataset.")
     if array_flag:
         return data.values
     else:
