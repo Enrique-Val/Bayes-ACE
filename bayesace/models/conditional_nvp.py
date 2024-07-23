@@ -212,3 +212,19 @@ class ConditionalNVP(ConditionalNF):
         return (self.dist_x_given_class.log_prob(X_tensor, y_tensor).cpu().detach().numpy() + np.log(
             np.array([list(self.class_dist.values())[i] for i in y])))
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Save the module's state_dict separately
+        state['module_state_dict'] = self.dist_x_given_class.state_dict()
+        # Remove the actual module from the state
+        del state['dist_x_given_class']
+        return state
+
+    def __setstate__(self, state):
+        # Restore the module
+        self.dist_x_given_class = ConditionalNormalizingFlow()  # Replace with the actual class of your module
+        self.dist_x_given_class.load_state_dict(state['module_state_dict'])
+        # Restore the other attributes
+        del state['module_state_dict']
+        self.__dict__.update(state)
+
