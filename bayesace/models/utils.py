@@ -29,7 +29,7 @@ def check_copy(bn):
     return bn.fitted()
 
 
-def get_data(dataset_id: int):
+def get_data(dataset_id: int, standardize=True):
     if dataset_id < 0:
         # Load a toy dataset
         data = pd.read_csv("toy-3class.csv")
@@ -51,17 +51,14 @@ def get_data(dataset_id: int):
     data = data.drop(data.columns[-1], axis=1)
     data["class"] = class_processed
 
-    # Scale the rest of the dataset
-    feature_columns = [i for i in data.columns if i != "class"]
-    data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
-
-    '''for i in data.columns[:-1]:
-        data = data[data[i] < data[i].std()*3]
-        data = data[data[i] > -data[i].std()*3]'''
+    if standardize:
+        # Scale the rest of the dataset
+        feature_columns = [i for i in data.columns if i != "class"]
+        data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
     return data
 
 
-def preprocess_train_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False):
+def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True):
     array_flag = False
     if isinstance(data, np.ndarray):
         # The following code but for an array instead of a dataframe:
@@ -69,9 +66,11 @@ def preprocess_train_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate
         array_flag = True
     for i in data.columns[:-1]:
         if eliminate_outliers:
-            data = data[data[i] < data[i].std() * 3]
-            data = data[data[i] > -data[i].std() * 3]
-        data[i] = data[i] + np.random.normal(0, jit_coef * 0.9 / (len(data) ** (1 / 5)), data[i].shape)
+            data = data[data[i] < (data[i].mean()+data[i].std() * 3)]
+            data = data[data[i] > (data[i].mean()-data[i].std() * 3)]
+        data[i] = data[i] + np.random.normal(0, jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
+    if standardize:
+        data[data.columns[:-1]] = StandardScaler().fit_transform(data[data.columns[:-1]].values)
     if array_flag:
         return data.values
     else:

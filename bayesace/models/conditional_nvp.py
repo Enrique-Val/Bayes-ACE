@@ -119,7 +119,7 @@ class ConditionalNVP(ConditionalNF):
                                                              use_cuda=False)
 
         # Build SVI object
-        optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, })
+        optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, "clip_norm": 5.0})
         svi = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer, Trace_ELBO(num_particles=1))
 
         best_val_loss = float('inf')
