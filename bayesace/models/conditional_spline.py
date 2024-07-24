@@ -105,27 +105,11 @@ class ConditionalSpline(ConditionalNF):
                         current_param += 1
         self.trained = True
 
-        '''n_samples = 2340
-        y_sample = torch.reshape(torch.from_numpy(dataset_numpy[:n_samples, -1]).float(), (-1, 1))
-        # y_sample = torch.from_numpy(dataset_numpy[:, -1]).float()
-        # print(y_sample)
-        # print(x_sample)
-        new_sample = self.dist_x_given_class.condition(y_sample).sample((n_samples,)).reshape(-1, n_dims).float()
-
-        for j, att in enumerate(dataset.columns[:-1]):
-            plt.hist(dataset[att], bins=200, alpha=0.5, color="red", density=True)
-            plt.hist(new_sample[:, j], bins=200, alpha=0.5, color="skyblue", density=True)
-            plt.title(str(att))
-            plt.show()
-        plt.scatter(dataset[dataset.columns[0]],dataset[dataset.columns[1]], c="red", alpha=0.5)
-        plt.scatter(new_sample[:,0],new_sample[:,1])
-        plt.show()'''
-
     def sample(self, n_samples, ordered=True, seed=None):
         class_sampler = dist.Categorical(torch.tensor(list(self.class_dist.values())))
         classes = class_sampler.sample((n_samples,))
         # Reshape the class sampling
-        classes_res = torch.reshape(classes.float(), (-1, 1)).to(self.device)
+        classes_res = torch.reshape(classes, (-1, 1)).to(self.device, dtype=torch.get_default_dtype())
         X = self.dist_x_given_class.condition(classes_res).sample(
             (n_samples,)).cpu()  # .reshape(-1, self.n_dims).float()
         sample_df = pd.DataFrame(X, columns=self.columns)
@@ -136,8 +120,8 @@ class ConditionalSpline(ConditionalNF):
 
     def logl_array(self, X: np.ndarray, y: np.ndarray):
         # Cast to tensor
-        y_tensor = torch.reshape(torch.tensor(y).float(), (-1, 1)).to(self.device)
-        X_tensor = torch.tensor(X).to(self.device)
+        y_tensor = torch.reshape(torch.tensor(y), (-1, 1)).to(self.device, dtype=torch.get_default_dtype())
+        X_tensor = torch.tensor(X).to(self.device, dtype=torch.get_default_dtype())
 
         return (self.dist_x_given_class.condition(y_tensor).log_prob(X_tensor).cpu().detach().numpy() + np.log(
             np.array([list(self.class_dist.values())[i] for i in y])))

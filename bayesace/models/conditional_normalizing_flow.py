@@ -34,21 +34,21 @@ class ConditionalNF(ABC):
         for i, label in enumerate(self.class_dist.keys()):
             class_column[dataset["class"] == label] = i
         dataset["class"] = class_column
-        dataset = dataset.astype(float)
+        #dataset = dataset.astype(float)
         dataset_numpy = dataset.values
 
         # Train validation split
         train_dataset, val_dataset = np.split(dataset_numpy,
                                               [int(.8 * len(dataset))])
         train_dataset_tensor = torch.utils.data.TensorDataset(
-            torch.from_numpy(train_dataset).float().to(self.device)
+            torch.from_numpy(train_dataset).to(self.device, dtype=torch.get_default_dtype())
         )
         train_loader = torch.utils.data.DataLoader(
             train_dataset_tensor, batch_size=batch_size, shuffle=True, num_workers=0
         )
 
         val_dataset_tensor = torch.utils.data.TensorDataset(
-            torch.from_numpy(val_dataset).float().to(self.device)
+            torch.from_numpy(val_dataset).to(self.device, dtype=torch.get_default_dtype())
         )
         val_loader = torch.utils.data.DataLoader(
             val_dataset_tensor, batch_size=batch_size, shuffle=False, num_workers=0

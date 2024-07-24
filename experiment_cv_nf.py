@@ -3,6 +3,7 @@ import random
 import sys
 from itertools import product
 
+import torch
 from matplotlib import pyplot as plt
 from skopt import gp_minimize
 from skopt.plots import plot_convergence, plot_evaluations
@@ -176,6 +177,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type = "NVP"):
 
 
 if __name__ == "__main__":
+    torch.set_default_dtype(torch.float32)
     t_init = time.time()
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)

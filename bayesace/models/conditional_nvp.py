@@ -196,7 +196,7 @@ class ConditionalNVP(ConditionalNF):
         class_sampler = dist.Categorical(torch.tensor(list(self.class_dist.values())))
         classes = class_sampler.sample((n_samples,))
         # Reshape the class sampling
-        classes_res = torch.reshape(classes.float(), (-1, 1)).to(self.device)
+        classes_res = torch.reshape(classes, (-1, 1)).to(self.device, dtype=torch.get_default_dtype())
         X = self.dist_x_given_class.sample(num_samples=n_samples, H=classes_res).cpu().detach()
         sample_df = pd.DataFrame(X, columns=self.columns)
         sample_df["class"] = pd.Categorical([list(self.class_dist.keys())[i] for i in classes],
@@ -206,8 +206,8 @@ class ConditionalNVP(ConditionalNF):
 
     def logl_array(self, X: np.ndarray, y: np.ndarray):
         # Cast to tensor
-        y_tensor = torch.reshape(torch.tensor(y).float(), (-1, 1)).to(self.device)
-        X_tensor = torch.tensor(X).float().to(self.device)
+        y_tensor = torch.reshape(torch.tensor(y), (-1, 1)).to(self.device, dtype=torch.get_default_dtype())
+        X_tensor = torch.tensor(X).to(self.device, dtype=torch.get_default_dtype())
 
         return (self.dist_x_given_class.log_prob(X_tensor, y_tensor).cpu().detach().numpy() + np.log(
             np.array([list(self.class_dist.values())[i] for i in y])))
