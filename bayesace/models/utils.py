@@ -62,7 +62,7 @@ def get_data(dataset_id: int, standardize=True):
     return data
 
 
-def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True, min_unique_vals=50):
+def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True, min_unique_vals=50, max_unique_vals_to_jit=350, max_cum_values=5):
     array_flag = False
     if isinstance(data, np.ndarray):
         # The following code but for an array instead of a dataframe:
@@ -74,12 +74,16 @@ def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outli
 
     feature_data = data[features]
     feature_data = feature_data.loc[:, feature_data.nunique() >= min_unique_vals]
+    # Same line as above but with I want to check if the count of the 5 most common values is less than 50% of the dataset
+    feature_data = feature_data.loc[:, feature_data.apply(lambda x: x.value_counts().nlargest(max_cum_values).sum() < len(data)/2, axis=0)]
     data = pd.concat([feature_data, data[target_column]], axis=1)
     for i in data.columns[:-1]:
         if eliminate_outliers:
             data = data[data[i] < (data[i].mean()+data[i].std() * 3)]
             data = data[data[i] > (data[i].mean()-data[i].std() * 3)]
-        data[i] = data[i] + np.random.normal(0, jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
+        if data[i].nunique() < max_unique_vals_to_jit:
+            new_jit_coef = (1-(data[i].nunique()-min_unique_vals)/(max_unique_vals_to_jit-min_unique_vals))*jit_coef
+            data[i] = data[i] + np.random.normal(0, new_jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
     if standardize:
         data[data.columns[:-1]] = StandardScaler().fit_transform(data[data.columns[:-1]].values)
     # Assert that there are no missing values

@@ -37,14 +37,15 @@ def kfold_indices(data, k):
 
 
 # Define the number of folds (K)
-k = 2
-steps = 10
-batch_size = 64
+k = 10
+steps = 1000
+batch_size = 1028
 
 # Define how the preprocessing will be done
-JIT_COEF = 0.0
-ELIM_OUTL = False
+JIT_COEF = 1
+ELIM_OUTL = True
 min_unique_vals = 0
+max_unique_vals_to_jit = 0.05
 
 # Define a time limit (in hours) for execution
 TIME_LIMIT = np.inf
@@ -203,7 +204,7 @@ if __name__ == "__main__":
     torch.set_default_dtype(torch.float32)
     t_init = time.time()
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=44122, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
     parser.add_argument('--no_graphics', action=argparse.BooleanOptionalAction)
     parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
     parser.add_argument('--search', choices=['grid', 'bayesian'], default='bayesian')
@@ -225,8 +226,10 @@ if __name__ == "__main__":
     random.seed(0)
 
     # Load the dataset and preprocess it
-    dataset = get_data(dataset_id, standardize=False)
-    dataset = preprocess_data(dataset, jit_coef=JIT_COEF, eliminate_outliers=ELIM_OUTL, min_unique_vals=min_unique_vals)
+    dataset = get_data(dataset_id, standardize=True)
+    dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL, jit_coef=JIT_COEF,
+                              min_unique_vals=min_unique_vals,
+                              max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset))
     d = len(dataset.columns) - 1
 
     if args.type == "NVP":
