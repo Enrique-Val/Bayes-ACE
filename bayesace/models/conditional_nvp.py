@@ -12,7 +12,7 @@ from pyro.distributions.transforms import permute, BatchNorm
 from pyro.distributions.transforms.affine_coupling import ConditionalAffineCoupling
 import itertools
 
-from bayesace.models.conditional_normalizing_flow import ConditionalNF
+from bayesace.models.conditional_normalizing_flow import ConditionalNF, NanLogProb
 
 """
 The class ConditionalNormalizingFlow is mostly implement over original code

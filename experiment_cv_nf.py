@@ -1,6 +1,7 @@
 import os
 import random
 import sys
+import warnings
 from itertools import product
 
 import torch
@@ -23,6 +24,7 @@ from bayesace.utils import *
 
 import time
 
+
 def kfold_indices(data, k):
     fold_size = len(data) // k
     indices = np.arange(len(data))
@@ -35,13 +37,14 @@ def kfold_indices(data, k):
 
 
 # Define the number of folds (K)
-k = 10
-steps = 1000
-batch_size = 512
+k = 2
+steps = 10
+batch_size = 64
 
 # Define how the preprocessing will be done
-JIT_COEF = 0.1
-ELIM_OUTL = True
+JIT_COEF = 0.0
+ELIM_OUTL = False
+min_unique_vals = 0
 
 # Define a time limit (in hours) for execution
 TIME_LIMIT = np.inf
@@ -59,13 +62,14 @@ param_grid = {
 
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
-    Real(1e-4, 1e-2, name='lr', prior='log-uniform'),
+    Real(1e-4, 1e-3, name='lr', prior='log-uniform'),
     Real(0, 1e-2, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
-    Integer(2, 10, name='hidden_units'),
-    Integer(1, 5, name='layers'),
-    Integer(1, 10, name='n_flows')
+    Integer(2, 5, name='hidden_units'),
+    Integer(1, 3, name='layers'),
+    Integer(1, 5, name='n_flows')
 ]
+
 
 def cross_validate_bn(dataset, fold_indices=None):
     # Validate Gaussian network
@@ -97,10 +101,13 @@ def cross_validate_bn(dataset, fold_indices=None):
     print("Bayesian network learned")
     dict_print = {result_metrics[i]: bn_results_mean[i] for i in range(len(result_metrics))}
     print(str(dict_print))
+    print()
 
     return bn_results
 
-def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, lr=None, weight_decay=None, count_bins=None, hidden_units=None,
+
+def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
+                      count_bins=None, hidden_units=None,
                       layers=None, split_dim=None,
                       n_flows=None):
     logl = []
@@ -110,9 +117,12 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     times = []
     param_dict = None
     if model_type == "NVP":
-        param_dict = {"lr": lr, "weight_decay": weight_decay, "split_dim": split_dim, "hidden_u": hidden_units, "layers": layers, "n_flows": n_flows}
+        param_dict = {"lr": lr, "weight_decay": weight_decay, "split_dim": split_dim, "hidden_u": hidden_units,
+                      "layers": layers, "n_flows": n_flows}
     elif model_type == "Spline":
-        param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units, "layers": layers}
+        param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units,
+                      "layers": layers}
+    print(str(param_dict), "normalizing flow learned")
     for train_index, test_index in fold_indices:
         df_train = dataset.iloc[train_index].reset_index(drop=True)
         df_test = dataset.iloc[test_index].reset_index(drop=True)
@@ -136,20 +146,33 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
         predictions = predict_class(df_test.drop("class", axis=1), model)
         brier.append(brier_score(df_test["class"].values, predictions))
         auc_list.append(auc(df_test["class"].values, predictions))
-    print(str(param_dict), "normalizing flow learned")
-    print(str({"Logl": np.mean(logl), "LoglStd":np.mean(logl_std) , "Brier": np.mean(brier), "AUC": np.mean(auc_list), "Time": np.mean(times)}))
+    print(str({"Logl": np.mean(logl), "LoglStd": np.mean(logl_std), "Brier": np.mean(brier), "AUC": np.mean(auc_list),
+               "Time": np.mean(times)}))
     print()
-    return np.mean(logl), np.std(logl), np.mean(logl_std), np.std(logl_std), np.mean(brier), np.std(brier), np.mean(auc_list), np.std(auc_list), np.mean(
+    return np.mean(logl), np.std(logl), np.mean(logl_std), np.std(logl_std), np.mean(brier), np.std(brier), np.mean(
+        auc_list), np.std(auc_list), np.mean(
         times), np.std(times), param_dict
 
-def get_best_normalizing_flow(dataset, fold_indices, model_type = "NVP"):
+
+def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
     # Bayesian optimization
     # Define the objective function
     @use_named_args(param_space)
     def objective(**params):
-        result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size, **params)
-        nf_logl_means = result[0]
-        return -nf_logl_means  # Assuming we want to maximize loglikelihood
+        result = None
+        try:
+            result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size, **params)
+            nf_logl_means = result[0]
+            return -nf_logl_means  # Assuming we want to maximize loglikelihood
+        except ValueError as e:
+            if e.args[0][:30] == "Error while computing log_prob":
+                warnings.warn("Error while computing log_prob. Returning a high value for the objective function. "
+                              "Consider smoothing data, decreasing the value of the lr or the complexity of the "
+                              "network.", RuntimeWarning)
+                print()
+                return 3e+38
+            else:
+                raise e
 
     # Perform Bayesian optimization
     result = gp_minimize(objective, param_space, n_calls=n_iter, random_state=0)
@@ -180,11 +203,11 @@ if __name__ == "__main__":
     torch.set_default_dtype(torch.float32)
     t_init = time.time()
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=44122, type=int)
     parser.add_argument('--no_graphics', action=argparse.BooleanOptionalAction)
     parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
     parser.add_argument('--search', choices=['grid', 'bayesian'], default='bayesian')
-    parser.add_argument('--n_iter', nargs='?', default=100, type=int)
+    parser.add_argument('--n_iter', nargs='?', default=10, type=int)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -192,7 +215,7 @@ if __name__ == "__main__":
     BAYESIAN = args.search == 'bayesian'
     n_iter = args.n_iter
 
-    directory_path = "./results/exp_cv_2/"+str(dataset_id)+"/"
+    directory_path = "./results/exp_cv_2/" + str(dataset_id) + "/"
     if not os.path.exists(directory_path):
         # If the directory does not exist, create it
         os.makedirs(directory_path)
@@ -203,11 +226,11 @@ if __name__ == "__main__":
 
     # Load the dataset and preprocess it
     dataset = get_data(dataset_id, standardize=False)
-    dataset = preprocess_data(dataset, jit_coef=JIT_COEF, eliminate_outliers=ELIM_OUTL, min_unique_vals=50)
+    dataset = preprocess_data(dataset, jit_coef=JIT_COEF, eliminate_outliers=ELIM_OUTL, min_unique_vals=min_unique_vals)
     d = len(dataset.columns) - 1
 
-    if args.type == "NVP" :
-        param_space[2] = Integer(0, int(d/2), name='split_dim')
+    if args.type == "NVP":
+        param_space[2] = Integer(0, int(d / 2), name='split_dim')
 
     # Get the fold indices
     fold_indices = kfold_indices(dataset, k)
@@ -218,7 +241,7 @@ if __name__ == "__main__":
     # Flattening the list of tuples into a single list
     cartesian_product = [word1 + word2 for word1, word2 in cartesian_product]
     results_df = pd.DataFrame(
-        index=cartesian_product+["params"])
+        index=cartesian_product + ["params"])
 
     # Validate Gaussian network
     bn_results = cross_validate_bn(dataset, fold_indices)
@@ -230,23 +253,23 @@ if __name__ == "__main__":
     if GRAPHIC:
         # Visualize the convergence of the objective function
         plot_convergence(result)
-        plt.savefig(directory_path+"convergence_RD_"+str(dataset_id)+".png")
+        plt.savefig(directory_path + "convergence_RD_" + str(dataset_id) + ".png")
         plt.clf()
 
         # Visualize the convergence of the parameters
         plot_evaluations(result)
-        plt.savefig(directory_path+"evaluations_RD_"+str(dataset_id)+".png")
+        plt.savefig(directory_path + "evaluations_RD_" + str(dataset_id) + ".png")
         plt.clf()
 
-    dill.dump(gt_model, open(directory_path+"gt_nf_" + str(dataset_id) + ".pkl", "wb"))
-    resampled_dataset = gt_model.sample(np.min((len(dataset),100000))).to_pandas()
-    resampled_dataset.to_csv(directory_path+"resampled_data"+str(dataset_id)+".csv")
+    dill.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
+    resampled_dataset = gt_model.sample(np.min((len(dataset), 100000))).to_pandas()
+    resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
 
     # New fold indices
     fold_indices = kfold_indices(resampled_dataset, k)
 
     # Check the metrics of the model given the resampled data
-    resampled_dataset_metrics = np.zeros(len(results_df)-1)
+    resampled_dataset_metrics = np.zeros(len(results_df) - 1)
     tmp = gt_model.logl(resampled_dataset)
     resampled_dataset_metrics[0] = tmp.mean()
     resampled_dataset_metrics[2] = tmp.std()
@@ -282,19 +305,19 @@ if __name__ == "__main__":
         nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type)
         results_df["NF"] = metrics
 
-        dill.dump(nf_model, open(directory_path+"nf_" + str(dataset_id) + ".pkl", "wb"))
+        dill.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
 
         if GRAPHIC:
             # Visualize the convergence of the objective function
             plot_convergence(result)
-            plt.savefig(directory_path+"convergence_SD_"+str(dataset_id)+".png")
+            plt.savefig(directory_path + "convergence_SD_" + str(dataset_id) + ".png")
             plt.clf()
 
             # Visualize the convergence of the parameters
             plot_evaluations(result)
-            plt.savefig(directory_path+"evaluations_SD_"+str(dataset_id)+".png")
+            plt.savefig(directory_path + "evaluations_SD_" + str(dataset_id) + ".png")
             plt.clf()
 
         # Train neural net using the best parameters to get metrics
     print(results_df.drop("params"))
-    results_df.to_csv(directory_path+'data' + str(dataset_id) + '_bis.csv')
+    results_df.to_csv(directory_path + 'data' + str(dataset_id) + '_bis.csv')

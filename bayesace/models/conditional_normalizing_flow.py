@@ -4,6 +4,8 @@ import pandas as pd
 import torch
 import pyro.distributions as dist
 
+class NanLogProb(Exception):
+    pass
 
 
 class ConditionalNF(ABC):
