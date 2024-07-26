@@ -24,18 +24,21 @@ Some modifications to work with data with more than 2 dimensions were made
 
 class ConditionalNormalizingFlow(nn.Module):
     def __init__(self, input_dim=2, split_dim=1, context_dim=1, hidden_dim=128, num_layers=1, flow_length=10,
-                 use_cuda=False):
+                 use_cuda=False, perms_instantiation = None):
         super(ConditionalNormalizingFlow, self).__init__()
         self.base_dist = dist.Normal(torch.zeros(input_dim),
                                      torch.ones(input_dim))  # base distribution is Isotropic Gaussian
         self.param_dims = [input_dim - split_dim, input_dim - split_dim]
         # Define series of bijective transformations
-        self.transforms = [ConditionalAffineCoupling(split_dim, ConditionalDenseNN(split_dim, context_dim,
+        self.transforms = nn.ModuleList([ConditionalAffineCoupling(split_dim, ConditionalDenseNN(split_dim, context_dim,
                                                                                    [hidden_dim] * num_layers,
                                                                                    self.param_dims)) for _ in
-                           range(flow_length)]
+                           range(flow_length)])
         # self.perms = [permute(2, torch.tensor([1, 0])) for _ in range(flow_length)]
-        self.perms = [permute(input_dim, torch.randperm(input_dim)) for _ in range(flow_length)]
+        self.perms_instantiation = perms_instantiation
+        if self.perms_instantiation is None :
+            self.perms_instantiation = [torch.randperm(input_dim) for _ in range(flow_length)]
+        self.perms = [permute(input_dim, self.perms_instantiation[i]) for i in range(flow_length)]
         self.bns = [BatchNorm(input_dim=input_dim) for _ in range(flow_length)]
         # Concatenate AffineCoupling layers with Permute and BatchNorm Layers
         self.generative_flows = list(itertools.chain(*zip(self.transforms, self.bns, self.perms)))[
@@ -106,6 +109,11 @@ class ConditionalNVP(ConditionalNF):
               layers=1,
               n_flows=1):
         super().train(dataset)
+        self.input_dim = len(dataset.columns)-1
+        self.split_dim = split_dim
+        self.hidden_units = hidden_units
+        self.layers = layers
+        self.n_flows = n_flows
         train_loader, val_loader = self.get_loaders(dataset, batch_size)
 
         # If graphical, then import pyplot
@@ -117,7 +125,7 @@ class ConditionalNVP(ConditionalNF):
                                                              hidden_dim=hidden_units, num_layers=layers,
                                                              flow_length=n_flows,
                                                              use_cuda=False)
-
+        self.perms_instantiation = self.dist_x_given_class.perms_instantiation.copy()
         # Build SVI object
         optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, "clip_norm": 5.0})
         svi = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer, Trace_ELBO(num_particles=1))
@@ -167,7 +175,7 @@ class ConditionalNVP(ConditionalNF):
                     no_improvement_counter = 0
                 else:
                     no_improvement_counter += 1
-                    self.dist_x_given_class.load_state_dict(best_model_state)
+                    #self.dist_x_given_class.load_state_dict(best_model_state)
 
                 if no_improvement_counter >= early_stop_patience:
                     # print(f"No improvement for {early_stop_patience} iterations, stopping early.")
@@ -184,6 +192,7 @@ class ConditionalNVP(ConditionalNF):
             plt.plot(val_losses, label='Validation Loss')
             plt.legend()
             plt.show()
+        self.dist_x_given_class.load_state_dict(best_model_state)
         self.trained = True
 
     def get_class_labels(self):
@@ -222,9 +231,12 @@ class ConditionalNVP(ConditionalNF):
 
     def __setstate__(self, state):
         # Restore the module
-        self.dist_x_given_class = ConditionalNormalizingFlow()  # Replace with the actual class of your module
-        self.dist_x_given_class.load_state_dict(state['module_state_dict'])
-        # Restore the other attributes
+        state_dict = state['module_state_dict']
         del state['module_state_dict']
         self.__dict__.update(state)
+        self.dist_x_given_class = ConditionalNormalizingFlow(input_dim=self.input_dim, split_dim=self.split_dim, hidden_dim=self.hidden_units, num_layers=self.layers, flow_length=self.n_flows, perms_instantiation=self.perms_instantiation)
+        self.dist_x_given_class.load_state_dict(state_dict)
+        # Restore the other attributes
+
+
 

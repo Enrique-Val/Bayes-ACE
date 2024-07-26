@@ -5,6 +5,7 @@ import warnings
 import math
 import multiprocessing as mp
 import openml as oml
+from matplotlib import pyplot as plt
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from collections import Counter
@@ -269,3 +270,19 @@ def get_mean_sd_logl(data, model_type, folds = 10) :
         mean_logl[label] = np.mean(mean_logl[label])
         std_logl[label] = np.mean(std_logl[label])
     return mean_logl, std_logl
+
+def plot_path(df, res_b = None) :
+    # I need you to generalize this code for any class values names
+    #x_1 = x_og.drop("class", axis=1)
+    assert len(df.columns) == 3
+    class_values = df["class"].cat.categories
+    to_plot = df.drop("class", axis=1)
+    colours = df["class"].to_numpy()
+    colour_palette = ["green", "blue", "yellow"]
+    for i in range(len(class_values)):
+        colours[colours == class_values[i]] = colour_palette[i]
+    plt.scatter(to_plot[to_plot.columns[0]], to_plot[to_plot.columns[1]], color=colours)
+    if res_b is not None:
+        df_vertex = res_b.path
+        plt.plot(df_vertex[to_plot.columns[0]], df_vertex[to_plot.columns[0]], color="red")
+
