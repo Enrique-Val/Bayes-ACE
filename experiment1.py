@@ -3,8 +3,10 @@ import csv
 import os
 import sys
 
-from models.multi_bnaf import Arguments
-from models.utils import hill_climbing
+import pickle
+
+from bayesace.algorithms.algorithm import ACEResult
+from bayesace.models.utils import get_data
 
 sys.path.append(os.getcwd())
 import argparse
@@ -45,7 +47,7 @@ if __name__ == "__main__":
     n_counterfactuals = 10
 
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=44091, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
     parser.add_argument("--network", nargs='?', default="CLG", type=str)
     args = parser.parse_args()
 
@@ -63,76 +65,71 @@ if __name__ == "__main__":
     sampling_range = (xl, xu)
 
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    df_train = df.head(len(df.index) - n_counterfactuals)
-    df_test = df.tail(n_counterfactuals)
+    df_train = pd.read_csv('./results/exp_cv_2/' + str(dataset_id) + '/resampled_data' + str(dataset_id) + '.csv', index_col=0)
+    # Transform the class into a categorical variable
+    class_processed = df_train[df_train.columns[-1]].astype('string').astype('category')
+    df_train = df_train.drop(df_train.columns[-1], axis=1)
+    df_train["class"] = class_processed
 
-    network = None
-    if network_type == 'CLG' or network_type == 'SP':
-        network = hill_climbing(data=df_train, bn_type=network_type)
-    elif network_type == "NN":
-        args = Arguments()
-        network = MultiBnaf(args, df_train)
+    # Load the pickled gt density estimator from the correct folder
+    gt_estimator = pickle.load(open('./results/exp_cv_2/' + str(dataset_id) + '/gt_nf_' + str(dataset_id) + '.pkl', 'rb'))
+    df_test = gt_estimator.sample(420, seed = 0).to_pandas()
+    clg_network = hill_climbing(data=df_train, bn_type=network_type)  # TODO Maybe dill the CLG as well
+    normalizing_flow = pickle.load(
+        open('./results/exp_cv_2/' + str(dataset_id) + '/nf_' + str(dataset_id) + '.pkl', 'rb'))
+    cv_results = pd.read_csv('./results/exp_cv_2/' + str(dataset_id) + '/data' + str(dataset_id) + '_bis.csv',
+                             index_col=0)
 
-    print("Train mean", network.logl(df_train).mean())
-    print("Test", network.logl(df_test).mean())
-    print("Test median", np.median(network.logl(df_train)))
-    print("Test std",network.logl(df_train).std())
-    print("Test p90", np.percentile(network.logl(df_train),90))
-    # mean_logl, std_logl = get_mean_sd_logl(df_train, network_type, folds=2)
+    print(cv_results.columns)
 
-    print("COMPARE MBNAF AND KDE")
-    print("Test mean mbnaf", np.log(likelihood(df_test,network)).mean())
-    print("Test mean kde", network.sampler.score_samples(df_test.drop("class",axis=1)).mean())
+    mu_gt = float(cv_results.loc["Logl_mean", "GT_SD"])
+    std_gt = float(cv_results.loc["LoglStd_mean", "GT_SD"])
 
-    mean_logl, std_logl = (dict(), dict())
-    for i in df_train["class"].cat.categories:
-        df_class = df_train[df_train["class"] == i]
-        logls = network.logl(df_class)
-        mean_logl[i] = logls.mean()
-        std_logl[i] = logls.std()
+    for density_estimator in [clg_network, normalizing_flow]:
+        np.random.seed(0)
+        # np.seterr(divide='ignore')
+        for penalty in penalties[:1]:
+            # Result storage
+            distances_mat = np.zeros((n_counterfactuals, len(n_vertices)))
+            evaluations_mat = np.zeros((n_counterfactuals, len(n_vertices)))
+            for i in range(0, n_counterfactuals-9):
+                instance = df_train.iloc[[i]]
+                print(instance)
+                likelihood_threshold = np.e ** (
+                        mu_gt + likelihood_threshold_sigma * std_gt)
+                distances = np.zeros(len(n_vertices))
+                evaluations = np.zeros(len(n_vertices))
+                for j, n_vertex in enumerate(n_vertices[:1]):
+                    alg = BayesACE(bayesian_network=density_estimator, features=df_train.columns[:-1],
+                                   n_vertex=n_vertex,
+                                   accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold,
+                                   chunks=chunks, penalty=penalty, sampling_range=sampling_range,
+                                   initialization="default",
+                                   seed=0, verbose=True, pop_size=100)
+                    result, res = alg.run(instance, target_label="b" if (instance["class"] != "b").all() else "a",
+                                          return_info=True)
+                    # print(result.distance)
+                    path_to_compute = path(result.path.values , chunks=chunks)
+                    distances[j] = path_likelihood_length(pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
+                                            bayesian_network=gt_estimator, penalty=penalty)
+                    evaluations[j] = res.algorithm.evaluator.n_eval
+                    plot_path(df_train, result)
+                    plt.show()
+                    plot_path(df_test, result)
+                    plt.show()
+                distances_mat[i] = distances
+                evaluations_mat[i] = evaluations
+            print("Distances mat")
+            print(distances_mat)
+            print()
+            print("Evaluations mat")
+            print(evaluations_mat)
+            print()
+            print()
 
-    np.random.seed(0)
-
-    np.seterr(divide='ignore')
-    for penalty in penalties:
-        # Result storage
-        distances_mat = np.zeros((n_counterfactuals, len(n_vertices)))
-        evaluations_mat = np.zeros((n_counterfactuals, len(n_vertices)))
-        for i in range(0, n_counterfactuals):
-            instance = df_test.iloc[[i]]
-            print(instance["class"].values[0])
-            print(mean_logl)
-            opposite_class_mean_logl = np.mean(
-                [mean_logl[i] for i in mean_logl.keys() if i != instance["class"].values[0]])
-            print("Opposite class", opposite_class_mean_logl)
-            opposite_class_std_logl = np.sqrt(
-                np.mean([std_logl[i] for i in std_logl.keys() if i != instance["class"].values[0]]))
-            likelihood_threshold = np.e ** (
-                        opposite_class_mean_logl + likelihood_threshold_sigma * opposite_class_std_logl)
-            distances = np.zeros(len(n_vertices))
-            evaluations = np.zeros(len(n_vertices))
-            for j, n_vertex in enumerate(n_vertices):
-                alg = BayesACE(bayesian_network=network, features=df_train.columns[:-1], n_vertex=n_vertex,
-                               accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold,
-                               chunks=chunks, penalty=penalty, sampling_range=sampling_range, initialization="default",
-                               seed=0, verbose=True, pop_size=100)
-                result, res = alg.run(instance, parallelize=True, return_info=True)
-                # print(result.distance)
-                distances[j] = result.distance
-                evaluations[j] = res.algorithm.evaluator.n_eval
-            distances_mat[i] = distances
-            evaluations_mat[i] = evaluations
-        print("Distances mat")
-        print(distances_mat)
-        print()
-        print("Evaluations mat")
-        print(evaluations_mat)
-        print()
-        print()
-
-        '''to_ret = pd.DataFrame(data=distances_mat, columns=n_vertices)
-        to_ret.to_csv('./results/exp_1/distances_data' + str(dataset_id) + '_net' + network_type + '_penalty' + str(penalty) + '.csv')
-
-        to_ret = pd.DataFrame(data=evaluations_mat, columns=n_vertices)
-        to_ret.to_csv('./results/exp_1/evaluations_data' + str(dataset_id) + '_net' + network_type + '_penalty' + str(penalty) + '.csv')
-        '''
+            '''to_ret = pd.DataFrame(data=distances_mat, columns=n_vertices)
+            to_ret.to_csv('./results/exp_1/distances_data' + str(dataset_id) + '_net' + network_type + '_penalty' + str(penalty) + '.csv')
+    
+            to_ret = pd.DataFrame(data=evaluations_mat, columns=n_vertices)
+            to_ret.to_csv('./results/exp_1/evaluations_data' + str(dataset_id) + '_net' + network_type + '_penalty' + str(penalty) + '.csv')
+            '''

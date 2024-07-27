@@ -114,6 +114,7 @@ class ConditionalNVP(ConditionalNF):
         self.hidden_units = hidden_units
         self.layers = layers
         self.n_flows = n_flows
+        self.steps = steps
         train_loader, val_loader = self.get_loaders(dataset, batch_size)
 
         # If graphical, then import pyplot
@@ -179,6 +180,7 @@ class ConditionalNVP(ConditionalNF):
 
                 if no_improvement_counter >= early_stop_patience:
                     # print(f"No improvement for {early_stop_patience} iterations, stopping early.")
+                    self.steps = epoch
                     break
             except KeyboardInterrupt:
                 if self.graphics:

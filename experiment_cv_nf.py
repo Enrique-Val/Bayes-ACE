@@ -1,11 +1,9 @@
 import os
 import random
 import sys
-import warnings
 from itertools import product
 
 import torch
-from matplotlib import pyplot as plt
 from skopt import gp_minimize
 from skopt.plots import plot_convergence, plot_evaluations
 from skopt.space import Real, Integer
@@ -15,7 +13,7 @@ from bayesace.models.conditional_nvp import ConditionalNVP
 from bayesace.models.conditional_spline import ConditionalSpline
 from bayesace.models.utils import get_data, preprocess_data
 
-import dill
+import pickle
 
 sys.path.append(os.getcwd())
 import argparse
@@ -39,7 +37,10 @@ def kfold_indices(data, k):
 # Define the number of folds (K)
 k = 10
 steps = 1000
-batch_size = 1028
+batch_size = 512
+
+# Define the number of iterations for Bayesian optimization
+default_opt_iter = 100
 
 # Define how the preprocessing will be done
 JIT_COEF = 1
@@ -63,7 +64,7 @@ param_grid = {
 
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
-    Real(1e-4, 1e-3, name='lr', prior='log-uniform'),
+    Real(5e-5, 1e-3, name='lr', prior='log-uniform'),
     Real(0, 1e-2, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
     Integer(2, 5, name='hidden_units'),
@@ -123,7 +124,7 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     elif model_type == "Spline":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units,
                       "layers": layers}
-    print(str(param_dict), "normalizing flow learned")
+    step_list = []
     for train_index, test_index in fold_indices:
         df_train = dataset.iloc[train_index].reset_index(drop=True)
         df_test = dataset.iloc[test_index].reset_index(drop=True)
@@ -140,6 +141,7 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
                         hidden_units=hidden_units * (len(df_train.columns) - 1), layers=layers,
                         steps=steps, batch_size=batch_size)
         it_time = time.time() - t0
+        step_list.append(model.steps)
         times.append(it_time)
         tmp = model.logl(df_test)
         logl.append(tmp.mean())
@@ -147,6 +149,8 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
         predictions = predict_class(df_test.drop("class", axis=1), model)
         brier.append(brier_score(df_test["class"].values, predictions))
         auc_list.append(auc(df_test["class"].values, predictions))
+    param_dict["steps"] = np.mean(step_list)
+    print(str(param_dict), "normalizing flow learned")
     print(str({"Logl": np.mean(logl), "LoglStd": np.mean(logl_std), "Brier": np.mean(brier), "AUC": np.mean(auc_list),
                "Time": np.mean(times)}))
     print()
@@ -194,8 +198,8 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
     elif model_type == "Splines":
         model = ConditionalSpline()
     params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
-    params["hidden_units"] = d * gt_params["hidden_units"]
-    model.train(dataset, **gt_params, steps=steps)
+    params["hidden_units"] = d*gt_params["hidden_units"]
+    model.train(dataset, **params, steps=steps)
 
     return model, metrics, result
 
@@ -208,7 +212,7 @@ if __name__ == "__main__":
     parser.add_argument('--no_graphics', action=argparse.BooleanOptionalAction)
     parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
     parser.add_argument('--search', choices=['grid', 'bayesian'], default='bayesian')
-    parser.add_argument('--n_iter', nargs='?', default=10, type=int)
+    parser.add_argument('--n_iter', nargs='?', default=default_opt_iter, type=int)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -264,7 +268,7 @@ if __name__ == "__main__":
         plt.savefig(directory_path + "evaluations_RD_" + str(dataset_id) + ".png")
         plt.clf()
 
-    dill.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
+    pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
     resampled_dataset = gt_model.sample(np.min((len(dataset), 100000))).to_pandas()
     resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
 
@@ -308,7 +312,7 @@ if __name__ == "__main__":
         nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type)
         results_df["NF"] = metrics
 
-        dill.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
+        pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
 
         if GRAPHIC:
             # Visualize the convergence of the objective function
@@ -323,4 +327,4 @@ if __name__ == "__main__":
 
         # Train neural net using the best parameters to get metrics
     print(results_df.drop("params"))
-    results_df.to_csv(directory_path + 'data' + str(dataset_id) + '_bis.csv')
+    results_df.to_csv(directory_path + 'data_' + str(dataset_id) + '.csv')
