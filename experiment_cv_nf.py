@@ -40,13 +40,15 @@ steps = 1000
 batch_size = 512
 
 # Define the number of iterations for Bayesian optimization
-default_opt_iter = 100
+default_opt_iter = 50
 
 # Define how the preprocessing will be done
 JIT_COEF = 1
 ELIM_OUTL = True
-min_unique_vals = 0
+min_unique_vals = 50
 max_unique_vals_to_jit = 0.05
+max_cum_values = 3
+minimum_spike_jitter = 0.0
 
 # Define a time limit (in hours) for execution
 TIME_LIMIT = np.inf
@@ -233,7 +235,8 @@ if __name__ == "__main__":
     dataset = get_data(dataset_id, standardize=True)
     dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL, jit_coef=JIT_COEF,
                               min_unique_vals=min_unique_vals,
-                              max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset))
+                              max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=300000,
+                              minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
     d = len(dataset.columns) - 1
 
     if args.type == "NVP":

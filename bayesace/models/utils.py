@@ -62,20 +62,23 @@ def get_data(dataset_id: int, standardize=True):
     return data
 
 
-def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True, min_unique_vals=50, max_unique_vals_to_jit=350, max_cum_values=5):
+def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True,
+                    min_unique_vals=50, max_unique_vals_to_jit=350, max_cum_values=3, max_instances=300000,
+                    minimum_spike_jitter = 0):
     array_flag = False
     if isinstance(data, np.ndarray):
         # The following code but for an array instead of a dataframe:
         data = pd.DataFrame(data)
         array_flag = True
     # Separate the target column (last column) from the features
+    data = data.head(max_instances)
     target_column = data.columns[-1]
     features = data.columns[:-1]
 
     feature_data = data[features]
     feature_data = feature_data.loc[:, feature_data.nunique() >= min_unique_vals]
 
-    feature_data = feature_data.loc[:, feature_data.apply(lambda x: np.sort(np.histogram(x, bins=200)[0])[-3:].sum() < len(data)*0.6, axis=0)]
+    feature_data = feature_data.loc[:, feature_data.apply(lambda x: np.sort(np.histogram(x, bins=200)[0])[-max_cum_values:].sum() < len(data)*0.6, axis=0)]
     data = pd.concat([feature_data, data[target_column]], axis=1)
     for i in data.columns[:-1]:
         if eliminate_outliers:
@@ -89,9 +92,9 @@ def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outli
             h = np.histogram(data[i], bins=200)[0]
             h = h/h.sum()
             h = np.abs(h[1:]-h[:-1])
-            jit_coef = h.max()
-            if jit_coef>0:
-                data[i] = data[i] + np.random.normal(0, jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
+            new_jit_coef = (h.max() - minimum_spike_jitter)*jit_coef
+            if new_jit_coef>0:
+                data[i] = data[i] + np.random.normal(0, new_jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
     if standardize:
         data[data.columns[:-1]] = StandardScaler().fit_transform(data[data.columns[:-1]].values)
     # Assert that there are no missing values
