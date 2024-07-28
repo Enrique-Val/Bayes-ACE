@@ -74,8 +74,8 @@ def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outli
 
     feature_data = data[features]
     feature_data = feature_data.loc[:, feature_data.nunique() >= min_unique_vals]
-    # Same line as above but with I want to check if the count of the 5 most common values is less than 50% of the dataset
-    feature_data = feature_data.loc[:, feature_data.apply(lambda x: x.value_counts().nlargest(max_cum_values).sum() < len(data)/2, axis=0)]
+
+    feature_data = feature_data.loc[:, feature_data.apply(lambda x: np.sort(np.histogram(x, bins=200)[0])[-3:].sum() < len(data)*0.6, axis=0)]
     data = pd.concat([feature_data, data[target_column]], axis=1)
     for i in data.columns[:-1]:
         if eliminate_outliers:
@@ -84,6 +84,14 @@ def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outli
         if data[i].nunique() < max_unique_vals_to_jit:
             new_jit_coef = (1-(data[i].nunique()-min_unique_vals)/(max_unique_vals_to_jit-min_unique_vals))*jit_coef
             data[i] = data[i] + np.random.normal(0, new_jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
+        else :
+            # Apply jittering proportional to the spikes in the data
+            h = np.histogram(data[i], bins=200)[0]
+            h = h/h.sum()
+            h = np.abs(h[1:]-h[:-1])
+            jit_coef = h.max()
+            if jit_coef>0:
+                data[i] = data[i] + np.random.normal(0, jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
     if standardize:
         data[data.columns[:-1]] = StandardScaler().fit_transform(data[data.columns[:-1]].values)
     # Assert that there are no missing values

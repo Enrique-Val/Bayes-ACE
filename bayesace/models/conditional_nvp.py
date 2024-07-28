@@ -21,6 +21,15 @@ available in the repo https://github.com/DanieleGammelli/pyro-torch-normalizing-
 Some modifications to work with data with more than 2 dimensions were made
 """
 
+def weights_init(m):
+    if isinstance(m, nn.Linear):
+        nn.init.xavier_normal_(m.weight)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, nn.BatchNorm1d):
+        nn.init.ones_(m.weight)
+        nn.init.zeros_(m.bias)
+
 
 class ConditionalNormalizingFlow(nn.Module):
     def __init__(self, input_dim=2, split_dim=1, context_dim=1, hidden_dim=128, num_layers=1, flow_length=10,
@@ -51,6 +60,7 @@ class ConditionalNormalizingFlow(nn.Module):
             nn.ModuleList(self.transforms).cuda()
             self.base_dist = dist.Normal(torch.zeros(input_dim).cuda(),
                                          torch.ones(input_dim).cuda())
+        self.apply(weights_init)
 
     def model(self, X=None, H=None):
         N = len(X) if X is not None else None
@@ -128,7 +138,7 @@ class ConditionalNVP(ConditionalNF):
                                                              use_cuda=False)
         self.perms_instantiation = self.dist_x_given_class.perms_instantiation.copy()
         # Build SVI object
-        optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, "clip_norm": 5.0})
+        optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, "clip_norm": 5, "lrd": 0.999})
         svi = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer, Trace_ELBO(num_particles=1))
 
         best_val_loss = float('inf')
