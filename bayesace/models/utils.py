@@ -63,7 +63,7 @@ def get_data(dataset_id: int, standardize=True):
 
 
 def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True,
-                    min_unique_vals=50, max_unique_vals_to_jit=350, max_cum_values=3, max_instances=300000,
+                    min_unique_vals=50, max_unique_vals_to_jit=350, max_cum_values=3, max_instances=100000,
                     minimum_spike_jitter = 0):
     array_flag = False
     if isinstance(data, np.ndarray):
