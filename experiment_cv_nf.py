@@ -3,6 +3,7 @@ import random
 import sys
 from itertools import product
 
+import pandas as pd
 import torch
 from skopt import gp_minimize
 from skopt.plots import plot_convergence, plot_evaluations
@@ -37,10 +38,10 @@ def kfold_indices(data, k):
 # Define the number of folds (K)
 k = 10
 steps = 1000
-batch_size = 512
+batch_size = 64
 
 # Define the number of iterations for Bayesian optimization
-default_opt_iter = 50
+default_opt_iter = 10
 
 # Define how the preprocessing will be done
 JIT_COEF = 1
@@ -67,11 +68,11 @@ param_grid = {
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
     Real(5e-5, 1e-3, name='lr', prior='log-uniform'),
-    Real(0, 1e-2, name='weight_decay'),
+    Real(1e-4, 1e-2, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
-    Integer(2, 5, name='hidden_units'),
+    Integer(2, 10, name='hidden_units'),
     Integer(1, 3, name='layers'),
-    Integer(1, 5, name='n_flows')
+    Integer(1, 10, name='n_flows')
 ]
 
 
@@ -200,7 +201,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
     elif model_type == "Splines":
         model = ConditionalSpline()
     params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
-    params["hidden_units"] = d*gt_params["hidden_units"]
+    params["hidden_units"] = d * gt_params["hidden_units"]
     model.train(dataset, **params, steps=steps)
 
     return model, metrics, result
@@ -215,6 +216,7 @@ if __name__ == "__main__":
     parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
     parser.add_argument('--search', choices=['grid', 'bayesian'], default='bayesian')
     parser.add_argument('--n_iter', nargs='?', default=default_opt_iter, type=int)
+    parser.add_argument('--part', choices=['full', 'rd', 'sd'], default='full')
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -231,103 +233,119 @@ if __name__ == "__main__":
 
     random.seed(0)
 
-    # Load the dataset and preprocess it
-    dataset = get_data(dataset_id, standardize=True)
-    dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL, jit_coef=JIT_COEF,
-                              min_unique_vals=min_unique_vals,
-                              max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=300000,
-                              minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
-    d = len(dataset.columns) - 1
+    if args.part == 'rd' or args.part == 'full':
+        # Load the dataset and preprocess it
+        dataset = get_data(dataset_id, standardize=True)
+        dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL, jit_coef=JIT_COEF,
+                                  min_unique_vals=min_unique_vals,
+                                  max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=300000,
+                                  minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
+        d = len(dataset.columns) - 1
 
-    if args.type == "NVP":
-        param_space[2] = Integer(0, int(d / 2), name='split_dim')
+        if args.type == "NVP":
+            param_space[2] = Integer(0, int(d / 2), name='split_dim')
 
-    # Get the fold indices
-    fold_indices = kfold_indices(dataset, k)
+        # Get the fold indices
+        fold_indices = kfold_indices(dataset, k)
 
-    # Storage of results
-    result_metrics = ["Logl", "LoglStd", "Brier", "AUC", "Time"]
-    cartesian_product = list(product(result_metrics, ["_mean", "_std"]))
-    # Flattening the list of tuples into a single list
-    cartesian_product = [word1 + word2 for word1, word2 in cartesian_product]
-    results_df = pd.DataFrame(
-        index=cartesian_product + ["params"])
+        # Storage of results
+        result_metrics = ["Logl", "LoglStd", "Brier", "AUC", "Time"]
+        cartesian_product = list(product(result_metrics, ["_mean", "_std"]))
+        # Flattening the list of tuples into a single list
+        cartesian_product = [word1 + word2 for word1, word2 in cartesian_product]
+        results_df = pd.DataFrame(
+            index=cartesian_product + ["params"])
+        results_df.index.name = str(dataset_id)
 
-    # Validate Gaussian network
-    bn_results = cross_validate_bn(dataset, fold_indices)
-    results_df["CLG_RD"] = bn_results
+        # Validate Gaussian network
+        bn_results = cross_validate_bn(dataset, fold_indices)
+        results_df["CLG_RD"] = bn_results
 
-    # First, learn a normalizing now and sample new synthetic data
-    gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices, model_type=args.type)
-    results_df["GT_RD"] = metrics
-    if GRAPHIC:
-        # Visualize the convergence of the objective function
-        plot_convergence(result)
-        plt.savefig(directory_path + "convergence_RD_" + str(dataset_id) + ".png")
-        plt.clf()
-
-        # Visualize the convergence of the parameters
-        plot_evaluations(result)
-        plt.savefig(directory_path + "evaluations_RD_" + str(dataset_id) + ".png")
-        plt.clf()
-
-    pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
-    resampled_dataset = gt_model.sample(np.min((len(dataset), 100000))).to_pandas()
-    resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
-
-    # New fold indices
-    fold_indices = kfold_indices(resampled_dataset, k)
-
-    # Check the metrics of the model given the resampled data
-    resampled_dataset_metrics = np.zeros(len(results_df) - 1)
-    tmp = gt_model.logl(resampled_dataset)
-    resampled_dataset_metrics[0] = tmp.mean()
-    resampled_dataset_metrics[2] = tmp.std()
-    predictions = predict_class(resampled_dataset.drop("class", axis=1), gt_model)
-    resampled_dataset_metrics[4] = brier_score(resampled_dataset["class"].values, predictions)
-    resampled_dataset_metrics[6] = auc(resampled_dataset["class"].values, predictions)
-    resampled_dataset_metrics = list(resampled_dataset_metrics)
-    resampled_dataset_metrics.append(metrics[-1])
-    results_df["GT_SD"] = resampled_dataset_metrics
-
-    # Validate Gaussian network
-    bn_results = cross_validate_bn(resampled_dataset, fold_indices)
-    results_df["CLG"] = bn_results
-
-    # Validate normalizing flow with different params
-    if not BAYESIAN:
-        # Exhaustive grid search
-        # Create a list of all parameter combinations
-        param_combinations = list(
-            product(param_grid["lr"], param_grid["weight_decay"], param_grid["bins"], param_grid["hidden_u"],
-                    param_grid["layers"], param_grid["n_flows"]))
-
-        results = []
-        for i in param_combinations:
-            results.append(cross_validate_nf(resampled_dataset, fold_indices, *i))
-            if TIME_LIMIT * 60 * 60 - 3600 < (time.time() - t_init):
-                break
-        for metrics in results:
-            nf_params = metrics[-1]
-            results_df["NF" + str(nf_params)] = metrics[:-1]
-
-    else:
-        nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type)
-        results_df["NF"] = metrics
-
-        pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
-
+        # First, learn a normalizing now and sample new synthetic data
+        gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices, model_type=args.type)
+        results_df["GT_RD"] = metrics
         if GRAPHIC:
             # Visualize the convergence of the objective function
             plot_convergence(result)
-            plt.savefig(directory_path + "convergence_SD_" + str(dataset_id) + ".png")
+            plt.savefig(directory_path + "convergence_RD_" + str(dataset_id) + ".png")
             plt.clf()
 
             # Visualize the convergence of the parameters
             plot_evaluations(result)
-            plt.savefig(directory_path + "evaluations_SD_" + str(dataset_id) + ".png")
+            plt.savefig(directory_path + "evaluations_RD_" + str(dataset_id) + ".png")
             plt.clf()
 
-        # Train neural net using the best parameters to get metrics
-    print(results_df.drop("params"))
-    results_df.to_csv(directory_path + 'data_' + str(dataset_id) + '.csv')
+        pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
+        resampled_dataset = gt_model.sample(np.min((len(dataset), 100000))).to_pandas()
+        resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
+
+        if args.part == 'rd':
+            print(results_df.drop("params"))
+            results_df.to_csv(directory_path + 'data_' + str(dataset_id) + '.csv')
+
+    if args.part == 'sd' or args.part == 'full':
+        gt_model = pickle.load(open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "rb"))
+        resampled_dataset = pd.read_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv", index_col=0)
+        resampled_dataset["class"] = resampled_dataset["class"].astype('category')
+        results_df = pd.read_csv(directory_path + 'data_' + str(dataset_id) + '.csv', index_col=0)
+        if len(results_df.columns) > 2:
+            results_df = results_df.drop("CLG", axis=1)
+            results_df = results_df.drop("GT_SD", axis=1)
+            results_df = results_df.drop("NF", axis=1)
+
+        # New fold indices
+        fold_indices = kfold_indices(resampled_dataset, k)
+
+        # Check the metrics of the model given the resampled data
+        resampled_dataset_metrics = np.zeros(len(results_df) - 1)
+        tmp = gt_model.logl(resampled_dataset)
+        resampled_dataset_metrics[0] = tmp.mean()
+        resampled_dataset_metrics[2] = tmp.std()
+        predictions = predict_class(resampled_dataset.drop("class", axis=1), gt_model)
+        resampled_dataset_metrics[4] = brier_score(resampled_dataset["class"].values, predictions)
+        resampled_dataset_metrics[6] = auc(resampled_dataset["class"].values, predictions)
+        resampled_dataset_metrics = list(resampled_dataset_metrics)
+        resampled_dataset_metrics.append(results_df["GT_RD"].values[-1])
+        results_df["GT_SD"] = resampled_dataset_metrics
+
+        # Validate Gaussian network
+        bn_results = cross_validate_bn(resampled_dataset, fold_indices)
+        results_df["CLG"] = bn_results
+
+        # Validate normalizing flow with different params
+        if not BAYESIAN:
+            # Exhaustive grid search
+            # Create a list of all parameter combinations
+            param_combinations = list(
+                product(param_grid["lr"], param_grid["weight_decay"], param_grid["bins"], param_grid["hidden_u"],
+                        param_grid["layers"], param_grid["n_flows"]))
+
+            results = []
+            for i in param_combinations:
+                results.append(cross_validate_nf(resampled_dataset, fold_indices, *i))
+                if TIME_LIMIT * 60 * 60 - 3600 < (time.time() - t_init):
+                    break
+            for metrics in results:
+                nf_params = metrics[-1]
+                results_df["NF" + str(nf_params)] = metrics[:-1]
+
+        else:
+            nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type)
+            results_df["NF"] = metrics
+
+            pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
+
+            if GRAPHIC:
+                # Visualize the convergence of the objective function
+                plot_convergence(result)
+                plt.savefig(directory_path + "convergence_SD_" + str(dataset_id) + ".png")
+                plt.clf()
+
+                # Visualize the convergence of the parameters
+                plot_evaluations(result)
+                plt.savefig(directory_path + "evaluations_SD_" + str(dataset_id) + ".png")
+                plt.clf()
+
+            # Train neural net using the best parameters to get metrics
+        print(results_df.drop("params"))
+        results_df.to_csv(directory_path + 'data_' + str(dataset_id) + '.csv')

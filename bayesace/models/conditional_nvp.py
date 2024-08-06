@@ -147,7 +147,7 @@ class ConditionalNVP(ConditionalNF):
         losses = []
         val_losses = []
         pyro.clear_param_store()
-        early_stop_patience = 50
+        early_stop_patience = 100
 
         for epoch in range(steps):
             try:
