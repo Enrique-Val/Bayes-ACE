@@ -38,10 +38,10 @@ def kfold_indices(data, k):
 # Define the number of folds (K)
 k = 10
 steps = 1000
-batch_size = 64
+batch_size = 1028
 
 # Define the number of iterations for Bayesian optimization
-default_opt_iter = 10
+default_opt_iter = 50
 
 # Define how the preprocessing will be done
 JIT_COEF = 1
@@ -281,7 +281,7 @@ if __name__ == "__main__":
 
         if args.part == 'rd':
             print(results_df.drop("params"))
-            results_df.to_csv(directory_path + 'data_' + str(dataset_id) + '.csv')
+        results_df.to_csv(directory_path + 'data_' + str(dataset_id) + '.csv')
 
     if args.part == 'sd' or args.part == 'full':
         gt_model = pickle.load(open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "rb"))
