@@ -67,12 +67,12 @@ param_grid = {
 
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
-    Real(5e-5, 1e-3, name='lr', prior='log-uniform'),
+    Real(5e-5, 5e-4, name='lr', prior='log-uniform'),
     Real(1e-4, 1e-2, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
     Integer(2, 10, name='hidden_units'),
-    Integer(1, 3, name='layers'),
-    Integer(1, 10, name='n_flows')
+    Integer(1, 5, name='layers'),
+    Integer(1, 8, name='n_flows')
 ]
 
 
@@ -174,9 +174,10 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
             return -nf_logl_means  # Assuming we want to maximize loglikelihood
         except ValueError as e:
             if e.args[0][:30] == "Error while computing log_prob":
-                warnings.warn("Error while computing log_prob. Returning a high value for the objective function. "
-                              "Consider smoothing data, decreasing the value of the lr or the complexity of the "
-                              "network.", RuntimeWarning)
+                to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
+                            "Consider smoothing data, decreasing the value of the lr or the complexity of the "
+                            "network.") + str(params)
+                warnings.warn(to_print, RuntimeWarning)
                 print()
                 return 3e+38
             else:
