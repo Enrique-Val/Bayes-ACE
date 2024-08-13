@@ -33,7 +33,7 @@ def get_data(dataset_id: int, standardize=True):
     if dataset_id < 0:
         # Load a toy dataset
         data = pd.read_csv("toy-3class.csv")
-        data["class"] = data["z"].astype('category')
+        data["class"] = data["z"].astype('str').astype('category')
         data = data.drop("z", axis=1)
     else:
         # Load the dataset

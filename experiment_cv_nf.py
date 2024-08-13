@@ -234,6 +234,11 @@ if __name__ == "__main__":
 
     random.seed(0)
 
+    # Set the metrics to evaluate
+    result_metrics = ["Logl", "LoglStd", "Brier", "AUC", "Time"]
+
+    args.part = "sd"
+
     if args.part == 'rd' or args.part == 'full':
         # Load the dataset and preprocess it
         dataset = get_data(dataset_id, standardize=True)
@@ -243,6 +248,7 @@ if __name__ == "__main__":
                                   minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
         d = len(dataset.columns) - 1
 
+        # In case we use NVP, we need to add the split_dim parameter
         if args.type == "NVP":
             param_space[2] = Integer(0, int(d / 2), name='split_dim')
 
@@ -250,7 +256,6 @@ if __name__ == "__main__":
         fold_indices = kfold_indices(dataset, k)
 
         # Storage of results
-        result_metrics = ["Logl", "LoglStd", "Brier", "AUC", "Time"]
         cartesian_product = list(product(result_metrics, ["_mean", "_std"]))
         # Flattening the list of tuples into a single list
         cartesian_product = [word1 + word2 for word1, word2 in cartesian_product]
@@ -287,7 +292,7 @@ if __name__ == "__main__":
     if args.part == 'sd' or args.part == 'full':
         gt_model = pickle.load(open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "rb"))
         resampled_dataset = pd.read_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv", index_col=0)
-        resampled_dataset["class"] = resampled_dataset["class"].astype('category')
+        resampled_dataset["class"] = resampled_dataset["class"].astyep('str').astype('category')
         results_df = pd.read_csv(directory_path + 'data_' + str(dataset_id) + '.csv', index_col=0)
         if len(results_df.columns) > 2:
             results_df = results_df.drop("CLG", axis=1)
@@ -296,6 +301,11 @@ if __name__ == "__main__":
 
         # New fold indices
         fold_indices = kfold_indices(resampled_dataset, k)
+
+        # If we use NVP, we need to add the split_dim parameter
+        d = len(resampled_dataset.columns) - 1
+        if args.type == "NVP":
+            param_space[2] = Integer(0, int(d / 2), name='split_dim')
 
         # Check the metrics of the model given the resampled data
         resampled_dataset_metrics = np.zeros(len(results_df) - 1)
