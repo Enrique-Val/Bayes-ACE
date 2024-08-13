@@ -232,12 +232,11 @@ if __name__ == "__main__":
 
     print("Cross validation dataset: ", dataset_id)
 
+    # Set the seed
     random.seed(0)
 
     # Set the metrics to evaluate
     result_metrics = ["Logl", "LoglStd", "Brier", "AUC", "Time"]
-
-    args.part = "sd"
 
     if args.part == 'rd' or args.part == 'full':
         # Load the dataset and preprocess it
