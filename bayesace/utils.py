@@ -57,17 +57,19 @@ def delta_distance(x_cfx, x_og, eps=0.1):
     return sum(map(lambda i: i > eps, abs_distance[0]))
 
 
-def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class") -> np.ndarray:
+def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mutable = False) -> np.ndarray:
     '''
     Computes the likelihood of the data given the density estimator, marginalizing over all possible values of the
     class variable. Even if provided, the method will ignore it.
 
     :param data: The data to compute the likelihood
     '''
-    if class_var_name in data.columns:
-        data = data.drop(class_var_name, axis=1)
+    if not mutable :
+        data = data.copy()
     if isinstance(density_estimator, ConditionalNF) :
         return density_estimator.likelihood(data, class_var_name=class_var_name)
+    if class_var_name in data.columns:
+        data = data.drop(class_var_name, axis=1)
     class_cpd = density_estimator.cpd(class_var_name)
     class_values = class_cpd.variable_values()
     n_samples = data.shape[0]
@@ -95,14 +97,14 @@ def posterior_probability(x_cfx: pd.DataFrame, y_og: str | list, density_estimat
     else:
         class_cpd = density_estimator.cpd(class_var_name)
         class_labels = class_cpd.variable_values()
-    cfx = x_cfx.copy()
+    x_cfx = x_cfx.copy()
     if isinstance(y_og, str):
-        cfx[class_var_name] = pd.Categorical([y_og] * len(x_cfx.index), categories=class_labels)
+        x_cfx[class_var_name] = pd.Categorical([y_og] * len(x_cfx.index), categories=class_labels)
     else:
         assert len(y_og) == len(x_cfx.index)
-        cfx[class_var_name] = pd.Categorical(y_og, categories=class_labels)
-    prob = np.e ** density_estimator.logl(cfx)
-    ll = likelihood(x_cfx, density_estimator)
+        x_cfx[class_var_name] = pd.Categorical(y_og, categories=class_labels)
+    prob = np.e ** density_estimator.logl(x_cfx)
+    ll = likelihood(x_cfx, density_estimator, mutable = True)
     to_ret = np.empty(shape=len(x_cfx.index))
     # If the likelihood is 0, then classification is done with uniform probability
     to_ret[ll <= 0] = 1/len(class_labels)
@@ -168,9 +170,13 @@ def path(vertex_array: np.ndarray, chunks=2) -> np.ndarray:
 
 
 def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
-    separation = euclidean_distance(path.iloc[0], path.iloc[1])
+    # Separation is computed between each row without for loops, fully vectorised
+    separation = np.linalg.norm(path.diff(axis=0).drop(0), axis=1)
+
     medium_points = ((path + path.shift()) / 2).drop(0).reset_index(drop=True)
-    likelihood_path = (-log_likelihood(medium_points, bayesian_network)) ** penalty * separation
+    point_evaluations = (-log_likelihood(medium_points, bayesian_network)) ** penalty
+    assert (point_evaluations > 0).any()
+    likelihood_path = np.multiply(point_evaluations, separation)
     return np.sum(likelihood_path)
 
 def L0_norm(x_1, x_2, eps=0.01):
@@ -284,5 +290,5 @@ def plot_path(df, res_b = None) :
     plt.scatter(to_plot[to_plot.columns[0]], to_plot[to_plot.columns[1]], color=colours)
     if res_b is not None:
         df_vertex = res_b.path
-        plt.plot(df_vertex[to_plot.columns[0]], df_vertex[to_plot.columns[0]], color="red")
+        plt.plot(df_vertex[to_plot.columns[0]], df_vertex[to_plot.columns[1]], color="red")
 

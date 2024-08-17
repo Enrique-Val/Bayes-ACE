@@ -291,7 +291,7 @@ if __name__ == "__main__":
     if args.part == 'sd' or args.part == 'full':
         gt_model = pickle.load(open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "rb"))
         resampled_dataset = pd.read_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv", index_col=0)
-        resampled_dataset["class"] = resampled_dataset["class"].astyep('str').astype('category')
+        resampled_dataset["class"] = resampled_dataset["class"].astype('str').astype('category')
         results_df = pd.read_csv(directory_path + 'data_' + str(dataset_id) + '.csv', index_col=0)
         if len(results_df.columns) > 2:
             results_df = results_df.drop("CLG", axis=1)

@@ -78,7 +78,7 @@ class ConditionalNF(ABC):
         class_labels = list(self.class_dist.keys())
 
         # Transform dataset to numpy and cast class from string to numerical
-        class_column = np.zeros(len(data), dtype=int)
+        class_column = np.zeros(data.shape[0], dtype=int)
         for i, label in enumerate(class_labels):
             class_column[data[class_var_name] == label] = i
 
@@ -89,13 +89,14 @@ class ConditionalNF(ABC):
     def likelihood(self, data, class_var_name="class"):
         # If the class variable is passed, remove it
         if class_var_name in data.columns:
-            data = data.drop(class_var_name, axis=1)
-        lls = np.zeros(len(data))
-        dataset_test = data.copy()
-        for i in self.class_dist.keys():
-            dataset_test["class"] = i
-            lls = lls + np.e ** self.logl(dataset_test)
+            data = data.values[:, :-1].astype(float)
+        else :
+            data = data.values
+        lls = np.zeros(data.shape[0])
+        for i in range(len(self.class_dist.keys())):
+            lls = lls + np.e ** self.logl_array(data, np.repeat(i,data.shape[0]))
         return lls
+
 
     def predict_proba(self, data: np.ndarray, class_var_name="class") -> np.ndarray:
         # We want to get P(Y|x), which will be computed as P(Y|x) = P(x,Y) / P(x)

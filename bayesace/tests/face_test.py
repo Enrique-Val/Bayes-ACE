@@ -1,9 +1,8 @@
 import os
 import sys
-sys.path.append(os.getcwd())
-import pybnesian as pb
 import numpy as np
 import pandas as pd
+import pybnesian as pb
 
 from sklearn.preprocessing import StandardScaler
 from bayesace.utils import *
@@ -11,6 +10,8 @@ from bayesace.algorithms.face import *
 from itertools import product
 import pickle
 import time
+
+sys.path.append(os.getcwd())
 
 def mlog(x) :
     return -np.log(x)
