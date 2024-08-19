@@ -6,10 +6,11 @@ from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 import multiprocessing as mp
 
-
 NON_ZERO_CONST = 0.000001
 
-def compute_weight_and_add_edge(variables, i, j, point_i, point_j, graph_type, epsilon, f_tilde, bn, chunks):
+
+def compute_weight_and_add_edge(variables, i, j, point_i, point_j, graph_type, epsilon, f_tilde, bn, chunks, k=1,
+                                n_instances=1):
     distance = euclidean_distance(point_i, point_j)
     if distance < epsilon:
         # Calculate the weight based on the provided function
@@ -18,8 +19,15 @@ def compute_weight_and_add_edge(variables, i, j, point_i, point_j, graph_type, e
             weight = epsilon_weight_function(point_i, point_j, epsilon, f_tilde)
         elif graph_type == "kde":
             weight = kde_weight_function(point_i, point_j, bn, f_tilde, variables=variables)[0]
+        elif graph_type == "knn":
+            # First compute volume of sphere with unit radius in d dimensions
+            d = len(variables)
+            volume = np.pi ** (d / 2) / math.gamma(d / 2 + 1)
+            r = k / (n_instances * volume)
+            weight = f_tilde(r / distance) * distance
         elif graph_type == "integral":
-            path_ij = pd.DataFrame(data=straight_path(point_i, point_j, chunks), columns=variables)
+            # Change straight_path for linespace
+            path_ij = pd.DataFrame(data=np.linspace(point_i, point_j, chunks), columns=variables)
             weight = path_likelihood_length(path_ij, bn, penalty=1)
         else:
             raise AttributeError(
@@ -27,8 +35,7 @@ def compute_weight_and_add_edge(variables, i, j, point_i, point_j, graph_type, e
         return (i, j, weight)
 
 
-def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_tilde=None, bn=None, chunks=2):
-
+def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_tilde=None, bn=None, chunks=2, k=1):
     # Create an undirected graph
     graph = nx.Graph()
 
@@ -43,15 +50,16 @@ def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_ti
 
     result = pool.starmap_async(compute_weight_and_add_edge, [
         (dataframe.columns, i[0], i[1], mat[i[0]], mat[i[1]], graph_type, epsilon, f_tilde, bn,
-         chunks) for i in combs])
+         chunks, k, len(dataframe)) for i in combs])
 
     pool.close()
     for i in result.get():
-        if i is not None :
+        if i is not None:
             graph.add_edge(i[0], i[1], weight=i[2])
     return graph
 
-def compute_path(graph, source_node, target_node) :
+
+def compute_path(graph, source_node, target_node):
     try:
         shortest_path = nx.shortest_path(graph, source=source_node, target=target_node, weight='weight')
         shortest_distance = nx.shortest_path_length(graph, source=source_node, target=target_node,
@@ -68,13 +76,13 @@ def find_closest_paths(graph, source_node, target_nodes):
 
     # First check if all the weights are non negative
     weights = []
-    for edge in graph.edges(data=True) :
+    for edge in graph.edges(data=True):
         weights.append(edge[2]["weight"])
     minimum = np.min(weights)
 
-    if minimum < 0 :
+    if minimum < 0:
         for edge in graph.edges(data=True):
-            edge[2]["weight"] = edge[2]["weight"]-minimum + NON_ZERO_CONST
+            edge[2]["weight"] = edge[2]["weight"] - minimum + NON_ZERO_CONST
 
     pool = mp.Pool(mp.cpu_count())
     result = pool.starmap_async(compute_path, [(graph, source_node, target_node) for target_node in target_nodes])
@@ -84,8 +92,8 @@ def find_closest_paths(graph, source_node, target_nodes):
             all_shortest_paths[i[0]] = i[1]
 
     # Return weights to its original state
-    if minimum < 0 :
-        for i,edge in enumerate(graph.edges(data=True)):
+    if minimum < 0:
+        for i, edge in enumerate(graph.edges(data=True)):
             edge[2]["weight"] = weights[i]
 
     return all_shortest_paths
@@ -95,7 +103,7 @@ class FACE(ACE):
     def __init__(self, bayesian_network, features, chunks, dataset: pd.DataFrame, distance_threshold,
                  graph_type,
                  f_tilde=None, seed=0, verbose=False, likelihood_threshold=0.00, accuracy_threshold=0.50,
-                 penalty=1):
+                 penalty=1, k=1):
         super().__init__(bayesian_network, features, chunks, likelihood_threshold=likelihood_threshold,
                          accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose)
         self.dataset = dataset
@@ -104,9 +112,12 @@ class FACE(ACE):
         self.f_tilde = f_tilde
         if f_tilde is None:
             self.f_tilde = neg_log
-        self.graph= build_weighted_graph(dataset, graph_type, epsilon=self.epsilon, f_tilde=self.f_tilde,
-                                          bn=self.bayesian_network, chunks=self.chunks)
+        elif f_tilde == "identity":
+            self.f_tilde = identity
+        self.graph = build_weighted_graph(dataset, graph_type, epsilon=self.epsilon, f_tilde=self.f_tilde,
+                                          bn=self.bayesian_network, chunks=self.chunks, k=k)
         self.y_pred = predict_class(self.dataset, self.bayesian_network)
+        self.k = k
 
     def add_point_to_graph(self, instance: pd.DataFrame):
         assert (instance.columns == self.dataset.columns).all()
@@ -117,7 +128,8 @@ class FACE(ACE):
         pool = mp.Pool(mp.cpu_count())
 
         result = pool.starmap_async(compute_weight_and_add_edge, [
-            (self.dataset.columns, i, len(self.dataset.index), mat[i], new_point, self.graph_type, self.epsilon, self.f_tilde, self.bayesian_network,
+            (self.dataset.columns, i, len(self.dataset.index), mat[i], new_point, self.graph_type, self.epsilon,
+             self.f_tilde, self.bayesian_network,
              self.chunks) for i in self.dataset.index])
 
         pool.close()
@@ -133,9 +145,8 @@ class FACE(ACE):
             if tuple is not None :
                 self.graph.add_edge(i, len(self.dataset.index), weight = tuple[2])'''
 
-    def run(self, instance: pd.DataFrame):
+    def run(self, instance: pd.DataFrame, target_label) -> ACEResult:
         x_og = instance.drop("class", axis=1)
-        y_og = instance["class"].values[0]
 
         # Add node to the graph
         self.add_point_to_graph(x_og)
@@ -145,7 +156,7 @@ class FACE(ACE):
         source_node = len(self.dataset.index)
 
         # Mark target nodes based on the accuracy and likelihood threshold
-        target_nodes = self.dataset.index[self.y_pred[y_og] < self.accuracy_threshold]
+        target_nodes = self.dataset.index[self.y_pred[target_label] > self.accuracy_threshold]
 
         if len(target_nodes) > 0:
             true_array = likelihood(self.dataset.iloc[target_nodes], self.bayesian_network) > self.likelihood_threshold
@@ -156,7 +167,9 @@ class FACE(ACE):
 
         closest_paths = find_closest_paths(self.graph, source_node, target_nodes)
         if len(closest_paths) == 0:
-            Warning("No paths found. Perhaps your point was too far from the data or you specified a low distance threshold")
+            Warning(
+                "No paths found. Perhaps your point was too far from the data or you specified a low distance "
+                "threshold epsilon")
             return ACEResult(None, x_og, np.inf)
 
         min_len = np.inf
