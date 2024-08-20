@@ -8,10 +8,19 @@ from bayesace.algorithms.algorithm import ACE, ACEResult
 
 MAX_VALUE_FLOAT = 1e+307
 
+# Helper function to encapsulate the parallelization logic
+def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estimator, penalty):
+    vertex_array = np.resize(np.append(x_og, x_i), new_shape=(n_vertex + 2, n_features))
+    paths = path(vertex_array, chunks=chunks)
+    f1_i = path_likelihood_length(pd.DataFrame(paths, columns=features),
+                                  density_estimator=density_estimator, penalty=penalty)
+    if f1_i > MAX_VALUE_FLOAT:
+        f1_i = MAX_VALUE_FLOAT
+    return f1_i
 
 class BestPathFinder(Problem):
-    def __init__(self, bayesian_network, instance, target_label, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
-                 accuracy_threshold=0.05, sampling_range=(-3, 3), **kwargs):
+    def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
+                 accuracy_threshold=0.05, sampling_range=(-3, 3), parallelize=False, **kwargs):
         n_features = (len(instance.columns) - 1)
         xl = None
         xu = None
@@ -34,29 +43,35 @@ class BestPathFinder(Problem):
         self.penalty = penalty
         self.features = instance.drop("class", axis=1).columns
         self.n_features = n_features
-        self.bayesian_network = bayesian_network
-        assert self.bayesian_network.fitted()
+        self.density_estimator = density_estimator
+        assert self.density_estimator.fitted()
         self.chunks = chunks
         self.likelihood_threshold = likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
+        self.parallelize = parallelize
 
     def _evaluate(self, x, out, *args, **kwargs):
         assert len(np.append(self.x_og, x[0])) == (self.n_vertex + 2) * self.n_features
         f1 = []
-        for x_i in x:
-            vertex_array = np.resize(np.append(self.x_og, x_i), new_shape=(self.n_vertex + 2, self.n_features))
-            paths = path(vertex_array, chunks=self.chunks)
-            f1_i = path_likelihood_length(pd.DataFrame(paths, columns=self.features),
-                                        bayesian_network=self.bayesian_network, penalty=self.penalty)
-            if f1_i > MAX_VALUE_FLOAT:
-                f1_i = MAX_VALUE_FLOAT
-            f1.append(f1_i)
+        if self.parallelize :
+            with mp.Pool(mp.cpu_count()) as pool:
+                f1 = pool.starmap(process_x_i, [(x_i, self.x_og, self.n_vertex, self.n_features, self.chunks, self.features,
+                                                 self.density_estimator, self.penalty) for x_i in x])
+        else :
+            for x_i in x:
+                vertex_array = np.resize(np.append(self.x_og, x_i), new_shape=(self.n_vertex + 2, self.n_features))
+                paths = path(vertex_array, chunks=self.chunks)
+                f1_i = path_likelihood_length(pd.DataFrame(paths, columns=self.features),
+                                              density_estimator=self.density_estimator, penalty=self.penalty)
+                if f1_i > MAX_VALUE_FLOAT:
+                    f1_i = MAX_VALUE_FLOAT
+                f1.append(f1_i)
         out["F"] = np.column_stack(f1)
 
         x_cfx = pd.DataFrame(x[:,-self.n_features:], columns=self.features)
         g1 = -posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.target_label,
-                                    self.bayesian_network) + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
-        g2 = -likelihood(pd.DataFrame(x_cfx, columns=self.features), self.bayesian_network) + self.likelihood_threshold
+                                    self.density_estimator) + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
+        g2 = -likelihood(pd.DataFrame(x_cfx, columns=self.features), self.density_estimator) + self.likelihood_threshold
         out["G"] = np.column_stack([g1, g2])
 
 
@@ -66,14 +81,14 @@ class BayesACE(ACE):
         y_og = instance["class"].values[0]
         class_labels = None
         probabilities = None
-        if isinstance(self.bayesian_network, ConditionalNF):
-            class_labels = self.bayesian_network.get_class_labels()
-            probabilities = list(self.bayesian_network.get_class_distribution().values())
+        if isinstance(self.density_estimator, ConditionalNF):
+            class_labels = self.density_estimator.get_class_labels()
+            probabilities = list(self.density_estimator.get_class_distribution().values())
 
         else:
-            class_cpd = self.bayesian_network.cpd("class")
+            class_cpd = self.density_estimator.cpd("class")
             class_labels = class_cpd.variable_values()
-            probabilities = self.bayesian_network.cpd("class").probabilities()
+            probabilities = self.density_estimator.cpd("class").probabilities()
         var_probs = {class_labels[i]: probabilities[i] for i in
                      range(len(class_labels))}
 
@@ -84,12 +99,12 @@ class BayesACE(ACE):
         initial_sample = pd.DataFrame(columns=self.features)
         count = 0
         while not completed :
-            candidate_initial = self.bayesian_network.sample(n_samples, ordered=True, seed=self.seed+count).to_pandas()
+            candidate_initial = self.density_estimator.sample(n_samples, ordered=True, seed=self.seed + count).to_pandas()
             candidate_initial = candidate_initial[candidate_initial["class"] == target_label]
 
             # Get likelihood and probability of the class
-            ll = likelihood(candidate_initial, self.bayesian_network)
-            post_prob = posterior_probability(candidate_initial, target_label, self.bayesian_network)
+            ll = likelihood(candidate_initial, self.density_estimator)
+            post_prob = posterior_probability(candidate_initial, target_label, self.density_estimator)
 
             mask = (ll > self.likelihood_threshold) & (post_prob > self.accuracy_threshold)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
@@ -111,8 +126,8 @@ class BayesACE(ACE):
             return initial_sample
 
         if self.initialization == "default" :
-            paths_sample = self.bayesian_network.sample(self.n_vertex * self.population_size, ordered=True,
-                                                      seed=self.seed).to_pandas()
+            paths_sample = self.density_estimator.sample(self.n_vertex * self.population_size, ordered=True,
+                                                         seed=self.seed).to_pandas()
             paths_sample = paths_sample.drop("class", axis=1)
             paths_sample = paths_sample.clip(self.sampling_range[0], self.sampling_range[1])
             # new_sample = new_sample[new_sample["class"] != y_og].head(self.population_size).reset_index(drop=True)
@@ -129,14 +144,14 @@ class BayesACE(ACE):
             # TODO optional, add a bit of noise to the paths
             return np.hstack((paths_sample, initial_sample))
 
-    def __init__(self, bayesian_network, features, chunks, n_vertex, pop_size=100,
+    def __init__(self, density_estimator, features, chunks, n_vertex, pop_size=100,
                  generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=None,
                  initialization="default",
                  seed=0,
-                 verbose=True):
-        super().__init__(bayesian_network, features, chunks, likelihood_threshold=likelihood_threshold,
-                         accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose)
-        self.bayesian_network = bayesian_network
+                 verbose=True, parallelize=False):
+        super().__init__(density_estimator, features, chunks, likelihood_threshold=likelihood_threshold,
+                         accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
+                         parallelize=parallelize)
         self.n_vertex = n_vertex
         self.generations = generations
         self.population_size = pop_size
@@ -147,6 +162,7 @@ class BayesACE(ACE):
         self.initialization = initialization
 
     def run(self, instance: pd.DataFrame, target_label, return_info=False):
+        super().run(instance, target_label)
         termination = DefaultSingleObjectiveTermination(
             ftol=0.5 * self.n_features ** self.penalty,
             period=20
@@ -154,7 +170,7 @@ class BayesACE(ACE):
         termination = ("n_gen",20)
         initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)
 
-        problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance,
+        problem = BestPathFinder(density_estimator=self.density_estimator, instance=instance,
                                  target_label=target_label, n_vertex=self.n_vertex,
                                  penalty=self.penalty, chunks=self.chunks,
                                  likelihood_threshold=self.likelihood_threshold,
@@ -178,7 +194,7 @@ class BayesACE(ACE):
         counterfactual = path_to_ret.iloc[-1]
         path_to_compute = path(total_path, chunks=self.chunks)
         distance = path_likelihood_length(pd.DataFrame(path_to_compute, columns=self.features),
-                                            bayesian_network=self.bayesian_network, penalty=self.penalty)
+                                          density_estimator=self.density_estimator, penalty=self.penalty)
         if return_info:
             return ACEResult(counterfactual, path_to_ret, distance), res
         return ACEResult(counterfactual, path_to_ret, distance)

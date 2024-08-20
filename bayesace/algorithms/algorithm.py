@@ -27,20 +27,22 @@ class ACEResult():
 
 
 class ACE(ABC):
-    def __init__(self, bayesian_network, features, chunks, likelihood_threshold=0, accuracy_threshold=0.5, penalty=1,
-                 seed=0, verbose=True):
-        self.bayesian_network = bayesian_network
+    def __init__(self, density_estimator, features, chunks, likelihood_threshold=0, accuracy_threshold=0.5, penalty=1,
+                 seed=0, verbose=True, parallelize=False):
+        self.density_estimator = density_estimator
         self.penalty = penalty
         self.features = features
         self.n_features = len(self.features)
-        self.bayesian_network = bayesian_network
+        self.density_estimator = density_estimator
         self.chunks = chunks
         self.likelihood_threshold = likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
         self.seed = seed
         random.seed(self.seed)
         self.verbose = verbose
+        self.parallelize = parallelize
 
     @abstractmethod
     def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
+        assert (instance["class"].values[0] != target_label)
         return

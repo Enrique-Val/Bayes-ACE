@@ -7,55 +7,66 @@ from bayesace.algorithms.algorithm import ACE, ACEResult
 import multiprocessing as mp
 
 NON_ZERO_CONST = 0.000001
+n_processes = 1#mp.cpu_count()
 
 
-def compute_weight_and_add_edge(variables, i, j, point_i, point_j, graph_type, epsilon, f_tilde, bn, chunks, k=1,
-                                n_instances=1):
+def compute_weight(point_i, point_j, epsilon, weight_function, *args):
     distance = euclidean_distance(point_i, point_j)
+    # Directly use the provided weight function to compute the weight
     if distance < epsilon:
-        # Calculate the weight based on the provided function
-        weight = None
-        if graph_type == "epsilon":
-            weight = epsilon_weight_function(point_i, point_j, epsilon, f_tilde)
-        elif graph_type == "kde":
-            weight = kde_weight_function(point_i, point_j, bn, f_tilde, variables=variables)[0]
-        elif graph_type == "knn":
-            # First compute volume of sphere with unit radius in d dimensions
-            d = len(variables)
-            volume = np.pi ** (d / 2) / math.gamma(d / 2 + 1)
-            r = k / (n_instances * volume)
-            weight = f_tilde(r / distance) * distance
-        elif graph_type == "integral":
-            # Change straight_path for linespace
-            path_ij = pd.DataFrame(data=np.linspace(point_i, point_j, chunks), columns=variables)
-            weight = path_likelihood_length(path_ij, bn, penalty=1)
-        else:
-            raise AttributeError(
-                "Parameter \"graph_type\" should take value \"epsilon\", \"kde\" or \"integral\"")
-        return (i, j, weight)
+        weight = weight_function(point_i, point_j, distance, *args)
+        return weight
+    return None
 
 
-def build_weighted_graph(dataframe: pd.DataFrame, graph_type, epsilon=0.25, f_tilde=None, bn=None, chunks=2, k=1):
-    # Create an undirected graph
+def epsilon_weight(point1, point2, distance, epsilon, f_tilde):
+    d = len(point1)
+    return f_tilde(epsilon ** d / distance) * distance
+
+
+def kde_weight(point1, point2, distance, density_estimator, f_tilde, variables):
+    return f_tilde(likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2, density_estimator)) * distance
+
+
+def knn_weight(point1, point2, distance, k, n_instances, d, f_tilde):
+    volume = np.pi ** (d / 2) / math.gamma(d / 2 + 1)
+    r = k / (n_instances * volume)
+    return f_tilde(r / distance) * distance
+
+
+def integral_weight(point1, point2, distance, density_estimator, variables, chunks):
+    path_ij = pd.DataFrame(data=np.linspace(point1, point2, chunks), columns=variables)
+    return path_likelihood_length(path_ij, density_estimator, penalty=1)
+
+
+def build_weighted_graph(dataframe: pd.DataFrame, epsilon, weight_function, weight_args=None, parallelize=False):
     graph = nx.Graph()
-
     mat = dataframe.to_numpy()
-
-    # Add nodes to the graph
     graph.add_nodes_from(dataframe.index)
 
     combs = combinations(list(dataframe.index), 2)
-    # Connect nodes if their Euclidean distance is below the threshold
-    pool = mp.Pool(mp.cpu_count())
 
-    result = pool.starmap_async(compute_weight_and_add_edge, [
-        (dataframe.columns, i[0], i[1], mat[i[0]], mat[i[1]], graph_type, epsilon, f_tilde, bn,
-         chunks, k, len(dataframe)) for i in combs])
+    if parallelize:
+        pool = mp.Pool(n_processes)
 
-    pool.close()
-    for i in result.get():
-        if i is not None:
-            graph.add_edge(i[0], i[1], weight=i[2])
+        result = pool.starmap(compute_weight, [
+            (mat[i[0]], mat[i[1]], epsilon, weight_function, *weight_args)
+            for i in combs
+        ])
+
+        pool.close()
+        pool.join()
+
+        for i, (i_idx, j_idx) in enumerate(combs):
+            weight = result[i]
+            if weight is not None:
+                graph.add_edge(i_idx, j_idx, weight=weight)
+    else:
+        for i, (i_idx, j_idx) in enumerate(combs):
+            weight = compute_weight(mat[i_idx], mat[j_idx], epsilon, weight_function, *weight_args)
+            if weight is not None:
+                graph.add_edge(i_idx, j_idx, weight=weight)
+
     return graph
 
 
@@ -70,7 +81,7 @@ def compute_path(graph, source_node, target_node):
         return None
 
 
-def find_closest_paths(graph, source_node, target_nodes):
+def find_closest_paths(graph, source_node, target_nodes, parallelize=False):
     # Use Dijkstra's algorithm to find the shortest paths
     all_shortest_paths = {}
 
@@ -84,12 +95,19 @@ def find_closest_paths(graph, source_node, target_nodes):
         for edge in graph.edges(data=True):
             edge[2]["weight"] = edge[2]["weight"] - minimum + NON_ZERO_CONST
 
-    pool = mp.Pool(mp.cpu_count())
-    result = pool.starmap_async(compute_path, [(graph, source_node, target_node) for target_node in target_nodes])
-    pool.close()
-    for i in result.get():
-        if i is not None:
-            all_shortest_paths[i[0]] = i[1]
+    result = []
+    if parallelize :
+        pool = mp.Pool(n_processes)
+        result = pool.starmap_async(compute_path, [(graph, source_node, target_node) for target_node in target_nodes])
+        pool.close()
+        for i in result.get():
+            if i is not None:
+                all_shortest_paths[i[0]] = i[1]
+    else :
+        for target_node in target_nodes :
+            path = compute_path(graph, source_node, target_node)
+            if path is not None:
+                all_shortest_paths[target_node] = path[1]
 
     # Return weights to its original state
     if minimum < 0:
@@ -100,52 +118,72 @@ def find_closest_paths(graph, source_node, target_nodes):
 
 
 class FACE(ACE):
-    def __init__(self, bayesian_network, features, chunks, dataset: pd.DataFrame, distance_threshold,
+    def __init__(self, density_estimator, features, chunks, dataset: pd.DataFrame, distance_threshold,
                  graph_type,
                  f_tilde=None, seed=0, verbose=False, likelihood_threshold=0.00, accuracy_threshold=0.50,
-                 penalty=1, k=1):
-        super().__init__(bayesian_network, features, chunks, likelihood_threshold=likelihood_threshold,
-                         accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose)
+                 penalty=1, k=1, parallelize=True):
+        assert (list(dataset.columns) == features).all()
+        super().__init__(density_estimator, features, chunks, likelihood_threshold=likelihood_threshold,
+                         accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
+                         parallelize=parallelize)
         self.dataset = dataset
         self.epsilon = distance_threshold
         self.graph_type = graph_type
+
         self.f_tilde = f_tilde
         if f_tilde is None:
             self.f_tilde = neg_log
         elif f_tilde == "identity":
             self.f_tilde = identity
-        self.graph = build_weighted_graph(dataset, graph_type, epsilon=self.epsilon, f_tilde=self.f_tilde,
-                                          bn=self.bayesian_network, chunks=self.chunks, k=k)
-        self.y_pred = predict_class(self.dataset, self.bayesian_network)
+
+        self.weight_function = None
+        self.weight_args = None
+        # Determine the appropriate weight function and arguments based on the graph type
+        if graph_type == "epsilon":
+            self.weight_function = epsilon_weight
+            self.weight_args = [self.epsilon, self.f_tilde]
+        elif graph_type == "kde":
+            self.weight_function = kde_weight
+            self.weight_args = [density_estimator, self.f_tilde, dataset.columns]
+        elif graph_type == "knn":
+            self.weight_function = knn_weight
+            self.weight_args = [k, dataset.shape[0], dataset.shape[1], self.f_tilde]
+        elif graph_type == "integral":
+            self.weight_function = integral_weight
+            self.weight_args = [density_estimator, features, chunks]
+        else:
+            raise AttributeError("Invalid graph_type. Expected 'epsilon', 'kde', 'knn', or 'integral'.")
+
+        self.graph = build_weighted_graph(dataset, epsilon=self.epsilon, weight_function=self.weight_function,
+                                          weight_args = self.weight_args, parallelize=self.parallelize)
+        self.y_pred = predict_class(self.dataset, self.density_estimator)
         self.k = k
 
     def add_point_to_graph(self, instance: pd.DataFrame):
         assert (instance.columns == self.dataset.columns).all()
-        self.graph.add_node(len(self.dataset.index))
+        self.graph.add_node(self.dataset.shape[0])
         mat = self.dataset.to_numpy()
         new_point = instance.values[0]
 
-        pool = mp.Pool(mp.cpu_count())
+        if self.parallelize :
+            pool = mp.Pool(n_processes)
 
-        result = pool.starmap_async(compute_weight_and_add_edge, [
-            (self.dataset.columns, i, len(self.dataset.index), mat[i], new_point, self.graph_type, self.epsilon,
-             self.f_tilde, self.bayesian_network,
-             self.chunks) for i in self.dataset.index])
+            result = pool.starmap(compute_weight, [
+                (new_point, mat[i], self.epsilon, self.weight_function, *self.weight_args) for i in self.dataset.index])
 
-        pool.close()
-        for i in result.get():
-            if i is not None:
-                self.graph.add_edge(i[0], i[1], weight=i[2])
-
-        '''for i in range(mat.shape[0]):
-            point_i = mat[i]
-            tuple = compute_weight_and_add_edge(self.graph, self.dataset.columns, i, len(self.dataset.index), point_i,
-                                        new_point, self.graph_type, self.epsilon, self.f_tilde, self.bayesian_network,
-                                        self.chunks)
-            if tuple is not None :
-                self.graph.add_edge(i, len(self.dataset.index), weight = tuple[2])'''
+            pool.close()
+            for i, weight_i in enumerate(result):
+                if weight_i is not None:
+                    self.graph.add_edge(self.dataset.shape[0], i, weight=weight_i)
+        else :
+            for i in self.dataset.index:
+                point_i = mat[i]
+                weight = compute_weight(point_i, new_point, self.epsilon, self.weight_function, *self.weight_args)
+                if weight is not None :
+                    self.graph.add_edge(i, len(self.dataset.index), weight=weight)
 
     def run(self, instance: pd.DataFrame, target_label) -> ACEResult:
+        super().run(instance, target_label)
         x_og = instance.drop("class", axis=1)
 
         # Add node to the graph
@@ -159,13 +197,13 @@ class FACE(ACE):
         target_nodes = self.dataset.index[self.y_pred[target_label] > self.accuracy_threshold]
 
         if len(target_nodes) > 0:
-            true_array = likelihood(self.dataset.iloc[target_nodes], self.bayesian_network) > self.likelihood_threshold
+            true_array = likelihood(self.dataset.iloc[target_nodes], self.density_estimator) > self.likelihood_threshold
             target_nodes = target_nodes[true_array]
 
         if len(target_nodes) == 0:
             return ACEResult(None, x_og, np.inf)
 
-        closest_paths = find_closest_paths(self.graph, source_node, target_nodes)
+        closest_paths = find_closest_paths(self.graph, source_node, target_nodes, parallelize=self.parallelize)
         if len(closest_paths) == 0:
             Warning(
                 "No paths found. Perhaps your point was too far from the data or you specified a low distance "
@@ -192,6 +230,10 @@ class FACE(ACE):
                 print(f"   Distance: {info['distance']}")
         path_x = self.dataset.iloc[closest_paths[closest_node]["path"][1:]]
         path_x = pd.concat([x_og, path_x])
+        # Change index of original instance to -1
+        copy_index = list(path_x.index)
+        copy_index[0] = -1
+        path_x.index = copy_index
 
         counterfactual = path_x.iloc[-1]
 
@@ -199,16 +241,3 @@ class FACE(ACE):
         self.graph.remove_node(source_node)
 
         return ACEResult(counterfactual, path_x, min_len)
-
-
-def epsilon_weight_function(point1, point2, epsilon, f_tilde):
-    d = len(point1)
-    dist = euclidean_distance(point1, point2)
-    if not dist > 0:
-        return NON_ZERO_CONST
-    return f_tilde(epsilon ** d / dist) * dist
-
-
-def kde_weight_function(point1, point2, bn, f_tilde, variables):
-    dist = euclidean_distance(point1, point2)
-    return f_tilde(likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2, bn)) * dist

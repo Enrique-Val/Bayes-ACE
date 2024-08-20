@@ -169,12 +169,12 @@ def path(vertex_array: np.ndarray, chunks=2) -> np.ndarray:
     return to_ret_path
 
 
-def path_likelihood_length(path: pd.DataFrame, bayesian_network, penalty=1):
+def path_likelihood_length(path: pd.DataFrame, density_estimator, penalty=1):
     # Separation is computed between each row without for loops, fully vectorised
     separation = np.linalg.norm(path.diff(axis=0).drop(0), axis=1)
 
     medium_points = ((path + path.shift()) / 2).drop(0).reset_index(drop=True)
-    point_evaluations = (-log_likelihood(medium_points, bayesian_network)) ** penalty
+    point_evaluations = (-log_likelihood(medium_points, density_estimator)) ** penalty
     assert (point_evaluations > 0).any()
     likelihood_path = np.multiply(point_evaluations, separation)
     return np.sum(likelihood_path)

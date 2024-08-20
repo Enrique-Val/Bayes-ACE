@@ -1,32 +1,14 @@
 import random
-import csv
 import os
 import sys
 
 import pickle
 
-from bayesace.algorithms.algorithm import ACEResult
-from bayesace.models.utils import get_data
-
 sys.path.append(os.getcwd())
 import argparse
 
-import pandas as pd
-import numpy as np
-from pybnesian import hc, CLGNetworkType, SemiparametricBNType, SemiparametricBN, CLGNetwork
-# from drawdata import draw_scatter
-import matplotlib.pyplot as plt
-
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
-from bayesace.algorithms.face import FACE
-
-from sklearn.preprocessing import StandardScaler
-import openml as oml
-
-import multiprocessing as mp
-
-import time
 
 if __name__ == "__main__":
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
@@ -86,7 +68,7 @@ if __name__ == "__main__":
                 distances = np.zeros(n_vertices)
                 evaluations = np.zeros(n_vertices)
                 for n_vertex in range(n_vertices):
-                    alg = BayesACE(bayesian_network=density_estimator, features=df_train.columns[:-1],
+                    alg = BayesACE(density_estimator=density_estimator, features=df_train.columns[:-1],
                                    n_vertex=n_vertex,
                                    accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold,
                                    chunks=chunks, penalty=penalty, sampling_range=sampling_range,
@@ -97,7 +79,7 @@ if __name__ == "__main__":
                     # print(result.distance)
                     path_to_compute = path(result.path.values, chunks=chunks)
                     distances[n_vertex] = path_likelihood_length(pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
-                                            bayesian_network=gt_estimator, penalty=penalty)
+                                                                 density_estimator=gt_estimator, penalty=penalty)
                     evaluations[n_vertex] = res.algorithm.evaluator.n_eval
                     plot_path(df_train, result)
                     plt.title("Counterfactual"+str(i)+" and vertex"+str(n_vertex))
