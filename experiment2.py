@@ -5,6 +5,8 @@ import sys
 import pickle
 from itertools import product
 
+import pandas as pd
+
 sys.path.append(os.getcwd())
 import argparse
 
@@ -27,6 +29,9 @@ if __name__ == "__main__":
     # Number of counterfactuals
     n_counterfactuals = 30
 
+    # Folder for storing the results
+    results_dir = './results/exp_2/'
+
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
@@ -39,7 +44,8 @@ if __name__ == "__main__":
     random.seed(0)
 
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    df_train = pd.read_csv('./results/exp_cv_2/' + str(dataset_id) + '/resampled_data' + str(dataset_id) + '.csv',
+    results_cv_dir = './results/exp_cv_2/'
+    df_train = pd.read_csv(results_cv_dir + str(dataset_id) + '/resampled_data' + str(dataset_id) + '.csv',
                            index_col=0)
     # Transform the class into a categorical variable
     class_processed = df_train[df_train.columns[-1]].astype('string').astype('category')
@@ -53,27 +59,30 @@ if __name__ == "__main__":
     sampling_range = (xl, xu)
 
     # Load the pickled gt density estimator from the correct folder
-    gt_estimator = pickle.load(
-        open('./results/exp_cv_2/' + str(dataset_id) + '/gt_nf_' + str(dataset_id) + '.pkl', 'rb'))
+    gt_estimator: ConditionalNF = pickle.load(
+        open(results_cv_dir + str(dataset_id) + '/gt_nf_' + str(dataset_id) + '.pkl', 'rb'))
     df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0).to_pandas()
     clg_network = hill_climbing(data=df_train, bn_type="CLG")
-    normalizing_flow = pickle.load(
-        open('./results/exp_cv_2/' + str(dataset_id) + '/nf_' + str(dataset_id) + '.pkl', 'rb'))
-    cv_results = pd.read_csv('./results/exp_cv_2/' + str(dataset_id) + '/data' + str(dataset_id) + '_bis.csv',
+    normalizing_flow: ConditionalNF = pickle.load(
+        open(results_cv_dir + str(dataset_id) + '/nf_' + str(dataset_id) + '.pkl', 'rb'))
+    cv_results = pd.read_csv(results_cv_dir + str(dataset_id) + '/data' + str(dataset_id) + '_bis.csv',
                              index_col=0)
 
     mu_gt = float(cv_results.loc["Logl_mean", "GT_SD"])
     std_gt = float(cv_results.loc["LoglStd_mean", "GT_SD"])
 
     # Names of the models
-    model_str_list = ["face_baseline", "face_kde", "face_eps"] + ["bayesace_nf_v" + str(n_vertex) for n_vertex in n_vertices] + ["bayesace_clg_v" + str(n_vertex) for n_vertex in n_vertices]
+    models = [normalizing_flow, clg_network]
+    models_str = ["nf", "clg"]
+    faces_str = ["face_baseline", "face_kde", "face_eps"]
+    algorithm_str_list = faces_str + ["bayesace_" + model_str + "_v" + str(n_vertex) for model_str, n_vertex in product(models_str, n_vertices)]
 
     # List for storing the models
     algorithms = []
 
     # I want to store the times of building the algorithms
     construction_time_df = pd.DataFrame(columns=["construction_time"],
-                                        index=model_str_list)
+                                        index=algorithm_str_list)
 
     t0 = time.time()
     alg = FACE(density_estimator=gt_estimator, features=df_train.columns[:-1], chunks=chunks,
@@ -103,65 +112,75 @@ if __name__ == "__main__":
     construction_time_df.loc["face_eps", "construction_time"] = tf
 
     # I need as many BayesACE (both with normalizing flow and CLG) as vertices
-    for n_vertex in n_vertices:
-        t0 = time.time()
-        alg = BayesACE(density_estimator=normalizing_flow, features=df_train.columns[:-1],
-                               n_vertex=n_vertex,
-                               accuracy_threshold=0.00, likelihood_threshold=0.00,
-                               chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                               initialization="default",
-                               seed=0, verbose=verbose, pop_size=100, parallelize=parallelize)
-        tf = time.time()-t0
-        algorithms.append(alg)
-        construction_time_df.loc["bayesace_nf_v", "construction_time"] = tf
-
-    for n_vertex in n_vertices:
-        t0 = time.time()
-        alg = BayesACE(density_estimator=clg_network, features=df_train.columns[:-1],
-                                n_vertex=n_vertex,
-                                accuracy_threshold=0.00, likelihood_threshold=0.00,
-                                chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                                initialization="default",
-                                seed=0, verbose=verbose, pop_size=100,parallelize=parallelize)
-        tf = time.time()-t0
-        algorithms.append(alg)
-        construction_time_df.loc["bayesace_clg_v", "construction_time"] = tf
+    for algorithm_str,model in zip(["nf", "clg"], [normalizing_flow, clg_network]):
+        for n_vertex in n_vertices:
+            t0 = time.time()
+            alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
+                                   n_vertex=n_vertex,
+                                   accuracy_threshold=0.00, likelihood_threshold=0.00,
+                                   chunks=chunks, penalty=penalty, sampling_range=sampling_range,
+                                   initialization="default",
+                                   seed=0, verbose=verbose, pop_size=100, parallelize=parallelize)
+            tf = time.time()-t0
+            algorithms.append(alg)
+            construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
 
     # Store the construction time. The dataset need to be identified.
-    if not os.path.exists('./results/exp_2/'):
-        os.makedirs('./results/exp_2/')
-    construction_time_df.to_csv('./results/exp_2/construction_time_data' + str(dataset_id) + '.csv')
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+    construction_time_df.to_csv(results_dir+'construction_time_data' + str(dataset_id) + '.csv')
 
-    metrics = ["distance", "time"]
-    results_cols = [metric + "_" + model_str for metric, model_str in product(metrics, model_str_list)]
+    metrics = ["distance", "counterfactual", "time"]
+
+    # Folder in case we want to store every result:
+    if not os.path.exists(results_dir+'paths/'):
+        os.makedirs(results_dir+'paths/')
 
     for likelihood_dev in likelihood_dev_list:
         for accuracy_threshold in accuracy_threshold_list:
             # Result storage
-            results_df = pd.DataFrame(columns=results_cols, index=range(n_counterfactuals))
-            for algorithm, model_str in zip(algorithms, model_str_list):
+            results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
+            for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
                 # Set the proper likelihood  and accuracy thresholds
                 algorithm.likelihood_threshold = np.e ** (mu_gt + likelihood_dev * std_gt)
                 algorithm.accuracy_threshold = accuracy_threshold
                 for i in range(n_counterfactuals):
                     instance = df_counterfactuals.iloc[[i]]
+                    target_label = get_other_class(df_train["class"].cat.categories, instance["class"].values[0])
                     t0 = time.time()
-                    result = algorithm.run(instance, target_label="b" if (instance["class"] != "b").all() else "a")
+                    result = algorithm.run(instance, target_label=target_label)
                     tf = time.time()-t0
-                    # TODO check if indeed a counterfactual was found
-                    path_to_compute = path(result.path.values, chunks=chunks)
-                    path_length_gt = path_likelihood_length(
-                        pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
-                        density_estimator=gt_estimator, penalty=penalty)
-                    results_df.loc[i, "distance_" + model_str] = path_length_gt
-                    results_df.loc[i, "time_" + model_str] = tf
+                    '''
+                    # Uncomment if all paths want to be stored
+                    result.path.to_csv(results_dir+'paths/data' + str(dataset_id) + '_likelihood' + str(
+                    likelihood_dev) + '_acc' + str(accuracy_threshold) +  + algorithm_str + '_counterfactual' + 
+                    str(i) + '.csv') 
+                    '''
+                    # Check first if indeed a counterfactual was found
+                    if result.counterfactual is None:
+                        results_dfs['distance'].loc[i, algorithm_str] = np.nan
+                        results_dfs['time'].loc[i, algorithm_str] = tf
+                        results_dfs['counterfactual'].loc[i, algorithm_str] = np.nan
+                        print("Counterfactual " + str(i) + " model " + algorithm_str + " distance: " + str(np.nan) + " time: " + str(tf))
+                    else :
+                        path_to_compute = path(result.path.values, chunks=chunks)
+                        path_length_gt = path_likelihood_length(
+                            pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
+                            density_estimator=gt_estimator, penalty=penalty)
+                        results_dfs['distance'].loc[i, algorithm_str] = path_length_gt
+                        results_dfs['time'].loc[i, algorithm_str] = tf
+                        print(result.counterfactual.values)
+                        results_dfs['counterfactual'].loc[i, algorithm_str] = result.counterfactual.values
+                        print("Counterfactual " + str(i) + " model " + algorithm_str + " distance: " + str(path_length_gt) + " time: " + str(tf))
+                    '''
+                    # Uncomment for a plot (only for 2D data)
                     plot_path(df_train, result)
-                    plt.title("Counterfactual" + str(i) + " model" + model_str)
-                    plt.show()
+                    plt.title("Counterfactual" + str(i) + " model" + algorithm_str)
+                    plt.show()'''
 
             # Save the results
-            if not os.path.exists('./results/exp_2/'):
-                os.makedirs('./results/exp_2/')
-            results_df.to_csv('./results/exp_2/results_data' + str(dataset_id) + '_likelihood' + str(likelihood_dev) + '_acc' + str(accuracy_threshold) + '.csv')
-
+            for i in metrics:
+                if not os.path.exists(results_dir+i+'/'):
+                    os.makedirs(results_dir+i+'/')
+                results_dfs[i].to_csv(results_dir+i+'/data' + str(dataset_id) + '_likelihood' + str(likelihood_dev) + '_acc' + str(accuracy_threshold) + '.csv')
 

@@ -292,3 +292,7 @@ def plot_path(df, res_b = None) :
         df_vertex = res_b.path
         plt.plot(df_vertex[to_plot.columns[0]], df_vertex[to_plot.columns[1]], color="red")
 
+
+def get_other_class(class_values, class_value):
+    return class_values[class_values != class_value][0]
+
