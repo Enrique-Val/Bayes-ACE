@@ -13,8 +13,8 @@ from bayesace.algorithms.bayesace_algorithm import BayesACE
 if __name__ == "__main__":
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    likelihood_threshold_sigma = 0
-    accuracy_threshold = 0.7
+    likelihood_threshold_sigma = 1
+    accuracy_threshold = 0.9
     n_vertices = 5
     penalties = [1, 5, 10, 15, 20]
     # Number of points for approximating integrals:
@@ -59,37 +59,39 @@ if __name__ == "__main__":
         # np.seterr(divide='ignore')
         for penalty in penalties:
             # Result storage
-            distances_mat = np.zeros((n_counterfactuals, n_vertices))
+            times_mat = np.zeros((n_counterfactuals, n_vertices))
             evaluations_mat = np.zeros((n_counterfactuals, n_vertices))
             for i in range(n_counterfactuals):
                 instance = df_counterfactuals.iloc[[i]]
                 likelihood_threshold = np.e ** (
                         mu_gt + likelihood_threshold_sigma * std_gt)
                 distances = np.zeros(n_vertices)
-                evaluations = np.zeros(n_vertices)
+                times = np.zeros(n_vertices)
                 for n_vertex in range(n_vertices):
+                    target_label = get_other_class(df_train["class"].cat.categories, instance["class"].values[0])
+                    t0 = time.time()
                     alg = BayesACE(density_estimator=density_estimator, features=df_train.columns[:-1],
                                    n_vertex=n_vertex,
                                    accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold,
                                    chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                                    initialization="default",
-                                   seed=0, verbose=False, pop_size=100)
-                    result, res = alg.run(instance, target_label="b" if (instance["class"] != "b").all() else "a",
-                                          return_info=True)
+                                   seed=0, verbose=True, pop_size=10)
+                    result = alg.run(instance, target_label=target_label)
+                    tf = time.time()-t0
                     # print(result.distance)
                     path_to_compute = path(result.path.values, chunks=chunks)
                     distances[n_vertex] = path_likelihood_length(pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
                                                                  density_estimator=gt_estimator, penalty=penalty)
-                    evaluations[n_vertex] = res.algorithm.evaluator.n_eval
+                    times[n_vertex] = tf
+                    '''
                     plot_path(df_train, result)
                     plt.title("Counterfactual"+str(i)+" and vertex"+str(n_vertex))
                     plt.show()
-                    '''plot_path(df_test, result)
-                    plt.show()'''
-                distances_mat[i] = distances
-                evaluations_mat[i] = evaluations
+                    '''
+                times_mat[i] = distances
+                evaluations_mat[i] = times
             print("Distances mat")
-            print(distances_mat)
+            print(times_mat)
             print()
             print("Evaluations mat")
             print(evaluations_mat)
@@ -102,9 +104,9 @@ if __name__ == "__main__":
             if not os.path.exists('./results/exp_1/'+model_str+'/'):
                 os.makedirs('./results/exp_1/'+model_str+'/')
 
-            to_ret = pd.DataFrame(data=distances_mat, columns=range(n_vertices))
+            to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices))
             to_ret.to_csv('./results/exp_1/'+model_str+'/distances_data' + str(dataset_id) + '_penalty' + str(penalty) + '.csv')
     
             to_ret = pd.DataFrame(data=evaluations_mat, columns=range(n_vertices))
-            to_ret.to_csv('./results/exp_1/'+model_str+'/evaluations_data' + str(dataset_id) + '_penalty' + str(penalty) + '.csv')
+            to_ret.to_csv('./results/exp_1/'+model_str+'/time_data' + str(dataset_id) + '_penalty' + str(penalty) + '.csv')
 

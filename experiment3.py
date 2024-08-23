@@ -21,7 +21,8 @@ if __name__ == "__main__":
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     n_vertices = [0]
-    penalty = 1
+    penalties = [0,1,5,10,15,20]
+    epsilons = [0.5,1,2,3]
     likelihood_dev_list = [0,0.5,1]
     accuracy_threshold_list = [0.9,0.8,0.7]
     # Number of points for approximating integrals:
@@ -30,7 +31,7 @@ if __name__ == "__main__":
     n_counterfactuals = 30
 
     # Folder for storing the results
-    results_dir = './results/exp_2/'
+    results_dir = './results/exp_3/'
 
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
@@ -51,7 +52,7 @@ if __name__ == "__main__":
     class_processed = df_train[df_train.columns[-1]].astype('string').astype('category')
     df_train = df_train.drop(df_train.columns[-1], axis=1)
     df_train["class"] = class_processed
-    df_train = df_train.head(10000)
+    df_train = df_train.head(10)
 
     # Get the bounds for the optimization problem. The initial sampling will rely on this, so we call it sampling_range
     xu = df_train.drop(columns=['class']).max().values + 0.0001
@@ -74,8 +75,8 @@ if __name__ == "__main__":
     # Names of the models
     models = [normalizing_flow, clg_network]
     models_str = ["nf", "clg"]
-    faces_str = ["face_baseline", "face_kde", "face_eps"]
-    algorithm_str_list = faces_str + ["bayesace_" + model_str + "_v" + str(n_vertex) for model_str, n_vertex in product(models_str, n_vertices)]
+    faces_str = [face_str+"_eps"+str(eps) for face_str,eps in product(["face_baseline", "face_kde", "face_eps"],epsilons)]
+    algorithm_str_list = faces_str + ["bayesace_" + model_str + "_v" + str(n_vertex) + "_pen" + str(penalty) for model_str, n_vertex,penalty in product(models_str, n_vertices, penalties)]
 
     # List for storing the models
     algorithms = []
@@ -83,47 +84,48 @@ if __name__ == "__main__":
     # I want to store the times of building the algorithms
     construction_time_df = pd.DataFrame(columns=["construction_time"],
                                         index=algorithm_str_list)
+    for eps in epsilons :
+        t0 = time.time()
+        alg = FACE(density_estimator=gt_estimator, features=df_train.columns[:-1], chunks=chunks,
+                             dataset=df_train.drop("class", axis = 1),
+                             distance_threshold=eps, graph_type="integral", f_tilde=None, seed=0, verbose=verbose,
+                             likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
+        tf = time.time()-t0
+        algorithms.append(alg)
+        construction_time_df.loc["face_baseline"+"_eps"+str(eps), "construction_time"] = tf
 
-    t0 = time.time()
-    alg = FACE(density_estimator=gt_estimator, features=df_train.columns[:-1], chunks=chunks,
-                         dataset=df_train.drop("class", axis = 1),
-                         distance_threshold=5, graph_type="integral", f_tilde=None, seed=0, verbose=verbose,
-                         likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
-    tf = time.time()-t0
-    algorithms.append(alg)
-    construction_time_df.loc["face_baseline", "construction_time"] = tf
+        t0 = time.time()
+        alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
+                        dataset=df_train.drop("class", axis = 1),
+                        distance_threshold=eps, graph_type="kde", f_tilde=None, seed=0, verbose=verbose,
+                        likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1,parallelize=parallelize)
+        tf = time.time()-t0
+        algorithms.append(alg)
+        construction_time_df.loc["face_kde"+"_eps"+str(eps), "construction_time"] = tf
 
-    t0 = time.time()
-    alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
-                    dataset=df_train.drop("class", axis = 1),
-                    distance_threshold=5, graph_type="kde", f_tilde=None, seed=0, verbose=verbose,
-                    likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1,parallelize=parallelize)
-    tf = time.time()-t0
-    algorithms.append(alg)
-    construction_time_df.loc["face_kde", "construction_time"] = tf
-
-    t0 = time.time()
-    alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
-                    dataset=df_train.drop("class", axis = 1),
-                    distance_threshold=5, graph_type="epsilon", f_tilde="identity", seed=0, verbose=verbose,
-                    likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1,parallelize=parallelize)
-    tf = time.time()-t0
-    algorithms.append(alg)
-    construction_time_df.loc["face_eps", "construction_time"] = tf
+        t0 = time.time()
+        alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
+                        dataset=df_train.drop("class", axis = 1),
+                        distance_threshold=eps, graph_type="epsilon", f_tilde="identity", seed=0, verbose=verbose,
+                        likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1,parallelize=parallelize)
+        tf = time.time()-t0
+        algorithms.append(alg)
+        construction_time_df.loc["face_eps"+"_eps"+str(eps), "construction_time"] = tf
 
     # I need as many BayesACE (both with normalizing flow and CLG) as vertices
     for algorithm_str,model in zip(["nf", "clg"], [normalizing_flow, clg_network]):
         for n_vertex in n_vertices:
-            t0 = time.time()
-            alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
-                                   n_vertex=n_vertex,
-                                   accuracy_threshold=0.00, likelihood_threshold=0.00,
-                                   chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                                   initialization="default",
-                                   seed=0, verbose=verbose, pop_size=100, parallelize=parallelize)
-            tf = time.time()-t0
-            algorithms.append(alg)
-            construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
+            for penalty in penalties :
+                t0 = time.time()
+                alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
+                                       n_vertex=n_vertex,
+                                       accuracy_threshold=0.00, likelihood_threshold=0.00,
+                                       chunks=chunks, penalty=penalty, sampling_range=sampling_range,
+                                       initialization="default",
+                                       seed=0, verbose=verbose, pop_size=100, parallelize=parallelize)
+                tf = time.time()-t0
+                algorithms.append(alg)
+                construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
 
     # Store the construction time. The dataset need to be identified.
     if not os.path.exists(results_dir):
