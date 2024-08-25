@@ -5,6 +5,7 @@ import sys
 import pickle
 from itertools import product
 
+import numpy as np
 import pandas as pd
 
 sys.path.append(os.getcwd())
@@ -28,6 +29,7 @@ if __name__ == "__main__":
     chunks = 10
     # Number of counterfactuals
     n_counterfactuals = 30
+    eps = np.inf
 
     # Folder for storing the results
     results_dir = './results/exp_2/'
@@ -65,7 +67,7 @@ if __name__ == "__main__":
     clg_network = hill_climbing(data=df_train, bn_type="CLG")
     normalizing_flow: ConditionalNF = pickle.load(
         open(results_cv_dir + str(dataset_id) + '/nf_' + str(dataset_id) + '.pkl', 'rb'))
-    cv_results = pd.read_csv(results_cv_dir + str(dataset_id) + '/data' + str(dataset_id) + '_bis.csv',
+    cv_results = pd.read_csv(results_cv_dir + str(dataset_id) + '/data_' + str(dataset_id) + '.csv',
                              index_col=0)
 
     mu_gt = float(cv_results.loc["Logl_mean", "GT_SD"])
@@ -86,27 +88,27 @@ if __name__ == "__main__":
 
     t0 = time.time()
     alg = FACE(density_estimator=gt_estimator, features=df_train.columns[:-1], chunks=chunks,
-                         dataset=df_train.drop("class", axis = 1),
-                         distance_threshold=5, graph_type="integral", f_tilde=None, seed=0, verbose=verbose,
-                         likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
+               dataset=df_train.drop("class", axis = 1),
+               distance_threshold=eps, graph_type="integral", f_tilde=None, seed=0, verbose=verbose,
+               log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time()-t0
     algorithms.append(alg)
     construction_time_df.loc["face_baseline", "construction_time"] = tf
 
     t0 = time.time()
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
-                    dataset=df_train.drop("class", axis = 1),
-                    distance_threshold=5, graph_type="kde", f_tilde=None, seed=0, verbose=verbose,
-                    likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1,parallelize=parallelize)
+               dataset=df_train.drop("class", axis = 1),
+               distance_threshold=eps, graph_type="kde", f_tilde=None, seed=0, verbose=verbose,
+               log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time()-t0
     algorithms.append(alg)
     construction_time_df.loc["face_kde", "construction_time"] = tf
 
     t0 = time.time()
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
-                    dataset=df_train.drop("class", axis = 1),
-                    distance_threshold=5, graph_type="epsilon", f_tilde="identity", seed=0, verbose=verbose,
-                    likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1,parallelize=parallelize)
+               dataset=df_train.drop("class", axis = 1),
+               distance_threshold=eps, graph_type="epsilon", f_tilde="identity", seed=0, verbose=verbose,
+               log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time()-t0
     algorithms.append(alg)
     construction_time_df.loc["face_eps", "construction_time"] = tf
@@ -116,11 +118,11 @@ if __name__ == "__main__":
         for n_vertex in n_vertices:
             t0 = time.time()
             alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
-                                   n_vertex=n_vertex,
-                                   accuracy_threshold=0.00, likelihood_threshold=0.00,
-                                   chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                                   initialization="default",
-                                   seed=0, verbose=verbose, pop_size=100, parallelize=parallelize)
+                           n_vertex=n_vertex,
+                           accuracy_threshold=0.00, log_likelihood_threshold=0.00,
+                           chunks=chunks, penalty=penalty, sampling_range=sampling_range,
+                           initialization="default",
+                           seed=0, verbose=verbose, pop_size=10, parallelize=parallelize)
             tf = time.time()-t0
             algorithms.append(alg)
             construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
@@ -142,7 +144,7 @@ if __name__ == "__main__":
             results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
             for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
                 # Set the proper likelihood  and accuracy thresholds
-                algorithm.likelihood_threshold = np.e ** (mu_gt + likelihood_dev * std_gt)
+                algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
                 algorithm.accuracy_threshold = accuracy_threshold
                 for i in range(n_counterfactuals):
                     instance = df_counterfactuals.iloc[[i]]
@@ -161,7 +163,7 @@ if __name__ == "__main__":
                         results_dfs['distance'].loc[i, algorithm_str] = np.nan
                         results_dfs['time'].loc[i, algorithm_str] = tf
                         results_dfs['counterfactual'].loc[i, algorithm_str] = np.nan
-                        print("Counterfactual " + str(i) + " model " + algorithm_str + " distance: " + str(np.nan) + " time: " + str(tf))
+                        print("Counterfactual " + str(i) + " likelihood"+ str(likelihood_dev)+ "accuracy" + str(accuracy_threshold) + " model " + algorithm_str + " distance: " + str(np.nan) + " time: " + str(tf))
                     else :
                         path_to_compute = path(result.path.values, chunks=chunks)
                         path_length_gt = path_likelihood_length(
@@ -170,7 +172,7 @@ if __name__ == "__main__":
                         results_dfs['distance'].loc[i, algorithm_str] = path_length_gt
                         results_dfs['time'].loc[i, algorithm_str] = tf
                         results_dfs['counterfactual'].loc[i, algorithm_str] = result.counterfactual.values
-                        print("Counterfactual " + str(i) + " model " + algorithm_str + " distance: " + str(path_length_gt) + " time: " + str(tf))
+                        print("Counterfactual " + str(i)+ " likelihood"+ str(likelihood_dev)+ "accuracy" + str(accuracy_threshold) + " model " + algorithm_str + " distance: " + str(path_length_gt) + " time: " + str(tf))
                     '''
                     # Uncomment for a plot (only for 2D data)
                     plot_path(df_train, result)

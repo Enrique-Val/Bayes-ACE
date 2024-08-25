@@ -7,7 +7,7 @@ from bayesace.algorithms.algorithm import ACE, ACEResult
 import multiprocessing as mp
 
 NON_ZERO_CONST = 0.000001
-n_processes = 1#mp.cpu_count()
+n_processes = np.max((1, int(mp.cpu_count()/1)))
 
 
 def compute_weight(point_i, point_j, epsilon, weight_function, *args):
@@ -21,10 +21,13 @@ def compute_weight(point_i, point_j, epsilon, weight_function, *args):
 
 def epsilon_weight(point1, point2, distance, epsilon, f_tilde):
     d = len(point1)
-    return f_tilde(epsilon ** d / distance) * distance
+    f_tilde(epsilon ** d / distance) * distance
+    return 1
 
 
 def kde_weight(point1, point2, distance, density_estimator, f_tilde, variables):
+    if f_tilde == neg_log:
+        return -log_likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2, density_estimator) * distance
     return f_tilde(likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2, density_estimator)) * distance
 
 
@@ -120,10 +123,10 @@ def find_closest_paths(graph, source_node, target_nodes, parallelize=False):
 class FACE(ACE):
     def __init__(self, density_estimator, features, chunks, dataset: pd.DataFrame, distance_threshold,
                  graph_type,
-                 f_tilde=None, seed=0, verbose=False, likelihood_threshold=0.00, accuracy_threshold=0.50,
+                 f_tilde=None, seed=0, verbose=False, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50,
                  penalty=1, k=1, parallelize=True):
         assert (list(dataset.columns) == features).all()
-        super().__init__(density_estimator, features, chunks, likelihood_threshold=likelihood_threshold,
+        super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
                          accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
                          parallelize=parallelize)
         self.dataset = dataset
@@ -197,7 +200,7 @@ class FACE(ACE):
         target_nodes = self.dataset.index[self.y_pred[target_label] > self.accuracy_threshold]
 
         if len(target_nodes) > 0:
-            true_array = likelihood(self.dataset.iloc[target_nodes], self.density_estimator) > self.likelihood_threshold
+            true_array = log_likelihood(self.dataset.iloc[target_nodes], self.density_estimator) > self.log_likelihood_threshold
             target_nodes = target_nodes[true_array]
 
         if len(target_nodes) == 0:

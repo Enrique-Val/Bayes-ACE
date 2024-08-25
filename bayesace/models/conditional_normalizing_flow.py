@@ -97,6 +97,17 @@ class ConditionalNF(ABC):
             lls = lls + np.e ** self.logl_array(data, np.repeat(i,data.shape[0]))
         return lls
 
+    def log_likelihood(self, data, class_var_name="class"):
+        # If the class variable is passed, remove it
+        if class_var_name in data.columns:
+            data = data.values[:, :-1].astype(float)
+        else:
+            data = data.values
+        logl = self.logl_array(data, np.repeat(0, data.shape[0]))
+        for i in range(len(self.class_dist.keys())-1):
+            logl = logl + np.log(1+np.e ** (self.logl_array(data, np.repeat(i+1, data.shape[0]))-logl))
+        return logl
+
 
     def predict_proba(self, data: np.ndarray, class_var_name="class") -> np.ndarray:
         # We want to get P(Y|x), which will be computed as P(Y|x) = P(x,Y) / P(x)

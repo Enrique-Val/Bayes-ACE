@@ -48,7 +48,7 @@ if __name__ == "__main__":
     clg_network = hill_climbing(data=df_train, bn_type="CLG")  # TODO Maybe dill the CLG as well
     normalizing_flow = pickle.load(
         open('./results/exp_cv_2/' + str(dataset_id) + '/nf_' + str(dataset_id) + '.pkl', 'rb'))
-    cv_results = pd.read_csv('./results/exp_cv_2/' + str(dataset_id) + '/data' + str(dataset_id) + '_bis.csv',
+    cv_results = pd.read_csv('./results/exp_cv_2/' + str(dataset_id) + '/data_' + str(dataset_id) + '.csv',
                              index_col=0)
 
     mu_gt = float(cv_results.loc["Logl_mean", "GT_SD"])
@@ -72,7 +72,7 @@ if __name__ == "__main__":
                     t0 = time.time()
                     alg = BayesACE(density_estimator=density_estimator, features=df_train.columns[:-1],
                                    n_vertex=n_vertex,
-                                   accuracy_threshold=accuracy_threshold, likelihood_threshold=likelihood_threshold,
+                                   accuracy_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
                                    chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                                    initialization="default",
                                    seed=0, verbose=True, pop_size=10)

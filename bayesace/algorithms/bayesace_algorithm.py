@@ -7,6 +7,7 @@ from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 
 MAX_VALUE_FLOAT = 1e+307
+n_processes = np.max((1, int(mp.cpu_count()/1)))
 
 # Helper function to encapsulate the parallelization logic
 def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estimator, penalty):
@@ -19,7 +20,7 @@ def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estim
     return f1_i
 
 class BestPathFinder(Problem):
-    def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=2, likelihood_threshold=0.05,
+    def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=2, log_likelihood_threshold=-np.inf,
                  accuracy_threshold=0.05, sampling_range=(-3, 3), parallelize=False, **kwargs):
         n_features = (len(instance.columns) - 1)
         xl = None
@@ -46,7 +47,7 @@ class BestPathFinder(Problem):
         self.density_estimator = density_estimator
         assert self.density_estimator.fitted()
         self.chunks = chunks
-        self.likelihood_threshold = likelihood_threshold
+        self.log_likelihood_threshold = log_likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
         self.parallelize = parallelize
 
@@ -54,7 +55,7 @@ class BestPathFinder(Problem):
         assert len(np.append(self.x_og, x[0])) == (self.n_vertex + 2) * self.n_features
         f1 = []
         if self.parallelize :
-            with mp.Pool(mp.cpu_count()) as pool:
+            with mp.Pool(n_processes) as pool:
                 f1 = pool.starmap(process_x_i, [(x_i, self.x_og, self.n_vertex, self.n_features, self.chunks, self.features,
                                                  self.density_estimator, self.penalty) for x_i in x])
         else :
@@ -71,7 +72,7 @@ class BestPathFinder(Problem):
         x_cfx = pd.DataFrame(x[:,-self.n_features:], columns=self.features)
         g1 = -posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.target_label,
                                     self.density_estimator) + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
-        g2 = -likelihood(pd.DataFrame(x_cfx, columns=self.features), self.density_estimator) + self.likelihood_threshold
+        g2 = -log_likelihood(pd.DataFrame(x_cfx, columns=self.features), self.density_estimator) + self.log_likelihood_threshold
         out["G"] = np.column_stack([g1, g2])
 
 
@@ -103,10 +104,10 @@ class BayesACE(ACE):
             candidate_initial = candidate_initial[candidate_initial["class"] == target_label]
 
             # Get likelihood and probability of the class
-            ll = likelihood(candidate_initial, self.density_estimator)
+            logl = log_likelihood(candidate_initial, self.density_estimator)
             post_prob = posterior_probability(candidate_initial, target_label, self.density_estimator)
 
-            mask = (ll > self.likelihood_threshold) & (post_prob > self.accuracy_threshold)
+            mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
             candidate_initial = candidate_initial.drop("class", axis = 1)
             initial_sample = pd.concat([initial_sample, candidate_initial])
@@ -114,7 +115,7 @@ class BayesACE(ACE):
             if len(initial_sample) > self.population_size:
                 completed = True
             count += 1
-            if count > 50 and initial_sample.shape[0] < 2:
+            if count > 100 and initial_sample.shape[0] < 1:
                 raise Exception("Could not find enough samples to start the optimization process. Please, try again "
                                 "with a lower likelihood or probability threshold.")
 
@@ -145,11 +146,11 @@ class BayesACE(ACE):
             return np.hstack((paths_sample, initial_sample))
 
     def __init__(self, density_estimator, features, chunks, n_vertex, pop_size=100,
-                 generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=None,
+                 generations=10, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
                  initialization="default",
                  seed=0,
                  verbose=True, parallelize=False):
-        super().__init__(density_estimator, features, chunks, likelihood_threshold=likelihood_threshold,
+        super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
                          accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
                          parallelize=parallelize)
         self.n_vertex = n_vertex
@@ -173,7 +174,7 @@ class BayesACE(ACE):
         problem = BestPathFinder(density_estimator=self.density_estimator, instance=instance,
                                  target_label=target_label, n_vertex=self.n_vertex,
                                  penalty=self.penalty, chunks=self.chunks,
-                                 likelihood_threshold=self.likelihood_threshold,
+                                 log_likelihood_threshold=self.log_likelihood_threshold,
                                  accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)
         algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
 

@@ -2,6 +2,7 @@ import random
 from abc import ABC, abstractmethod
 
 import pandas as pd
+import numpy as np
 
 
 class ACEResult():
@@ -27,7 +28,7 @@ class ACEResult():
 
 
 class ACE(ABC):
-    def __init__(self, density_estimator, features, chunks, likelihood_threshold=0, accuracy_threshold=0.5, penalty=1,
+    def __init__(self, density_estimator, features, chunks, log_likelihood_threshold=-np.inf, accuracy_threshold=0.5, penalty=1,
                  seed=0, verbose=True, parallelize=False):
         self.density_estimator = density_estimator
         self.penalty = penalty
@@ -35,7 +36,7 @@ class ACE(ABC):
         self.n_features = len(self.features)
         self.density_estimator = density_estimator
         self.chunks = chunks
-        self.likelihood_threshold = likelihood_threshold
+        self.log_likelihood_threshold = log_likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
         self.seed = seed
         random.seed(self.seed)

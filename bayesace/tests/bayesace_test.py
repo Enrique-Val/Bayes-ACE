@@ -1,6 +1,8 @@
 import os
 import sys
 
+from bayesace.models.utils import PybnesianParallelizationError
+
 sys.path.append(os.getcwd())
 import pybnesian as pb
 import numpy as np
@@ -29,18 +31,18 @@ def get_naive_structure(df: pd.DataFrame, type):
     return naive
 
 
-def check_bayesace(bayesian_network, dataset: pd.DataFrame, penalty, n_vertex, likelihood_thresh, acc_thresh):
+def check_bayesace(bayesian_network, dataset: pd.DataFrame, penalty, n_vertex, log_likelihood_threshold, acc_thresh):
     np.random.seed(0)
     bayesace = BayesACE(density_estimator=bayesian_network, features=df.columns[:-1], n_vertex=n_vertex, chunks=2,
                         penalty=penalty,
-                        pop_size=50, likelihood_threshold=likelihood_thresh, accuracy_threshold=acc_thresh,
+                        pop_size=50, log_likelihood_threshold=log_likelihood_threshold, accuracy_threshold=acc_thresh,
                         generations=5, verbose=False)
     res = bayesace.run(dataset.iloc[[0]], parallelize=True)
 
     ## CHECK THE RESULTING_PATH
     cfx_path = res.path.values
     path_file = os.path.dirname(__file__) + "/bayesace_vars/cfxpath_" + str(penalty) + "_" + str(
-        n_vertex) + "_" + str(likelihood_thresh) + "_" + str(acc_thresh) + ".pkl"
+        n_vertex) + "_" + str(log_likelihood_threshold) + "_" + str(acc_thresh) + ".pkl"
     # with open(path_file, "wb") as file :
     #    pickle.dump(cfx_path, file)
     with open(path_file, "rb") as file:
@@ -49,7 +51,7 @@ def check_bayesace(bayesian_network, dataset: pd.DataFrame, penalty, n_vertex, l
     ## CHECK THE RESULTING DISTANCE
     distance = res.distance
     path_file = os.path.dirname(__file__) + "/bayesace_vars/distance_" + str(penalty) + "_" + str(
-        n_vertex) + "_" + str(likelihood_thresh) + "_" + str(acc_thresh) + ".pkl"
+        n_vertex) + "_" + str(log_likelihood_threshold) + "_" + str(acc_thresh) + ".pkl"
     # with open(path_file, "wb") as file :
     #   pickle.dump(distance, file)
     with open(path_file, "rb") as file:
@@ -94,10 +96,10 @@ if __name__ == "__main__":
 
     list_pen = [0, 1]
     list_n_vertex = [0, 1]
-    list_ll = [0, 0.00001, ]
+    list_ll = [np.log(0), np.log(0.00001)]
     list_acc = [0.5, 0.05]
     for i in product(list_pen, list_n_vertex, list_ll, list_acc):
-        check_bayesace(bn, df, penalty=i[0], n_vertex=i[1], likelihood_thresh=i[2], acc_thresh=i[3])
+        check_bayesace(bn, df, penalty=i[0], n_vertex=i[1], log_likelihood_threshold=i[2], acc_thresh=i[3])
 
     print(time.time() - t0)
     print("Bayes ACE tested succesfully")
