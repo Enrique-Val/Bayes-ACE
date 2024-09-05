@@ -13,7 +13,7 @@ from bayesace.algorithms.bayesace_algorithm import BayesACE
 if __name__ == "__main__":
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    likelihood_threshold_sigma = 1
+    likelihood_threshold_sigma = 0.5
     accuracy_threshold = 0.9
     n_vertices = 5
     penalties = [1, 5, 10, 15, 20]
@@ -63,8 +63,7 @@ if __name__ == "__main__":
             evaluations_mat = np.zeros((n_counterfactuals, n_vertices))
             for i in range(n_counterfactuals):
                 instance = df_counterfactuals.iloc[[i]]
-                likelihood_threshold = np.e ** (
-                        mu_gt + likelihood_threshold_sigma * std_gt)
+                likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
                 distances = np.zeros(n_vertices)
                 times = np.zeros(n_vertices)
                 for n_vertex in range(n_vertices):
@@ -74,8 +73,8 @@ if __name__ == "__main__":
                                    n_vertex=n_vertex,
                                    accuracy_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
                                    chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                                   initialization="default",
-                                   seed=0, verbose=True, pop_size=10)
+                                   initialization="guided",
+                                   seed=0, verbose=False, pop_size=100, generations=1000)
                     result = alg.run(instance, target_label=target_label)
                     tf = time.time()-t0
                     # print(result.distance)

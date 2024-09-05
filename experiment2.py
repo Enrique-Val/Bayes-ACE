@@ -121,8 +121,8 @@ if __name__ == "__main__":
                            n_vertex=n_vertex,
                            accuracy_threshold=0.00, log_likelihood_threshold=0.00,
                            chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                           initialization="default",
-                           seed=0, verbose=verbose, pop_size=10, parallelize=parallelize)
+                           initialization="guided",
+                           seed=0, verbose=verbose, pop_size=100, generations=1000, parallelize=parallelize)
             tf = time.time()-t0
             algorithms.append(alg)
             construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf

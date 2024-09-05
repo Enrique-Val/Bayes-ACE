@@ -95,7 +95,7 @@ class BayesACE(ACE):
 
         # This first bit of code give us the initial sample, where every counterfactual is above the likelihood and
         # probability
-        n_samples = int((self.population_size / var_probs[target_label]) * 2.5*2)
+        n_samples = int((self.population_size / var_probs[target_label]) * 100)
         completed = False
         initial_sample = pd.DataFrame(columns=self.features)
         count = 0
@@ -126,7 +126,7 @@ class BayesACE(ACE):
         if self.n_vertex == 0:
             return initial_sample
 
-        if self.initialization == "default" :
+        if self.initialization == "random" :
             paths_sample = self.density_estimator.sample(self.n_vertex * self.population_size, ordered=True,
                                                          seed=self.seed).to_pandas()
             paths_sample = paths_sample.drop("class", axis=1)
@@ -143,11 +143,11 @@ class BayesACE(ACE):
             paths_sample = np.array(paths_sample)
             paths_sample = paths_sample[:, self.n_features:]
             # TODO optional, add a bit of noise to the paths
-            return np.hstack((paths_sample, initial_sample))
+            return paths_sample
 
     def __init__(self, density_estimator, features, chunks, n_vertex, pop_size=100,
-                 generations=10, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
-                 initialization="default",
+                 generations=1000, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
+                 initialization="guided",
                  seed=0,
                  verbose=True, parallelize=False):
         super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
@@ -164,11 +164,7 @@ class BayesACE(ACE):
 
     def run(self, instance: pd.DataFrame, target_label, return_info=False):
         super().run(instance, target_label)
-        termination = DefaultSingleObjectiveTermination(
-            ftol=0.5 * self.n_features ** self.penalty,
-            period=20
-        )
-        termination = ("n_gen",20)
+        termination = DefaultSingleObjectiveTermination(n_max_gen=self.generations)
         initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)
 
         problem = BestPathFinder(density_estimator=self.density_estimator, instance=instance,
@@ -180,7 +176,7 @@ class BayesACE(ACE):
 
         res = minimize(problem,
                        algorithm,
-                       termination=termination,  # ('n_gen', self.generations),
+                       termination=termination,
                        seed=self.seed,
                        verbose=self.verbose)
         if res.X is None or res.F > MAX_VALUE_FLOAT:
