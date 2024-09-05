@@ -110,9 +110,11 @@ class BayesACE(ACE):
             mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
             candidate_initial = candidate_initial.drop("class", axis = 1)
+            if candidate_initial.shape[0] > 0 :
+                count = 0
             initial_sample = pd.concat([initial_sample, candidate_initial])
             count += 1
-            if len(initial_sample) > self.population_size:
+            if initial_sample.shape[0] > self.population_size:
                 completed = True
             count += 1
             if count > 100 and initial_sample.shape[0] < 1:

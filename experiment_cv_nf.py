@@ -38,7 +38,7 @@ def kfold_indices(data, k):
 # Define the number of folds (K)
 k = 10
 steps = 1000
-batch_size = 1028
+n_batches = 10
 
 # Define the number of iterations for Bayesian optimization
 default_opt_iter = 50
@@ -243,9 +243,12 @@ if __name__ == "__main__":
         dataset = get_data(dataset_id, standardize=True)
         dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL, jit_coef=JIT_COEF,
                                   min_unique_vals=min_unique_vals,
-                                  max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=300000,
+                                  max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=100000,
                                   minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
         d = len(dataset.columns) - 1
+        n_instances = dataset.shape[0]
+        global batch_size
+        batch_size = int((n_instances / n_batches)+1)
 
         # In case we use NVP, we need to add the split_dim parameter
         if args.type == "NVP":

@@ -84,27 +84,28 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mu
 
 
 def log_likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mutable=False) -> np.ndarray:
-    if not mutable:
-        data = data.copy()
-    if isinstance(density_estimator, ConditionalNF):
-        return density_estimator.log_likelihood(data, class_var_name=class_var_name)
-    if class_var_name in data.columns:
-        data = data.drop(class_var_name, axis=1)
-    class_cpd = density_estimator.cpd(class_var_name)
-    class_values = class_cpd.variable_values()
-    n_samples = data.shape[0]
-    # Set the value of the logl for the first iteration
-    data[class_var_name] = pd.Categorical([class_values[0]] * n_samples, categories=class_values)
-    log_likelihood_val = density_estimator.logl(data)
-    for v in class_values[1:]:
-        data[class_var_name] = pd.Categorical([v] * n_samples, categories=class_values)
-        logly = density_estimator.logl(data)
-        log_likelihood_val = log_likelihood_val + np.log(1 + np.e ** (logly - log_likelihood_val))
+    return np.log(likelihood(data, density_estimator, class_var_name, mutable))
+'''if not mutable:
+    data = data.copy()
+if isinstance(density_estimator, ConditionalNF):
+    return density_estimator.log_likelihood(data, class_var_name=class_var_name)
+if class_var_name in data.columns:
+    data = data.drop(class_var_name, axis=1)
+class_cpd = density_estimator.cpd(class_var_name)
+class_values = class_cpd.variable_values()
+n_samples = data.shape[0]
+# Set the value of the logl for the first iteration
+data[class_var_name] = pd.Categorical([class_values[0]] * n_samples, categories=class_values)
+log_likelihood_val = density_estimator.logl(data)
+for v in class_values[1:]:
+    data[class_var_name] = pd.Categorical([v] * n_samples, categories=class_values)
+    logly = density_estimator.logl(data)
+    log_likelihood_val = log_likelihood_val + np.log(1 + np.e ** (logly - log_likelihood_val))
 
-    if (log_likelihood_val > 0).any():
-        Warning(
-            "Log likelihood of some points in the space is higher than 0.")
-    return log_likelihood_val
+if (log_likelihood_val > 0).any():
+    Warning(
+        "Log likelihood of some points in the space is higher than 0.")
+return log_likelihood_val'''
 
 
 # Get the probability P(y|x)

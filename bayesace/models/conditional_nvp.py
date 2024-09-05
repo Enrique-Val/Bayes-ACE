@@ -147,7 +147,7 @@ class ConditionalNVP(ConditionalNF):
         losses = []
         val_losses = []
         pyro.clear_param_store()
-        early_stop_patience = 100
+        early_stop_patience = 1000
 
         for epoch in range(steps):
             try:
@@ -180,7 +180,7 @@ class ConditionalNVP(ConditionalNF):
                 del val_running_loss
 
                 # Early stopping and model checkpoint
-                if val_loss < best_val_loss:
+                if epoch > 800 and val_loss < best_val_loss:
                     best_val_loss = val_loss
                     best_model_state = self.dist_x_given_class.state_dict()
                     no_improvement_counter = 0

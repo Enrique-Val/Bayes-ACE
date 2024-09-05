@@ -43,7 +43,7 @@ if __name__ == "__main__":
     sampling_range = (xl, xu)
 
     # Load the pickled gt density estimator from the correct folder
-    gt_estimator = pickle.load(open('./results/exp_cv_2/' + str(dataset_id) + '/gt_nf_' + str(dataset_id) + '.pkl', 'rb'))
+    gt_estimator:ConditionalNF = pickle.load(open('./results/exp_cv_2/' + str(dataset_id) + '/gt_nf_' + str(dataset_id) + '.pkl', 'rb'))
     df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed = 0).to_pandas()
     clg_network = hill_climbing(data=df_train, bn_type="CLG")  # TODO Maybe dill the CLG as well
     normalizing_flow = pickle.load(

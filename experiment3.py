@@ -125,7 +125,7 @@ if __name__ == "__main__":
                                seed=0, verbose=verbose, pop_size=100, generations=1000, parallelize=parallelize)
                 tf = time.time()-t0
                 algorithms.append(alg)
-                construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
+                construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex)+"_pen"+ str(), "construction_time"] = tf
 
     # Store the construction time. The dataset need to be identified.
     if not os.path.exists(results_dir):
