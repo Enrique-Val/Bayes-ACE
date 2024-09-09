@@ -67,12 +67,12 @@ param_grid = {
 
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
-    Real(5e-5, 5e-4, name='lr', prior='log-uniform'),
-    Real(1e-4, 1e-2, name='weight_decay'),
+    Real(5e-5, 1e-3, name='lr', prior='log-uniform'),
+    Real(1e-4, 5e-2, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
     Integer(2, 10, name='hidden_units'),
     Integer(1, 5, name='layers'),
-    Integer(1, 8, name='n_flows')
+    Integer(1, 10, name='n_flows')
 ]
 
 
@@ -113,8 +113,8 @@ def cross_validate_bn(dataset, fold_indices=None):
 
 def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
                       count_bins=None, hidden_units=None,
-                      layers=None, split_dim=None,
-                      n_flows=None):
+                      layers=None,
+                      n_flows=None, perms_instantiation=None):
     logl = []
     logl_std = []
     brier = []
@@ -122,8 +122,10 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     times = []
     param_dict = None
     if model_type == "NVP":
-        param_dict = {"lr": lr, "weight_decay": weight_decay, "split_dim": split_dim, "hidden_u": hidden_units,
+        param_dict = {"lr": lr, "weight_decay": weight_decay, "hidden_u": hidden_units,
                       "layers": layers, "n_flows": n_flows}
+        if perms_instantiation is None :
+            perms_instantiation = [torch.randperm(d) for _ in range(n_flows)]
     elif model_type == "Spline":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units,
                       "layers": layers}
@@ -135,13 +137,13 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
         model = None
         if model_type == "NVP":
             model = ConditionalNVP(graphics=False)
-            model.train(df_train, lr=lr, weight_decay=weight_decay, split_dim=split_dim,
-                        hidden_units=hidden_units * (len(df_train.columns) - 1), layers=layers,
-                        n_flows=n_flows, steps=steps, batch_size=batch_size)
+            model.train(df_train, lr=lr, weight_decay=weight_decay, split_dim=d//2,
+                        hidden_units=hidden_units * d, layers=layers,
+                        n_flows=n_flows, steps=steps, batch_size=batch_size, perms_instantiation=perms_instantiation)
         elif model_type == "Spline":
             model = ConditionalSpline()
             model.train(df_train, lr=lr, weight_decay=weight_decay, count_bins=count_bins,
-                        hidden_units=hidden_units * (len(df_train.columns) - 1), layers=layers,
+                        hidden_units=hidden_units * d, layers=layers,
                         steps=steps, batch_size=batch_size)
         it_time = time.time() - t0
         step_list.append(model.steps)
@@ -164,12 +166,22 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
 
 def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
     # Bayesian optimization
+
+    # List to store the random permutations
+    perms_list = []
+
     # Define the objective function
     @use_named_args(param_space)
     def objective(**params):
+        # First, if using NVP, define a random permutation and store it in a global list
+        perms_instantiation = None
+        if model_type == "NVP":
+            perms_instantiation = [torch.randperm(d) for _ in range(params["n_flows"])]
+            perms_list.append(perms_instantiation)
         result = None
         try:
-            result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size, **params)
+            result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size,
+                                       perms_instantiation=perms_instantiation,**params)
             nf_logl_means = result[0]
             return -nf_logl_means  # Assuming we want to maximize loglikelihood
         except ValueError as e:
@@ -183,8 +195,17 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
             else:
                 raise e
 
+    # Get number of features
+    d = len(dataset.columns) - 1
+
     # Perform Bayesian optimization
     result = gp_minimize(objective, param_space, n_calls=n_iter, random_state=0)
+
+    # Get the permutations from temporary file
+
+    # Get the best permutation (optimized at random)
+    best_iter = np.argmin(result.func_vals)
+    best_perm = perms_list[best_iter]
 
     # Get the best parameters
     best_params = result.x
@@ -193,18 +214,20 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
     print("Best parameters: ", best_params)
     print("Gt params:", gt_params)
 
-    metrics = cross_validate_nf(dataset, fold_indices, batch_size=batch_size, **gt_params)
+    # Cross validate again to get the rest of the metrics
+    metrics = cross_validate_nf(dataset, fold_indices, batch_size=batch_size,
+                                perms_instantiation=best_perm, **gt_params)
+    params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
+    params["hidden_units"] = d * gt_params["hidden_units"]
 
     # Train once again to return the object
     model = None
     if model_type == "NVP":
         model = ConditionalNVP(graphics=False)
+        params["split_dim"] = d // 2
     elif model_type == "Splines":
         model = ConditionalSpline()
-    params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
-    params["hidden_units"] = d * gt_params["hidden_units"]
-    model.train(dataset, **params, steps=steps)
-
+    model.train(dataset, **params, steps=steps, batch_size=batch_size, perms_instantiation=best_perm)
     return model, metrics, result
 
 
@@ -243,16 +266,17 @@ if __name__ == "__main__":
         dataset = get_data(dataset_id, standardize=True)
         dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL, jit_coef=JIT_COEF,
                                   min_unique_vals=min_unique_vals,
-                                  max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=100000,
+                                  max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=50000,
                                   minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
         d = len(dataset.columns) - 1
+        split_dim = d // 2
         n_instances = dataset.shape[0]
         global batch_size
         batch_size = int((n_instances / n_batches)+1)
 
         # In case we use NVP, we need to add the split_dim parameter
         if args.type == "NVP":
-            param_space[2] = Integer(0, int(d / 2), name='split_dim')
+            param_space.pop(2)
 
         # Get the fold indices
         fold_indices = kfold_indices(dataset, k)
@@ -284,7 +308,7 @@ if __name__ == "__main__":
             plt.clf()
 
         pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
-        resampled_dataset = gt_model.sample(np.min((len(dataset), 100000))).to_pandas()
+        resampled_dataset = gt_model.sample(np.min((len(dataset), 50000))).to_pandas()
         resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
 
         if args.part == 'rd':
@@ -306,8 +330,8 @@ if __name__ == "__main__":
 
         # If we use NVP, we need to add the split_dim parameter
         d = len(resampled_dataset.columns) - 1
-        if args.type == "NVP":
-            param_space[2] = Integer(0, int(d / 2), name='split_dim')
+        if args.type == "NVP" and args.part == 'sd':
+            param_space.pop(2)
 
         # Check the metrics of the model given the resampled data
         resampled_dataset_metrics = np.zeros(len(results_df) - 1)

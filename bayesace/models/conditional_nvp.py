@@ -117,7 +117,7 @@ class ConditionalNVP(ConditionalNF):
 
     def train(self, dataset, batch_size=1028, steps=1000, lr=1e-3, weight_decay=0, split_dim=1, hidden_units=150,
               layers=1,
-              n_flows=1):
+              n_flows=1, perms_instantiation=None):
         super().train(dataset)
         self.input_dim = len(dataset.columns)-1
         self.split_dim = split_dim
@@ -135,19 +135,19 @@ class ConditionalNVP(ConditionalNF):
         self.dist_x_given_class = ConditionalNormalizingFlow(input_dim=self.n_dims, split_dim=split_dim, context_dim=1,
                                                              hidden_dim=hidden_units, num_layers=layers,
                                                              flow_length=n_flows,
-                                                             use_cuda=False)
+                                                             use_cuda=False, perms_instantiation=perms_instantiation)
         self.perms_instantiation = self.dist_x_given_class.perms_instantiation.copy()
         # Build SVI object
         optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, "clip_norm": 5, "lrd": 0.999})
         svi = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer, Trace_ELBO(num_particles=1))
 
-        best_val_loss = float('inf')
-        best_model_state = None
-        no_improvement_counter = 0
         losses = []
         val_losses = []
         pyro.clear_param_store()
-        early_stop_patience = 1000
+
+        last_epochs = 50
+        last_models = []
+        last_vals_logl = []
 
         for epoch in range(steps):
             try:
@@ -180,18 +180,10 @@ class ConditionalNVP(ConditionalNF):
                 del val_running_loss
 
                 # Early stopping and model checkpoint
-                if epoch > 800 and val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    best_model_state = self.dist_x_given_class.state_dict()
-                    no_improvement_counter = 0
-                else:
-                    no_improvement_counter += 1
-                    #self.dist_x_given_class.load_state_dict(best_model_state)
+                if epoch > steps - last_epochs:
+                    last_models.append(self.dist_x_given_class.state_dict())
+                    last_vals_logl.append(val_loss)
 
-                if no_improvement_counter >= early_stop_patience:
-                    # print(f"No improvement for {early_stop_patience} iterations, stopping early.")
-                    self.steps = epoch
-                    break
             except KeyboardInterrupt:
                 if self.graphics:
                     plt.plot(losses, label='Training Loss')
@@ -204,7 +196,9 @@ class ConditionalNVP(ConditionalNF):
             plt.plot(val_losses, label='Validation Loss')
             plt.legend()
             plt.show()
-        self.dist_x_given_class.load_state_dict(best_model_state)
+        # Select model with median validation loss
+        median_model_idx = np.argsort(last_vals_logl)[len(last_vals_logl)//2]
+        self.dist_x_given_class.load_state_dict(last_models[median_model_idx])
         self.trained = True
 
     def get_class_labels(self):
