@@ -110,16 +110,35 @@ def cross_validate_bn(dataset, fold_indices=None):
 
     return bn_results
 
+def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
+                             count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None) :
+    d = df_train.shape[1] - 1
+    t0 = time.time()
+    model = None
+    if model_type == "NVP":
+        model = ConditionalNVP(graphics=False)
+        model.train(df_train, lr=lr, weight_decay=weight_decay, split_dim=d // 2,
+                    hidden_units=hidden_units * d, layers=layers,
+                    n_flows=n_flows, steps=steps, batch_size=batch_size, perms_instantiation=perms_instantiation)
+    elif model_type == "Spline":
+        model = ConditionalSpline()
+        model.train(df_train, lr=lr, weight_decay=weight_decay, count_bins=count_bins,
+                    hidden_units=hidden_units * d, layers=layers,
+                    steps=steps, batch_size=batch_size)
+    it_time = time.time() - t0
+    logl_data = model.logl(df_test)
+    logl = logl_data.mean()
+    logl_std = logl_data.std()
+    predictions = predict_class(df_test.drop("class", axis=1), model)
+    brier = brier_score(df_test["class"].values, predictions)
+    auc_res = auc(df_test["class"].values, predictions)
+    return {"Logl": np.mean(logl), "LoglStd": np.mean(logl_std), "Brier": np.mean(brier), "AUC": np.mean(auc_res),
+            "Time": np.mean(it_time)}
 
 def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
                       count_bins=None, hidden_units=None,
                       layers=None,
-                      n_flows=None, perms_instantiation=None):
-    logl = []
-    logl_std = []
-    brier = []
-    auc_list = []
-    times = []
+                      n_flows=None, perms_instantiation=None, parallelize = False):
     param_dict = None
     if model_type == "NVP":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "hidden_u": hidden_units,
@@ -129,42 +148,30 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     elif model_type == "Spline":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units,
                       "layers": layers}
-    step_list = []
+    cv_iter_results = []
     for train_index, test_index in fold_indices:
         df_train = dataset.iloc[train_index].reset_index(drop=True)
         df_test = dataset.iloc[test_index].reset_index(drop=True)
-        t0 = time.time()
-        model = None
-        if model_type == "NVP":
-            model = ConditionalNVP(graphics=False)
-            model.train(df_train, lr=lr, weight_decay=weight_decay, split_dim=d//2,
-                        hidden_units=hidden_units * d, layers=layers,
-                        n_flows=n_flows, steps=steps, batch_size=batch_size, perms_instantiation=perms_instantiation)
-        elif model_type == "Spline":
-            model = ConditionalSpline()
-            model.train(df_train, lr=lr, weight_decay=weight_decay, count_bins=count_bins,
-                        hidden_units=hidden_units * d, layers=layers,
-                        steps=steps, batch_size=batch_size)
-        it_time = time.time() - t0
-        step_list.append(model.steps)
-        times.append(it_time)
-        tmp = model.logl(df_test)
-        logl.append(tmp.mean())
-        logl_std.append(tmp.std())
-        predictions = predict_class(df_test.drop("class", axis=1), model)
-        brier.append(brier_score(df_test["class"].values, predictions))
-        auc_list.append(auc(df_test["class"].values, predictions))
-    param_dict["steps"] = np.mean(step_list)
+        cv_iter_results.append(train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr, weight_decay=weight_decay,
+                                 count_bins=count_bins, hidden_units=hidden_units, layers=layers, n_flows=n_flows,
+                                 perms_instantiation=perms_instantiation))
+    cv_results = {"Logl" : [], "LoglStd" : [], "Brier" : [], "AUC" : [], "Time" : []}
+    for cv_iter_results in cv_iter_results:
+        for key in cv_results.keys():
+            cv_results[key].append(cv_iter_results[key])
+
     print(str(param_dict), "normalizing flow learned")
-    print(str({"Logl": np.mean(logl), "LoglStd": np.mean(logl_std), "Brier": np.mean(brier), "AUC": np.mean(auc_list),
-               "Time": np.mean(times)}))
+    cv_results_summary = {"Logl_mean": np.mean(cv_results["Logl"]), "Logl_std": np.std(cv_results["Logl"]),
+                          "LoglStd_mean": np.mean(cv_results["LoglStd"]), "LoglStd_std": np.std(cv_results["LoglStd"]),
+                          "Brier_mean": np.mean(cv_results["Brier"]), "Brier_std": np.std(cv_results["Brier"]),
+                          "AUC_mean": np.mean(cv_results["AUC"]), "AUC_std": np.std(cv_results["AUC"]),
+                          "Time_mean": np.mean(cv_results["Time"]), "Time_std": np.std(cv_results["Time"])}
+    print(cv_results_summary)
     print()
-    return np.mean(logl), np.std(logl), np.mean(logl_std), np.std(logl_std), np.mean(brier), np.std(brier), np.mean(
-        auc_list), np.std(auc_list), np.mean(
-        times), np.std(times), param_dict
+    return [cv_results_summary[i] for i in cv_results_summary.keys()] + [param_dict]
 
 
-def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
+def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", parallelize = False):
     # Bayesian optimization
 
     # List to store the random permutations
@@ -181,7 +188,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP"):
         result = None
         try:
             result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size,
-                                       perms_instantiation=perms_instantiation,**params)
+                                       perms_instantiation=perms_instantiation,parallelize=parallelize,**params)
             nf_logl_means = result[0]
             return -nf_logl_means  # Assuming we want to maximize loglikelihood
         except ValueError as e:
@@ -241,14 +248,16 @@ if __name__ == "__main__":
     parser.add_argument('--search', choices=['grid', 'bayesian'], default='bayesian')
     parser.add_argument('--n_iter', nargs='?', default=default_opt_iter, type=int)
     parser.add_argument('--part', choices=['full', 'rd', 'sd'], default='full')
+    parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
     GRAPHIC = not args.no_graphics
     BAYESIAN = args.search == 'bayesian'
     n_iter = args.n_iter
+    parallelize = args.parallelize
 
-    directory_path = "./results/exp_cv_2/" + str(dataset_id) + "/"
+    directory_path = "./results/exp_cv_2/" + str(dataset_id) + "_biz/"
     if not os.path.exists(directory_path):
         # If the directory does not exist, create it
         os.makedirs(directory_path)
@@ -294,7 +303,7 @@ if __name__ == "__main__":
         results_df["CLG_RD"] = bn_results
 
         # First, learn a normalizing now and sample new synthetic data
-        gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices, model_type=args.type)
+        gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices, model_type=args.type, parallelize = parallelize)
         results_df["GT_RD"] = metrics
         if GRAPHIC:
             # Visualize the convergence of the objective function
