@@ -20,6 +20,7 @@ sys.path.append(os.getcwd())
 import argparse
 
 from bayesace.utils import *
+import multiprocessing as mp
 
 import time
 
@@ -148,17 +149,24 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     elif model_type == "Spline":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units,
                       "layers": layers}
+
     cv_iter_results = []
-    for train_index, test_index in fold_indices:
-        df_train = dataset.iloc[train_index].reset_index(drop=True)
-        df_test = dataset.iloc[test_index].reset_index(drop=True)
-        cv_iter_results.append(train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr, weight_decay=weight_decay,
-                                 count_bins=count_bins, hidden_units=hidden_units, layers=layers, n_flows=n_flows,
-                                 perms_instantiation=perms_instantiation))
-    cv_results = {"Logl" : [], "LoglStd" : [], "Brier" : [], "AUC" : [], "Time" : []}
-    for cv_iter_results in cv_iter_results:
+    if not parallelize :
+        for train_index, test_index in fold_indices:
+            df_train = dataset.iloc[train_index].reset_index(drop=True)
+            df_test = dataset.iloc[test_index].reset_index(drop=True)
+            cv_iter_results.append(train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr, weight_decay=weight_decay,
+                                     count_bins=count_bins, hidden_units=hidden_units, layers=layers, n_flows=n_flows,
+                                     perms_instantiation=perms_instantiation))
+    elif parallelize :
+        pool = mp.Pool(k)
+        cv_iter_results = pool.starmap(train_nf_and_get_results, [(dataset.iloc[train_index].reset_index(drop=True), dataset.iloc[test_index].reset_index(drop=True), model_type, batch_size, lr, weight_decay, count_bins, hidden_units, layers, n_flows, perms_instantiation) for train_index, test_index in fold_indices])
+        pool.close()
+    cv_results = {"Logl": [], "LoglStd": [], "Brier": [], "AUC": [], "Time": []}
+    for cv_iter_result in cv_iter_results:
         for key in cv_results.keys():
-            cv_results[key].append(cv_iter_results[key])
+            cv_results[key].append(cv_iter_result[key])
+
 
     print(str(param_dict), "normalizing flow learned")
     cv_results_summary = {"Logl_mean": np.mean(cv_results["Logl"]), "Logl_std": np.std(cv_results["Logl"]),
@@ -257,7 +265,7 @@ if __name__ == "__main__":
     n_iter = args.n_iter
     parallelize = args.parallelize
 
-    directory_path = "./results/exp_cv_2/" + str(dataset_id) + "_biz/"
+    directory_path = "./results/exp_cv_2/" + str(dataset_id) + "/"
     if not os.path.exists(directory_path):
         # If the directory does not exist, create it
         os.makedirs(directory_path)
@@ -376,7 +384,7 @@ if __name__ == "__main__":
                 results_df["NF" + str(nf_params)] = metrics[:-1]
 
         else:
-            nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type)
+            nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type, parallelize=True)
             results_df["NF"] = metrics
 
             pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
