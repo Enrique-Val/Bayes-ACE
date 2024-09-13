@@ -2,7 +2,9 @@ import os
 import random
 import sys
 from itertools import product
+from multiprocessing import shared_memory
 
+import numpy as np
 import pandas as pd
 import torch
 from skopt import gp_minimize
@@ -111,8 +113,46 @@ def cross_validate_bn(dataset, fold_indices=None):
 
     return bn_results
 
+
+# Convert the dataset to a NumPy array for shared memory usage
+def to_numpy_shared(df) :
+    unique_values = df["class"].unique()
+    ordinal_mapping = {value: idx for idx, value in enumerate(unique_values)}
+    # Convert DataFrame to NumPy array
+    df_numpy = df.drop("class",axis=1).to_numpy()
+    df_numpy = np.hstack((df_numpy, np.array([ordinal_mapping[value] for value in df["class"]]).reshape(-1, 1)))
+    shm = shared_memory.SharedMemory(create=True, size=df_numpy.nbytes)
+    shared_array = np.ndarray(df_numpy.shape, dtype=df_numpy.dtype, buffer=shm.buf)
+    np.copyto(shared_array, df_numpy)
+    return shm, shared_array, ordinal_mapping
+
+
+# Worker function that accesses shared memory
+def worker(task, shm_name, shape, dtype, column_names, ordinal_mapping, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
+           count_bins=None, hidden_units=None,
+           layers=None,
+           n_flows=None, perms_instantiation=None):
+    train_index, test_index = task
+    # Reconstruct the DataFrame using the shared memory array
+    # Access shared memory by name
+    existing_shm = shared_memory.SharedMemory(name=shm_name)
+    shared_array = np.ndarray(shape, dtype=dtype, buffer=existing_shm.buf)
+    # Create a DataFrame from the shared memory array
+    df_shared = pd.DataFrame(shared_array, columns=column_names)
+    # Recodify the str of the class using the ordinal mapping
+    df_shared["class"] = df_shared["class"].apply(lambda x: list(ordinal_mapping.keys())[list(ordinal_mapping.values()).index(x)])
+    # Create train and test DataFrames
+    df_train = df_shared.iloc[train_index].reset_index(drop=True)
+    df_test = df_shared.iloc[test_index].reset_index(drop=True)
+    # Proceed with training
+    return train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr,
+                                    weight_decay=weight_decay,
+                                    count_bins=count_bins, hidden_units=hidden_units, layers=layers, n_flows=n_flows,
+                                    perms_instantiation=perms_instantiation)
+
+
 def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
-                             count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None) :
+                             count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None):
     d = df_train.shape[1] - 1
     t0 = time.time()
     model = None
@@ -136,37 +176,53 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64,
     return {"Logl": np.mean(logl), "LoglStd": np.mean(logl_std), "Brier": np.mean(brier), "AUC": np.mean(auc_res),
             "Time": np.mean(it_time)}
 
+
 def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
                       count_bins=None, hidden_units=None,
                       layers=None,
-                      n_flows=None, perms_instantiation=None, parallelize = False):
+                      n_flows=None, perms_instantiation=None, parallelize=False):
     param_dict = None
     if model_type == "NVP":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "hidden_u": hidden_units,
                       "layers": layers, "n_flows": n_flows}
-        if perms_instantiation is None :
+        if perms_instantiation is None:
             perms_instantiation = [torch.randperm(d) for _ in range(n_flows)]
     elif model_type == "Spline":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units,
                       "layers": layers}
 
     cv_iter_results = []
-    if not parallelize :
+    if not parallelize:
         for train_index, test_index in fold_indices:
             df_train = dataset.iloc[train_index].reset_index(drop=True)
             df_test = dataset.iloc[test_index].reset_index(drop=True)
-            cv_iter_results.append(train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr, weight_decay=weight_decay,
-                                     count_bins=count_bins, hidden_units=hidden_units, layers=layers, n_flows=n_flows,
-                                     perms_instantiation=perms_instantiation))
-    elif parallelize :
+            cv_iter_results.append(
+                train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr,
+                                         weight_decay=weight_decay,
+                                         count_bins=count_bins, hidden_units=hidden_units, layers=layers,
+                                         n_flows=n_flows,
+                                         perms_instantiation=perms_instantiation))
+    elif parallelize:
+        shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
+        df_shape = dataset.shape
+        column_names = dataset.columns.tolist()
         pool = mp.Pool(k)
-        cv_iter_results = pool.starmap(train_nf_and_get_results, [(dataset.iloc[train_index].reset_index(drop=True), dataset.iloc[test_index].reset_index(drop=True), model_type, batch_size, lr, weight_decay, count_bins, hidden_units, layers, n_flows, perms_instantiation) for train_index, test_index in fold_indices])
+        fold_tasks = [(train_index, test_index) for train_index, test_index in fold_indices]
+
+        # Use starmap with the shared memory array and other needed parameters
+        cv_iter_results = pool.starmap(worker,
+                                       [(task, shm.name, shared_array.shape, shared_array.dtype, column_names, ordinal_mapping, model_type, batch_size, lr,
+                                         weight_decay, count_bins, hidden_units, layers, n_flows, perms_instantiation)
+                                        for task in fold_tasks])
         pool.close()
+        pool.join()
+
+        shm.close()
+        shm.unlink()
     cv_results = {"Logl": [], "LoglStd": [], "Brier": [], "AUC": [], "Time": []}
     for cv_iter_result in cv_iter_results:
         for key in cv_results.keys():
             cv_results[key].append(cv_iter_result[key])
-
 
     print(str(param_dict), "normalizing flow learned")
     cv_results_summary = {"Logl_mean": np.mean(cv_results["Logl"]), "Logl_std": np.std(cv_results["Logl"]),
@@ -179,7 +235,7 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [param_dict]
 
 
-def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", parallelize = False):
+def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", parallelize=False):
     # Bayesian optimization
 
     # List to store the random permutations
@@ -196,7 +252,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
         result = None
         try:
             result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size,
-                                       perms_instantiation=perms_instantiation,parallelize=parallelize,**params)
+                                       perms_instantiation=perms_instantiation, parallelize=parallelize, **params)
             nf_logl_means = result[0]
             return -nf_logl_means  # Assuming we want to maximize loglikelihood
         except ValueError as e:
@@ -289,7 +345,7 @@ if __name__ == "__main__":
         split_dim = d // 2
         n_instances = dataset.shape[0]
         global batch_size
-        batch_size = int((n_instances / n_batches)+1)
+        batch_size = int((n_instances / n_batches) + 1)
 
         # In case we use NVP, we need to add the split_dim parameter
         if args.type == "NVP":
@@ -311,7 +367,8 @@ if __name__ == "__main__":
         results_df["CLG_RD"] = bn_results
 
         # First, learn a normalizing now and sample new synthetic data
-        gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices, model_type=args.type, parallelize = parallelize)
+        gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices, model_type=args.type,
+                                                              parallelize=parallelize)
         results_df["GT_RD"] = metrics
         if GRAPHIC:
             # Visualize the convergence of the objective function
@@ -384,7 +441,8 @@ if __name__ == "__main__":
                 results_df["NF" + str(nf_params)] = metrics[:-1]
 
         else:
-            nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type, parallelize=True)
+            nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type,
+                                                                  parallelize=parallelize)
             results_df["NF"] = metrics
 
             pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
