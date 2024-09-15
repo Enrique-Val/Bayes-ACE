@@ -37,6 +37,13 @@ def kfold_indices(data, k):
         folds.append((train_indices, test_indices))
     return folds
 
+def get_kfold_indices(n_instances, n_folds, i) :
+    fold_size = n_instances // n_folds
+    indices = np.arange(n_instances)
+    test_indices = indices[i * fold_size: (i + 1) * fold_size]
+    train_indices = np.concatenate([indices[:i * fold_size], indices[(i + 1) * fold_size:]])
+    return train_indices, test_indices
+
 
 # Define the number of folds (K)
 k = 10
@@ -128,11 +135,11 @@ def to_numpy_shared(df) :
 
 
 # Worker function that accesses shared memory
-def worker(task, shm_name, shape, dtype, column_names, ordinal_mapping, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
+def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n_folds, i_fold, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
            count_bins=None, hidden_units=None,
            layers=None,
            n_flows=None, perms_instantiation=None):
-    train_index, test_index = task
+    train_index, test_index = get_kfold_indices(n_instances, n_folds, i_fold)
     # Reconstruct the DataFrame using the shared memory array
     # Access shared memory by name
     existing_shm = shared_memory.SharedMemory(name=shm_name)
@@ -211,9 +218,9 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
 
         # Use starmap with the shared memory array and other needed parameters
         cv_iter_results = pool.starmap(worker,
-                                       [(task, shm.name, shared_array.shape, shared_array.dtype, column_names, ordinal_mapping, model_type, batch_size, lr,
+                                       [(shm.name, shared_array.shape, shared_array.dtype, column_names, ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size, lr,
                                          weight_decay, count_bins, hidden_units, layers, n_flows, perms_instantiation)
-                                        for task in fold_tasks])
+                                        for i_fold in range(k)])
         pool.close()
         pool.join()
 
