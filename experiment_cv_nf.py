@@ -139,6 +139,7 @@ def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n
            count_bins=None, hidden_units=None,
            layers=None,
            n_flows=None, perms_instantiation=None):
+    torch.set_num_threads(1)
     train_index, test_index = get_kfold_indices(n_instances, n_folds, i_fold)
     # Reconstruct the DataFrame using the shared memory array
     # Access shared memory by name
@@ -213,7 +214,7 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
         df_shape = dataset.shape
         column_names = dataset.columns.tolist()
-        pool = mp.Pool(k)
+        pool = mp.Pool(min(mp.cpu_count(), k))
         fold_tasks = [(train_index, test_index) for train_index, test_index in fold_indices]
 
         # Use starmap with the shared memory array and other needed parameters
@@ -328,6 +329,8 @@ if __name__ == "__main__":
     n_iter = args.n_iter
     parallelize = args.parallelize
 
+    global batch_size
+
     directory_path = "./results/exp_cv_2/" + str(dataset_id) + "/"
     if not os.path.exists(directory_path):
         # If the directory does not exist, create it
@@ -351,7 +354,6 @@ if __name__ == "__main__":
         d = len(dataset.columns) - 1
         split_dim = d // 2
         n_instances = dataset.shape[0]
-        global batch_size
         batch_size = int((n_instances / n_batches) + 1)
 
         # In case we use NVP, we need to add the split_dim parameter
@@ -410,7 +412,10 @@ if __name__ == "__main__":
         fold_indices = kfold_indices(resampled_dataset, k)
 
         # If we use NVP, we need to add the split_dim parameter
-        d = len(resampled_dataset.columns) - 1
+        d = resampled_dataset.shape[1] - 1
+        split_dim = d // 2
+        n_instances = resampled_dataset.shape[0]
+        batch_size = int((n_instances / n_batches) + 1)
         if args.type == "NVP" and args.part == 'sd':
             param_space.pop(2)
 
