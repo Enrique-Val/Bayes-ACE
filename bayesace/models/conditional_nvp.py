@@ -24,6 +24,7 @@ Some modifications to work with data with more than 2 dimensions were made
 def weights_init(m):
     if isinstance(m, nn.Linear):
         nn.init.xavier_normal_(m.weight)
+        #nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
         if m.bias is not None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, nn.BatchNorm1d):
@@ -61,6 +62,10 @@ class ConditionalNormalizingFlow(nn.Module):
             self.base_dist = dist.Normal(torch.zeros(input_dim).cuda(),
                                          torch.ones(input_dim).cuda())
         self.apply(weights_init)
+        '''for name, param in self.named_parameters():
+            if param.requires_grad:
+                print(name, param.data)
+        raise Exception("Stop here")'''
 
     def model(self, X=None, H=None):
         N = len(X) if X is not None else None
@@ -137,7 +142,26 @@ class ConditionalNVP(ConditionalNF):
                                                              flow_length=n_flows,
                                                              use_cuda=False, perms_instantiation=perms_instantiation)
         self.perms_instantiation = self.dist_x_given_class.perms_instantiation.copy()
-        # Build SVI object
+
+        # Do 10 warm up steps
+        optimizer_w = pyro.optim.ClippedAdam({"lr": lr/10, "weight_decay": weight_decay, "clip_norm": 5})
+        svi_w = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer_w, Trace_ELBO(num_particles=1))
+        pyro.clear_param_store()
+
+        for epoch in range(10):
+            running_loss = 0
+            for batch in train_loader:
+                batch = batch[0]
+                y_batch = torch.reshape(batch[:, -1], shape=(-1, 1))
+                x_batch = batch[:, :-1]
+                if self.device == "cuda":
+                    y_batch, x_batch = y_batch.cuda(), x_batch.cuda()
+                loss = svi_w.step(x_batch, y_batch)
+                running_loss += float(loss)
+                del x_batch, y_batch, loss
+            del running_loss
+
+        # Build SVI object for actual training
         optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, "clip_norm": 5, "lrd": 0.999})
         svi = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer, Trace_ELBO(num_particles=1))
 
@@ -177,6 +201,7 @@ class ConditionalNVP(ConditionalNF):
                     del x_val_batch, y_val_batch, val_loss
                 val_loss = val_running_loss / len(val_loader.dataset)
                 val_losses.append(val_loss)
+
                 del val_running_loss
 
                 # Early stopping and model checkpoint

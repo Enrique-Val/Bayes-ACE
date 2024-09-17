@@ -77,8 +77,8 @@ param_grid = {
 
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
-    Real(1e-4, 1e-3, name='lr', prior='log-uniform'),
-    Real(1e-3, 1e-1, name='weight_decay'),
+    Real(5e-5, 5e-4, name='lr', prior='log-uniform'),
+    Real(1e-3, 5e-1, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
     Integer(2, 10, name='hidden_units'),
     Integer(1, 5, name='layers'),

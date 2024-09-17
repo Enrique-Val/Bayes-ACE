@@ -29,7 +29,7 @@ class ConditionalNF(ABC):
         class_labels = np.unique(dataset["class"].values)
         self.class_dist = {label: len(dataset[dataset["class"] == label]) / len(dataset) for label in class_labels}
 
-    def get_loaders(self, dataset, batch_size):
+    def get_loaders(self, dataset, batch_size, proportion=0.8):
         dataset = dataset.copy()
         # Transform dataset to numpy and cast class from string to numerical
         class_column = np.zeros(len(dataset))
@@ -41,7 +41,7 @@ class ConditionalNF(ABC):
 
         # Train validation split
         train_dataset, val_dataset = np.split(dataset_numpy,
-                                              [int(.8 * len(dataset))])
+                                              [int(proportion * len(dataset))])
         train_dataset_tensor = torch.utils.data.TensorDataset(
             torch.from_numpy(train_dataset).to(self.device, dtype=torch.get_default_dtype())
         )
