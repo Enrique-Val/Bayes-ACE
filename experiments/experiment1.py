@@ -4,7 +4,6 @@ import sys
 
 import pickle
 
-sys.path.append(os.getcwd())
 import argparse
 
 from bayesace.utils import *
@@ -31,7 +30,8 @@ if __name__ == "__main__":
     random.seed(0)
 
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    df_train = pd.read_csv('./results/exp_cv_2/' + str(dataset_id) + '/resampled_data' + str(dataset_id) + '.csv', index_col=0)
+    df_train = pd.read_csv('./results/exp_cv_2/' + str(dataset_id) + '/resampled_data' + str(dataset_id) + '.csv',
+                           index_col=0)
     # Transform the class into a categorical variable
     class_processed = df_train[df_train.columns[-1]].astype('string').astype('category')
     df_train = df_train.drop(df_train.columns[-1], axis=1)
@@ -43,8 +43,9 @@ if __name__ == "__main__":
     sampling_range = (xl, xu)
 
     # Load the pickled gt density estimator from the correct folder
-    gt_estimator:ConditionalNF = pickle.load(open('./results/exp_cv_2/' + str(dataset_id) + '/gt_nf_' + str(dataset_id) + '.pkl', 'rb'))
-    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed = 0).to_pandas()
+    gt_estimator: ConditionalNF = pickle.load(
+        open('./results/exp_cv_2/' + str(dataset_id) + '/gt_nf_' + str(dataset_id) + '.pkl', 'rb'))
+    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0).to_pandas()
     clg_network = hill_climbing(data=df_train, bn_type="CLG")  # TODO Maybe dill the CLG as well
     normalizing_flow = pickle.load(
         open('./results/exp_cv_2/' + str(dataset_id) + '/nf_' + str(dataset_id) + '.pkl', 'rb'))
@@ -55,7 +56,7 @@ if __name__ == "__main__":
     std_gt = float(cv_results.loc["LoglStd_mean", "GT_SD"])
 
     for density_estimator in [clg_network, normalizing_flow]:
-        #np.random.seed(0)
+        # np.random.seed(0)
         # np.seterr(divide='ignore')
         for penalty in penalties:
             # Result storage
@@ -76,11 +77,12 @@ if __name__ == "__main__":
                                    initialization="guided",
                                    seed=0, verbose=False, pop_size=100, generations=1000)
                     result = alg.run(instance, target_label=target_label)
-                    tf = time.time()-t0
+                    tf = time.time() - t0
                     # print(result.distance)
                     path_to_compute = path(result.path.values, chunks=chunks)
-                    distances[n_vertex] = path_likelihood_length(pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
-                                                                 density_estimator=gt_estimator, penalty=penalty)
+                    distances[n_vertex] = path_likelihood_length(
+                        pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
+                        density_estimator=gt_estimator, penalty=penalty)
                     times[n_vertex] = tf
                     '''
                     plot_path(df_train, result)
@@ -100,12 +102,13 @@ if __name__ == "__main__":
             model_str = "nf" if density_estimator == normalizing_flow else "clg"
 
             # Check if the target directory exists, if not create it
-            if not os.path.exists('./results/exp_1/'+model_str+'/'):
-                os.makedirs('./results/exp_1/'+model_str+'/')
+            if not os.path.exists('./results/exp_1/' + model_str + '/'):
+                os.makedirs('./results/exp_1/' + model_str + '/')
 
             to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices))
-            to_ret.to_csv('./results/exp_1/'+model_str+'/distances_data' + str(dataset_id) + '_penalty' + str(penalty) + '.csv')
-    
-            to_ret = pd.DataFrame(data=evaluations_mat, columns=range(n_vertices))
-            to_ret.to_csv('./results/exp_1/'+model_str+'/time_data' + str(dataset_id) + '_penalty' + str(penalty) + '.csv')
+            to_ret.to_csv('./results/exp_1/' + model_str + '/distances_data' + str(dataset_id) + '_penalty' + str(
+                penalty) + '.csv')
 
+            to_ret = pd.DataFrame(data=evaluations_mat, columns=range(n_vertices))
+            to_ret.to_csv(
+                './results/exp_1/' + model_str + '/time_data' + str(dataset_id) + '_penalty' + str(penalty) + '.csv')

@@ -7,7 +7,6 @@ from itertools import product
 
 import pandas as pd
 
-sys.path.append(os.getcwd())
 import argparse
 
 from bayesace.utils import *

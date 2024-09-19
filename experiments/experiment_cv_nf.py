@@ -14,11 +14,11 @@ from skopt.utils import use_named_args
 
 from bayesace.models.conditional_nvp import ConditionalNVP
 from bayesace.models.conditional_spline import ConditionalSpline
-from bayesace.models.utils import get_data, preprocess_data
+from bayesace.models.utils import preprocess_data
+from bayesace.dataset.utils import get_data
 
 import pickle
 
-sys.path.append(os.getcwd())
 import argparse
 
 from bayesace.utils import *
