@@ -50,7 +50,7 @@ class BestPathFinder(ElementwiseProblem):
         sum_path = 0
         for path_i in paths:
             sum_path += path_likelihood_length(pd.DataFrame(path_i, columns=self.features),
-                                               density_estimator=self.bayesian_network, penalty=self.penalty)
+                                               bayesian_network=self.bayesian_network, penalty=self.penalty)
         x_cfx = self.x_og.copy()
         x_cfx[:] = x[-self.n_features:]
 
@@ -117,14 +117,14 @@ class BayesACE(ACE):
 
             return initial_sample
 
-    def __init__(self, density_estimator, features, chunks, n_vertex, pop_size=100,
-                 generations=10, log_likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=(-4, 4),
+    def __init__(self, bayesian_network, features, chunks, n_vertex, pop_size=100,
+                 generations=10, likelihood_threshold=0.00, accuracy_threshold=0.50, penalty=1, sampling_range=(-4, 4),
                  initialization="default",
                  seed=0,
                  verbose=True):
-        super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
+        super().__init__(bayesian_network, features, chunks, likelihood_threshold=likelihood_threshold,
                          accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose)
-        self.bayesian_network = density_estimator
+        self.bayesian_network = bayesian_network
         self.n_vertex = n_vertex
         self.generations = generations
         self.population_size = pop_size
@@ -144,7 +144,7 @@ class BayesACE(ACE):
             runner = StarmapParallelization(pool.starmap)
             problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
                                      penalty=self.penalty, chunks=self.chunks,
-                                     likelihood_threshold=self.log_likelihood_threshold,
+                                     likelihood_threshold=self.likelihood_threshold,
                                      accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range,
                                      elementwise_runner=runner)
             algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
@@ -158,7 +158,7 @@ class BayesACE(ACE):
         else:
             problem = BestPathFinder(bayesian_network=self.bayesian_network, instance=instance, n_vertex=self.n_vertex,
                                      penalty=self.penalty, chunks=self.chunks,
-                                     likelihood_threshold=self.log_likelihood_threshold,
+                                     likelihood_threshold=self.likelihood_threshold,
                                      accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)
             algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
 
@@ -181,7 +181,7 @@ class BayesACE(ACE):
         distance = 0
         for path_i in path_to_compute:
             distance += path_likelihood_length(pd.DataFrame(path_i, columns=self.features),
-                                               density_estimator=self.bayesian_network, penalty=self.penalty)
+                                               bayesian_network=self.bayesian_network, penalty=self.penalty)
         if return_info:
             return (ACEResult(counterfactual, path_to_ret, distance), res)
         return ACEResult(counterfactual, path_to_ret, distance)
