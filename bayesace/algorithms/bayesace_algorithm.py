@@ -112,7 +112,15 @@ class BayesACE(ACE):
             candidate_initial = candidate_initial.drop("class", axis = 1)
             if candidate_initial.shape[0] > 0 :
                 count = 0
-            initial_sample = pd.concat([initial_sample, candidate_initial])
+            # We concatenate the new samples to the initial sample. We have to do a couple checks in case some of them is empty
+            if not initial_sample.empty and not candidate_initial.empty:
+                initial_sample = pd.concat([initial_sample, candidate_initial], axis=0)
+            elif not initial_sample.empty:
+                initial_sample = initial_sample.copy()
+            elif not candidate_initial.empty:
+                initial_sample = candidate_initial.copy()
+            else:
+                initial_sample = pd.DataFrame(columns=self.features)
             count += 1
             if initial_sample.shape[0] > self.population_size:
                 completed = True
@@ -147,7 +155,7 @@ class BayesACE(ACE):
             # TODO optional, add a bit of noise to the paths
             return paths_sample
 
-    def __init__(self, density_estimator, features, chunks, n_vertex, pop_size=100,
+    def __init__(self, density_estimator, features, n_vertex, chunks=10, pop_size=100,
                  generations=1000, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
                  initialization="guided",
                  seed=0,

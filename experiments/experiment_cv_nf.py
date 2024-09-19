@@ -51,7 +51,7 @@ steps = 1000
 n_batches = 20
 
 # Define the number of iterations for Bayesian optimization
-default_opt_iter = 50
+default_opt_iter = 100
 
 # Define how the preprocessing will be done
 JIT_COEF = 1
@@ -77,8 +77,8 @@ param_grid = {
 
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
-    Real(5e-5, 5e-4, name='lr', prior='log-uniform'),
-    Real(1e-3, 5e-1, name='weight_decay'),
+    Real(1e-4, 1e-3, name='lr', prior='log-uniform'),
+    Real(1e-2, 1, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
     Integer(2, 10, name='hidden_units'),
     Integer(1, 5, name='layers'),
@@ -262,9 +262,9 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
             result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size,
                                        perms_instantiation=perms_instantiation, parallelize=parallelize, **params)
             nf_logl_means = result[0]
-            if nf_logl_means < -1000 :
+            if nf_logl_means < -3e11 :
                 # If the logl is too low, return a high value for the objective function. This allows to not overpenalize regions of the space
-                return 1000
+                return 3e11
             return -nf_logl_means  # Assuming we want to maximize loglikelihood
         except ValueError as e:
             if e.args[0][:30] == "Error while computing log_prob":
@@ -273,7 +273,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
                             "network.") + str(params)
                 warnings.warn(to_print, RuntimeWarning)
                 print()
-                return 1000
+                return 3e11
             else:
                 raise e
 
@@ -374,7 +374,7 @@ if __name__ == "__main__":
             index=cartesian_product + ["params"])
         results_df.index.name = str(dataset_id)
 
-        # Validate Gaussian network
+        # Validate Gaussian network for preliminary comparisons
         bn_results = cross_validate_bn(dataset, fold_indices)
         results_df["CLG_RD"] = bn_results
 
@@ -437,6 +437,10 @@ if __name__ == "__main__":
         # Validate Gaussian network
         bn_results = cross_validate_bn(resampled_dataset, fold_indices)
         results_df["CLG"] = bn_results
+
+        # Train a and pickle the Bayesian network
+        bn = hill_climbing(data=resampled_dataset, bn_type="CLG")
+        pickle.dump(bn, open(directory_path + "clg_" + str(dataset_id) + ".pkl", "wb"))
 
         # Validate normalizing flow with different params
         if not BAYESIAN:
