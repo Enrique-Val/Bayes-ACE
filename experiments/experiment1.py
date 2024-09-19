@@ -86,7 +86,7 @@ if __name__ == "__main__":
     sampling_range = (xl, xu)
 
     # Load the pickled gt density estimator from the correct folder
-    gt_estimator_path = results_cv_dir + '/gt_nf_' + str(dataset_id) + '.pkl'
+    gt_estimator_path = results_cv_dir + 'gt_nf_' + str(dataset_id) + '.pkl'
     gt_estimator: ConditionalNF = pickle.load(
         open(gt_estimator_path, 'rb'))
 
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0).to_pandas()
 
     # Open the Bayesian network (conditional linear Gaussian)
-    clg_network_path = results_cv_dir + '/clg_' + str(dataset_id) + '.pkl'
+    clg_network_path = results_cv_dir + 'clg_' + str(dataset_id) + '.pkl'
     try:
         clg_network = pickle.load(open(clg_network_path, 'rb'))
     except FileNotFoundError:
@@ -103,10 +103,10 @@ if __name__ == "__main__":
 
     # Open the NF
     normalizing_flow = pickle.load(
-        open(results_cv_dir + '/nf_' + str(dataset_id) + '.pkl', 'rb'))
+        open(results_cv_dir + 'nf_' + str(dataset_id) + '.pkl', 'rb'))
 
     # Get the cross-validation results
-    cv_results = pd.read_csv(results_cv_dir + '/data_' + str(dataset_id) + '.csv',
+    cv_results = pd.read_csv(results_cv_dir + 'data_' + str(dataset_id) + '.csv',
                              index_col=0)
 
     mu_gt = float(cv_results.loc["Logl_mean", "GT_SD"])
@@ -147,7 +147,7 @@ if __name__ == "__main__":
 
             # Check if the target directory exists, if not create it
             if not os.path.exists(results_dir + model_str + '/'):
-                os.makedirs('./results/exp_1/' + model_str + '/')
+                os.makedirs(results_dir + model_str + '/')
 
             to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices))
             to_ret.to_csv(results_dir + model_str + '/distances_data' + str(dataset_id) + '_penalty' + str(
