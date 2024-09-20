@@ -126,8 +126,10 @@ class BayesACE(ACE):
                 completed = True
             count += 1
             if count > 100 and initial_sample.shape[0] < 1:
-                raise Exception("Could not find enough samples to start the optimization process. Please, try again "
+                warnings.warn("Could not find enough samples to start the optimization process. Please, try again "
                                 "with a lower likelihood or probability threshold.")
+                return None
+
 
         initial_sample = initial_sample.head(self.population_size).reset_index(drop = True)
         initial_sample = initial_sample.clip(self.sampling_range[0], self.sampling_range[1])
@@ -176,6 +178,9 @@ class BayesACE(ACE):
         super().run(instance, target_label)
         termination = DefaultSingleObjectiveTermination(n_max_gen=self.generations)
         initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)
+        # Check if it was possible to even initialize the problem
+        if initial_sample is None :
+            return ACEResult(None, instance.drop("class", axis=1), np.inf)
 
         problem = BestPathFinder(density_estimator=self.density_estimator, instance=instance,
                                  target_label=target_label, n_vertex=self.n_vertex,

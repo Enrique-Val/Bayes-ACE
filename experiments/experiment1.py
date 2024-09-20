@@ -102,8 +102,8 @@ if __name__ == "__main__":
         pickle.dump(clg_network, open(clg_network_path, 'wb'))
 
     # Open the NF
-    normalizing_flow = pickle.load(
-        open(results_cv_dir + 'nf_' + str(dataset_id) + '.pkl', 'rb'))
+    nf_path = results_cv_dir + 'nf_' + str(dataset_id) + '.pkl'
+    normalizing_flow = pickle.load(open(nf_path, 'rb'))
 
     # Get the cross-validation results
     cv_results = pd.read_csv(results_cv_dir + 'data_' + str(dataset_id) + '.csv',
@@ -113,14 +113,14 @@ if __name__ == "__main__":
     std_gt = float(cv_results.loc["LoglStd_mean", "GT_SD"])
     likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
 
-    for density_estimator in [clg_network, normalizing_flow]:
+    for density_estimator_path,density_estimator in zip([clg_network_path,],[clg_network, normalizing_flow]):
         for penalty in penalties:
             # Result storage
             times_mat = np.zeros((n_counterfactuals, n_vertices))
             evaluations_mat = np.zeros((n_counterfactuals, n_vertices))
             if parallelize:
                 pool = mp.Pool(min(mp.cpu_count(), n_counterfactuals))
-                results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], clg_network_path, gt_estimator_path,
+                results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
                                                 penalty, n_vertices, likelihood_threshold, accuracy_threshold,
                                                 chunks, sampling_range) for i in range(n_counterfactuals)])
                 pool.close()
@@ -143,16 +143,16 @@ if __name__ == "__main__":
             print(evaluations_mat)
             print()
 
-            model_str = "nf" if density_estimator == normalizing_flow else "clg"
+            model_str = "NF" if density_estimator == normalizing_flow else "CLG"
 
             # Check if the target directory exists, if not create it
             if not os.path.exists(results_dir + model_str + '/'):
                 os.makedirs(results_dir + model_str + '/')
 
             to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices))
-            to_ret.to_csv(results_dir + model_str + '/distances_data' + str(dataset_id) + '_penalty' + str(
+            to_ret.to_csv(results_dir + model_str + '/distances_data' + str(dataset_id) +'_model' + model_str + '_penalty' + str(
                 penalty) + '.csv')
 
             to_ret = pd.DataFrame(data=evaluations_mat, columns=range(n_vertices))
             to_ret.to_csv(
-                results_dir + model_str + '/time_data' + str(dataset_id) + '_penalty' + str(penalty) + '.csv')
+                results_dir + model_str + '/time_data' + str(dataset_id) + '_model' + model_str + '_penalty' + str(penalty) + '.csv')
