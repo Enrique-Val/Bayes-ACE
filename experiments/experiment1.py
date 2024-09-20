@@ -10,6 +10,7 @@ import torch
 
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
+from experiments.utils import setup_experiment, get_constraints
 
 
 # Worker function for parallelization
@@ -72,45 +73,9 @@ if __name__ == "__main__":
     results_cv_dir = './results/exp_cv_2/' + str(dataset_id) + '/'
     results_dir = './results/exp_1/' + str(dataset_id) + '/'
 
-    # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    df_train = pd.read_csv(results_cv_dir + 'resampled_data' + str(dataset_id) + '.csv',
-                           index_col=0)
-    # Transform the class into a categorical variable
-    class_processed = df_train[df_train.columns[-1]].astype('string').astype('category')
-    df_train = df_train.drop(df_train.columns[-1], axis=1)
-    df_train["class"] = class_processed
-
-    # Get the bounds for the optimization problem. The initial sampling will rely on this, so we call it sampling_range
-    xu = df_train.drop(columns=['class']).max().values + 0.0001
-    xl = df_train.drop(columns=['class']).min().values - 0.0001
-    sampling_range = (xl, xu)
-
-    # Load the pickled gt density estimator from the correct folder
-    gt_estimator_path = results_cv_dir + 'gt_nf_' + str(dataset_id) + '.pkl'
-    gt_estimator: ConditionalNF = pickle.load(
-        open(gt_estimator_path, 'rb'))
-
-    # Generate a test sample
-    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0).to_pandas()
-
-    # Open the Bayesian network (conditional linear Gaussian)
-    clg_network_path = results_cv_dir + 'clg_' + str(dataset_id) + '.pkl'
-    try:
-        clg_network = pickle.load(open(clg_network_path, 'rb'))
-    except FileNotFoundError:
-        clg_network = hill_climbing(data=df_train, bn_type="CLG")
-        pickle.dump(clg_network, open(clg_network_path, 'wb'))
-
-    # Open the NF
-    nf_path = results_cv_dir + 'nf_' + str(dataset_id) + '.pkl'
-    normalizing_flow = pickle.load(open(nf_path, 'rb'))
-
-    # Get the cross-validation results
-    cv_results = pd.read_csv(results_cv_dir + 'data_' + str(dataset_id) + '.csv',
-                             index_col=0)
-
-    mu_gt = float(cv_results.loc["Logl_mean", "GT_SD"])
-    std_gt = float(cv_results.loc["LoglStd_mean", "GT_SD"])
+    df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
+        results_cv_dir, dataset_id, n_counterfactuals)
+    sampling_range, mu_gt, std_gt = get_constraints(results_cv_dir, df_train, dataset_id)
     likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
 
     for density_estimator_path,density_estimator in zip([clg_network_path,],[clg_network, normalizing_flow]):

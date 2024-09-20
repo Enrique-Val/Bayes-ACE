@@ -15,8 +15,20 @@ from bayesace.algorithms.face import FACE
 
 import time
 
+from experiments.utils import get_constraints, setup_experiment, get_counterfactual_from_algorithm
+
+
+def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
+    algorithm = pickle.load(open(algorithm_path, 'rb'))
+    gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
+    return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Arguments")
+    parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
+    parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
+    args = parser.parse_args()
+
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     n_vertices = [0]
@@ -30,12 +42,7 @@ if __name__ == "__main__":
     n_counterfactuals = 30
 
     # Folder for storing the results
-    results_dir = './results/exp_3/'
-
-    parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
-    parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
-    args = parser.parse_args()
+    results_dir = './results/exp_3/' + str(args.dataset_id) + '/'
 
     dataset_id = args.dataset_id
     parallelize = args.parallelize
@@ -44,32 +51,11 @@ if __name__ == "__main__":
     random.seed(0)
 
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    results_cv_dir = './results/exp_cv_2/'
-    df_train = pd.read_csv(results_cv_dir + str(dataset_id) + '/resampled_data' + str(dataset_id) + '.csv',
-                           index_col=0)
-    # Transform the class into a categorical variable
-    class_processed = df_train[df_train.columns[-1]].astype('string').astype('category')
-    df_train = df_train.drop(df_train.columns[-1], axis=1)
-    df_train["class"] = class_processed
-    df_train = df_train.head(10)
-
-    # Get the bounds for the optimization problem. The initial sampling will rely on this, so we call it sampling_range
-    xu = df_train.drop(columns=['class']).max().values + 0.0001
-    xl = df_train.drop(columns=['class']).min().values - 0.0001
-    sampling_range = (xl, xu)
-
-    # Load the pickled gt density estimator from the correct folder
-    gt_estimator: ConditionalNF = pickle.load(
-        open(results_cv_dir + str(dataset_id) + '/gt_nf_' + str(dataset_id) + '.pkl', 'rb'))
-    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0).to_pandas()
-    clg_network = hill_climbing(data=df_train, bn_type="CLG")
-    normalizing_flow: ConditionalNF = pickle.load(
-        open(results_cv_dir + str(dataset_id) + '/nf_' + str(dataset_id) + '.pkl', 'rb'))
-    cv_results = pd.read_csv(results_cv_dir + str(dataset_id) + '/data_' + str(dataset_id) + '.csv',
-                             index_col=0)
-
-    mu_gt = float(cv_results.loc["Logl_mean", "GT_SD"])
-    std_gt = float(cv_results.loc["LoglStd_mean", "GT_SD"])
+    results_cv_dir = './results/exp_cv_2/' + str(dataset_id) + '/'
+    df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
+        results_cv_dir, dataset_id, n_counterfactuals)
+    sampling_range, mu_gt, std_gt = get_constraints(results_cv_dir, df_train, dataset_id)
+    df_train = df_train.head(10000)
 
     # Names of the models
     models = [normalizing_flow, clg_network]
@@ -147,36 +133,31 @@ if __name__ == "__main__":
                 algorithm.accuracy_threshold = accuracy_threshold
                 for i in range(n_counterfactuals):
                     instance = df_counterfactuals.iloc[[i]]
-                    target_label = get_other_class(df_train["class"].cat.categories, instance["class"].values[0])
-                    t0 = time.time()
-                    result = algorithm.run(instance, target_label=target_label)
-                    tf = time.time()-t0
-                    '''
-                    # Uncomment if all paths want to be stored
-                    result.path.to_csv(results_dir+'paths/data' + str(dataset_id) + '_likelihood' + str(
-                    likelihood_dev) + '_acc' + str(accuracy_threshold) +  + algorithm_str + '_counterfactual' + 
-                    str(i) + '.csv') 
-                    '''
-                    # Check first if indeed a counterfactual was found
-                    if result.counterfactual is None:
-                        results_dfs['distance'].loc[i, algorithm_str] = np.nan
-                        results_dfs['time'].loc[i, algorithm_str] = tf
-                        results_dfs['counterfactual'].loc[i, algorithm_str] = np.nan
-                        print("Counterfactual " + str(i) + " model " + algorithm_str + " distance: " + str(np.nan) + " time: " + str(tf))
-                    else :
-                        path_to_compute = path(result.path.values, chunks=chunks)
-                        path_length_gt = path_likelihood_length(
-                            pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
-                            density_estimator=gt_estimator, penalty=penalty)
-                        results_dfs['distance'].loc[i, algorithm_str] = path_length_gt
-                        results_dfs['time'].loc[i, algorithm_str] = tf
-                        results_dfs['counterfactual'].loc[i, algorithm_str] = result.counterfactual.values
-                        print("Counterfactual " + str(i) + " model " + algorithm_str + " distance: " + str(path_length_gt) + " time: " + str(tf))
-                    '''
-                    # Uncomment for a plot (only for 2D data)
-                    plot_path(df_train, result)
-                    plt.title("Counterfactual" + str(i) + " model" + algorithm_str)
-                    plt.show()'''
+                    if parallelize:
+                        # Pickle the algorithm to avoid I/O in every worker. The file will later be deleted
+                        tmp_file_str = results_dir + 'algorithm_' + algorithm_str + '.pkl'
+                        pickle.dump(algorithm, open(tmp_file_str, 'wb'))
+                        pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
+                        results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], tmp_file_str, gt_estimator_path,
+                                                         penalty, chunks) for i in range(n_counterfactuals)])
+                        pool.close()
+                        pool.join()
+                        os.remove(tmp_file_str)
+                        for i in range(n_counterfactuals):
+                            results_dfs["distance"].loc[i, algorithm_str] = results[i][0]
+                            results_dfs["counterfactual"].loc[i, algorithm_str] = results[i][2]
+                            results_dfs["time"].loc[i, algorithm_str] = results[i][1]
+
+                    else:
+                        for i in range(n_counterfactuals):
+                            instance = df_counterfactuals.iloc[[i]]
+                            path_length_gt, tf, counterfactual = get_counterfactual_from_algorithm(instance, algorithm,
+                                                                                                   gt_estimator,
+                                                                                                   penalty,
+                                                                                                   chunks)
+                            results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
+                            results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
+                            results_dfs["time"].loc[i, algorithm_str] = tf
 
             # Save the results
             for i in metrics:
