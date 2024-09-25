@@ -9,7 +9,7 @@ class NanLogProb(Exception):
 
 
 class ConditionalNF(ABC):
-    def __init__(self, gpu_acceleration=False):
+    def __init__(self, gpu_acceleration=False, verbose = False):
         # Dict containing the marginal probability of tha target
         self.class_dist = {}
 
@@ -20,6 +20,7 @@ class ConditionalNF(ABC):
         # Check if CUDA is available
         self.device = torch.device("cuda" if torch.cuda.is_available() and gpu_acceleration else "cpu")
         self.trained = False
+        self.verbose = verbose
 
     def train(self, dataset):
         self.columns = dataset.columns[:-1]

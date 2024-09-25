@@ -99,8 +99,11 @@ class ConditionalNormalizingFlow(nn.Module):
         return x
 
     def log_prob(self, x, H):
-        cond_flow_dist = self._condition(H)
-        return cond_flow_dist.log_prob(x)
+        try :
+            cond_flow_dist = self._condition(H)
+            return cond_flow_dist.log_prob(x)
+        except ValueError:
+            raise NanLogProb()
 
     def _condition(self, H):
         self.cond_transforms = [t.condition(H) for t in self.transforms]
@@ -143,7 +146,7 @@ class ConditionalNVP(ConditionalNF):
                                                              use_cuda=False, perms_instantiation=perms_instantiation)
         self.perms_instantiation = self.dist_x_given_class.perms_instantiation.copy()
 
-        # Do 10 warm up steps
+        '''# Do 10 warm up steps
         optimizer_w = pyro.optim.ClippedAdam({"lr": lr/10, "weight_decay": weight_decay, "clip_norm": 5})
         svi_w = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer_w, Trace_ELBO(num_particles=1))
         pyro.clear_param_store()
@@ -159,22 +162,23 @@ class ConditionalNVP(ConditionalNF):
                 loss = svi_w.step(x_batch, y_batch)
                 running_loss += float(loss)
                 del x_batch, y_batch, loss
-            del running_loss
+            del running_loss'''
 
         # Build SVI object for actual training
-        optimizer = pyro.optim.ClippedAdam({"lr": lr, "weight_decay": weight_decay, "clip_norm": 5, "lrd": 0.999})
-        svi = SVI(self.dist_x_given_class.model, self.dist_x_given_class.guide, optimizer, Trace_ELBO(num_particles=1))
+        optimizer = torch.optim.Adam([{'params': self.dist_x_given_class.parameters()}], lr=lr, weight_decay=weight_decay)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=10)
 
         losses = []
         val_losses = []
-        pyro.clear_param_store()
 
         last_epochs = 50
         last_models = []
         last_vals_logl = []
+        torch.save(self.dist_x_given_class.state_dict(), "model.pth")
 
         for epoch in range(steps):
             try:
+                self.dist_x_given_class.train()
                 running_loss = 0
                 for batch in train_loader:
                     batch = batch[0]
@@ -182,40 +186,69 @@ class ConditionalNVP(ConditionalNF):
                     x_batch = batch[:, :-1]
                     if self.device == "cuda":
                         y_batch, x_batch = y_batch.cuda(), x_batch.cuda()
-                    loss = svi.step(x_batch, y_batch)
+                    loss = -self.dist_x_given_class.log_prob(x_batch, y_batch).sum()
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
                     running_loss += float(loss)
                     del x_batch, y_batch, loss
                 losses.append(running_loss / len(train_loader.dataset))
-                del running_loss
 
                 # Validation phase
-                val_running_loss = 0
-                for val_batch in val_loader:
-                    val_batch = val_batch[0]
-                    y_val_batch = torch.reshape(val_batch[:, -1], shape=(-1, 1))
-                    x_val_batch = val_batch[:, :-1]
-                    if self.device == "cuda":
-                        y_val_batch, x_val_batch = y_val_batch.cuda(), x_val_batch.cuda()
-                    val_loss = svi.evaluate_loss(x_val_batch, y_val_batch)
-                    val_running_loss += float(val_loss)
-                    del x_val_batch, y_val_batch, val_loss
-                val_loss = val_running_loss / len(val_loader.dataset)
-                val_losses.append(val_loss)
-
-                del val_running_loss
-
-                # Early stopping and model checkpoint
-                if epoch > steps - last_epochs:
-                    last_models.append(self.dist_x_given_class.state_dict())
-                    last_vals_logl.append(val_loss)
+                with torch.no_grad():
+                    self.dist_x_given_class.eval()
+                    val_running_loss = 0
+                    for val_batch in val_loader:
+                        val_batch = val_batch[0]
+                        y_val_batch = torch.reshape(val_batch[:, -1], shape=(-1, 1))
+                        x_val_batch = val_batch[:, :-1]
+                        if self.device == "cuda":
+                            y_val_batch, x_val_batch = y_val_batch.cuda(), x_val_batch.cuda()
+                        val_loss = -self.dist_x_given_class.log_prob(x_val_batch, y_val_batch).sum()
+                        val_running_loss += float(val_loss)
+                        del x_val_batch, y_val_batch, val_loss
+                    val_loss = val_running_loss / len(val_loader.dataset)
+                    val_losses.append(val_loss)
 
             except KeyboardInterrupt:
                 if self.graphics:
+                    print(losses)
+                    print(val_losses)
                     plt.plot(losses, label='Training Loss')
                     plt.plot(val_losses, label='Validation Loss')
                     plt.legend()
                     plt.show()
                 break
+
+            except NanLogProb:
+                if len(losses) > len(val_losses):
+                    losses.pop(-1)
+                val_losses.append(val_losses[-1])
+                losses.append(losses[-1])
+                self.dist_x_given_class.load_state_dict(torch.load("model.pth", weights_only=True))
+                if self.verbose :
+                    print("Nan in epoch", epoch)
+                continue
+
+            # Early stopping and model checkpoint
+            if epoch > steps - last_epochs:
+                last_models.append(self.dist_x_given_class.state_dict())
+                last_vals_logl.append(val_loss)
+
+            if epoch > 0 and val_losses[-1] >= val_losses[-2]:
+                if self.verbose :
+                    print("Worsen in epoch", epoch, "with loss", losses[-1], "   val_loss", val_losses[-1])
+                losses[-1] = losses[-2]
+                val_losses[-1] = val_losses[-2]
+                self.dist_x_given_class.load_state_dict(torch.load("model.pth", weights_only=True))
+            else:
+                torch.save(self.dist_x_given_class.state_dict(), "model.pth")
+
+
+            scheduler.step(val_losses[-1])
+            if self.verbose :
+                print(f"Epoch {epoch + 1}/{steps} - Loss: {losses[-1]} - Val Loss: {val_losses[-1]}")
+                print("Lr:", optimizer.param_groups[0]['lr'])
         if self.graphics:
             plt.plot(losses, label='Training Loss')
             plt.plot(val_losses, label='Validation Loss')
