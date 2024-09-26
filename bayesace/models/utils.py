@@ -10,8 +10,8 @@ class PybnesianParallelizationError(Exception):
     pass
 
 
-def get_naive_structure(data: pd.DataFrame, type):
-    naive = type(data.columns)
+def get_naive_structure(data: pd.DataFrame, bn_type):
+    naive = bn_type(data.columns)
     for i in [i for i in data.columns if i != "class"]:
         naive.add_arc("class", i)
     return naive

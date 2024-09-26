@@ -230,10 +230,10 @@ class ConditionalNVP(ConditionalNF):
                     print("Nan in epoch", epoch)
                 continue
 
-            # Early stopping and model checkpoint
+            '''# Use the median model of the last 50 iters
             if epoch > steps - last_epochs:
                 last_models.append(self.dist_x_given_class.state_dict())
-                last_vals_logl.append(val_loss)
+                last_vals_logl.append(val_loss)'''
 
             if epoch > 0 and val_losses[-1] >= val_losses[-2]:
                 if self.verbose :
@@ -255,8 +255,8 @@ class ConditionalNVP(ConditionalNF):
             plt.legend()
             plt.show()
         # Select model with median validation loss
-        median_model_idx = np.argsort(last_vals_logl)[len(last_vals_logl)//2]
-        self.dist_x_given_class.load_state_dict(last_models[median_model_idx])
+        '''median_model_idx = np.argsort(last_vals_logl)[len(last_vals_logl)//2]
+        self.dist_x_given_class.load_state_dict(last_models[median_model_idx])'''
         self.trained = True
 
     def get_class_labels(self):

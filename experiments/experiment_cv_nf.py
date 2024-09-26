@@ -47,7 +47,7 @@ def get_kfold_indices(n_instances, n_folds, i) :
 
 # Define the number of folds (K)
 k = 10
-steps = 1000
+steps = 500
 n_batches = 20
 
 # Define the number of iterations for Bayesian optimization
@@ -61,24 +61,10 @@ max_unique_vals_to_jit = 0.05
 max_cum_values = 3
 minimum_spike_jitter = 0.0
 
-# Define a time limit (in hours) for execution
-TIME_LIMIT = np.inf
-
-# Define the possible parameter values IF using grid search
-# The number of hidden units will be multiplied by number of features
-param_grid = {
-    "lr": [1e-2, 1e-3, 1e-4],
-    "weight_decay": [0, 1e-4, 1e-3],
-    "count_bins": [2, 4, 6],
-    "hidden_units": [2, 5, 10],
-    "layers": [1, 2],
-    "n_flows": [1, 2, 4]
-}
-
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
-    Real(1e-4, 1e-3, name='lr', prior='log-uniform'),
-    Real(1e-2, 1, name='weight_decay'),
+    Real(1e-4, 1e-3, name='lr'),
+    Real(1e-4, 1e-2, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
     Integer(2, 10, name='hidden_units'),
     Integer(1, 5, name='layers'),
@@ -314,24 +300,23 @@ if __name__ == "__main__":
     torch.set_default_dtype(torch.float32)
     t_init = time.time()
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
-    parser.add_argument('--no_graphics', action=argparse.BooleanOptionalAction)
+    parser.add_argument("--dataset_id", nargs='?', default=44127, type=int)
+    parser.add_argument('--graphics', action=argparse.BooleanOptionalAction)
     parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
-    parser.add_argument('--search', choices=['grid', 'bayesian'], default='bayesian')
     parser.add_argument('--n_iter', nargs='?', default=default_opt_iter, type=int)
     parser.add_argument('--part', choices=['full', 'rd', 'sd'], default='full')
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_2/", type=str)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
-    GRAPHIC = not args.no_graphics
-    BAYESIAN = args.search == 'bayesian'
+    GRAPHIC = args.graphics
     n_iter = args.n_iter
     parallelize = args.parallelize
 
     global batch_size
 
-    directory_path = "./results/exp_cv_2/" + str(dataset_id) + "/"
+    directory_path = args.dir_name + str(dataset_id) + "/"
     if not os.path.exists(directory_path):
         # If the directory does not exist, create it
         os.makedirs(directory_path)
@@ -356,7 +341,6 @@ if __name__ == "__main__":
         n_instances = dataset.shape[0]
         batch_size = int((n_instances / n_batches) + 1)
 
-        # In case we use NVP, we need to add the split_dim parameter
         if args.type == "NVP":
             param_space.pop(2)
 
@@ -440,39 +424,22 @@ if __name__ == "__main__":
         pickle.dump(bn, open(directory_path + "clg_" + str(dataset_id) + ".pkl", "wb"))
 
         # Validate normalizing flow with different params
-        if not BAYESIAN:
-            # Exhaustive grid search
-            # Create a list of all parameter combinations
-            param_combinations = list(
-                product(param_grid["lr"], param_grid["weight_decay"], param_grid["bins"], param_grid["hidden_u"],
-                        param_grid["layers"], param_grid["n_flows"]))
+        nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type,
+                                                              parallelize=parallelize)
+        results_df["NF"] = metrics
 
-            results = []
-            for i in param_combinations:
-                results.append(cross_validate_nf(resampled_dataset, fold_indices, *i))
-                if TIME_LIMIT * 60 * 60 - 3600 < (time.time() - t_init):
-                    break
-            for metrics in results:
-                nf_params = metrics[-1]
-                results_df["NF" + str(nf_params)] = metrics[:-1]
+        pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
 
-        else:
-            nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type,
-                                                                  parallelize=parallelize)
-            results_df["NF"] = metrics
+        if GRAPHIC:
+            # Visualize the convergence of the objective function
+            plot_convergence(result)
+            plt.savefig(directory_path + "convergence_SD_" + str(dataset_id) + ".png")
+            plt.clf()
 
-            pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
-
-            if GRAPHIC:
-                # Visualize the convergence of the objective function
-                plot_convergence(result)
-                plt.savefig(directory_path + "convergence_SD_" + str(dataset_id) + ".png")
-                plt.clf()
-
-                # Visualize the convergence of the parameters
-                plot_evaluations(result)
-                plt.savefig(directory_path + "evaluations_SD_" + str(dataset_id) + ".png")
-                plt.clf()
+            # Visualize the convergence of the parameters
+            plot_evaluations(result)
+            plt.savefig(directory_path + "evaluations_SD_" + str(dataset_id) + ".png")
+            plt.clf()
 
             # Train neural net using the best parameters to get metrics
         print(results_df.drop("params"))
