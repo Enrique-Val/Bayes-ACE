@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 import pyro.distributions as dist
@@ -125,7 +127,7 @@ class ConditionalNVP(ConditionalNF):
 
     def train(self, dataset, batch_size=1028, steps=1000, lr=1e-3, weight_decay=0, split_dim=1, hidden_units=150,
               layers=1,
-              n_flows=1, perms_instantiation=None):
+              n_flows=1, perms_instantiation=None, model_pth_name="model.pth"):
         super().train(dataset)
         self.input_dim = len(dataset.columns)-1
         self.split_dim = split_dim
@@ -174,7 +176,7 @@ class ConditionalNVP(ConditionalNF):
         last_epochs = 50
         last_models = []
         last_vals_logl = []
-        torch.save(self.dist_x_given_class.state_dict(), "model.pth")
+        torch.save(self.dist_x_given_class.state_dict(), model_pth_name)
 
         for epoch in range(steps):
             try:
@@ -225,7 +227,7 @@ class ConditionalNVP(ConditionalNF):
                     losses.pop(-1)
                 val_losses.append(val_losses[-1])
                 losses.append(losses[-1])
-                self.dist_x_given_class.load_state_dict(torch.load("model.pth", weights_only=True))
+                self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
                 if self.verbose :
                     print("Nan in epoch", epoch)
                 continue
@@ -240,9 +242,9 @@ class ConditionalNVP(ConditionalNF):
                     print("Worsen in epoch", epoch, "with loss", losses[-1], "   val_loss", val_losses[-1])
                 losses[-1] = losses[-2]
                 val_losses[-1] = val_losses[-2]
-                self.dist_x_given_class.load_state_dict(torch.load("model.pth", weights_only=True))
+                self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
             else:
-                torch.save(self.dist_x_given_class.state_dict(), "model.pth")
+                torch.save(self.dist_x_given_class.state_dict(), model_pth_name)
 
 
             scheduler.step(val_losses[-1])
@@ -257,6 +259,8 @@ class ConditionalNVP(ConditionalNF):
         # Select model with median validation loss
         '''median_model_idx = np.argsort(last_vals_logl)[len(last_vals_logl)//2]
         self.dist_x_given_class.load_state_dict(last_models[median_model_idx])'''
+        # Delete the pth file
+        os.remove(model_pth_name)
         self.trained = True
 
     def get_class_labels(self):

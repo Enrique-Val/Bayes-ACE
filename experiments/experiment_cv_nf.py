@@ -124,7 +124,7 @@ def to_numpy_shared(df) :
 def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n_folds, i_fold, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
            count_bins=None, hidden_units=None,
            layers=None,
-           n_flows=None, perms_instantiation=None):
+           n_flows=None, perms_instantiation=None, diretory_path = "./"):
     torch.set_num_threads(1)
     train_index, test_index = get_kfold_indices(n_instances, n_folds, i_fold)
     # Reconstruct the DataFrame using the shared memory array
@@ -142,11 +142,11 @@ def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n
     return train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr,
                                     weight_decay=weight_decay,
                                     count_bins=count_bins, hidden_units=hidden_units, layers=layers, n_flows=n_flows,
-                                    perms_instantiation=perms_instantiation)
+                                    perms_instantiation=perms_instantiation, directory_path=diretory_path)
 
 
 def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
-                             count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None):
+                             count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None,directory_path="./"):
     d = df_train.shape[1] - 1
     t0 = time.time()
     model = None
@@ -154,7 +154,8 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64,
         model = ConditionalNVP(graphics=False)
         model.train(df_train, lr=lr, weight_decay=weight_decay, split_dim=d // 2,
                     hidden_units=hidden_units * d, layers=layers,
-                    n_flows=n_flows, steps=steps, batch_size=batch_size, perms_instantiation=perms_instantiation)
+                    n_flows=n_flows, steps=steps, batch_size=batch_size, perms_instantiation=perms_instantiation,
+                    model_pth_name=directory_path+"model-"+str(os.getpid())+".pkl")
     elif model_type == "Spline":
         model = ConditionalSpline()
         model.train(df_train, lr=lr, weight_decay=weight_decay, count_bins=count_bins,
@@ -200,13 +201,13 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
         df_shape = dataset.shape
         column_names = dataset.columns.tolist()
-        pool = mp.Pool(min(mp.cpu_count(), k))
+        pool = mp.Pool(min(mp.cpu_count()-1, k))
         fold_tasks = [(train_index, test_index) for train_index, test_index in fold_indices]
 
         # Use starmap with the shared memory array and other needed parameters
         cv_iter_results = pool.starmap(worker,
                                        [(shm.name, shared_array.shape, shared_array.dtype, column_names, ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size, lr,
-                                         weight_decay, count_bins, hidden_units, layers, n_flows, perms_instantiation)
+                                         weight_decay, count_bins, hidden_units, layers, n_flows, perms_instantiation, directory_path)
                                         for i_fold in range(k)])
         pool.close()
         pool.join()
@@ -297,6 +298,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
 
 
 if __name__ == "__main__":
+    mp.set_start_method("spawn")
     torch.set_default_dtype(torch.float32)
     t_init = time.time()
     parser = argparse.ArgumentParser(description="Arguments")
