@@ -169,16 +169,15 @@ class ConditionalNVP(ConditionalNF):
 
         # Build SVI object for actual training
         optimizer = torch.optim.Adam([{'params': self.dist_x_given_class.parameters()}], lr=lr, weight_decay=weight_decay)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=10)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=30)
 
         losses = []
         val_losses = []
 
-        #self.verbose = True
-        last_epochs = 50
-        last_models = []
-        last_vals_logl = []
         err_scale = 0.9
+        best_val_loss = np.inf
+        patience = 15
+        epochs_no_improve = 0
         torch.save(self.dist_x_given_class.state_dict(), model_pth_name)
 
         for epoch in range(steps):
@@ -244,19 +243,18 @@ class ConditionalNVP(ConditionalNF):
                     print("Nan in epoch", epoch)
                 continue
 
-            '''# Use the median model of the last 50 iters
-            if epoch > steps - last_epochs:
-                last_models.append(self.dist_x_given_class.state_dict())
-                last_vals_logl.append(val_loss)'''
-
-            if epoch > 0 and val_losses[-1] >= val_losses[-2]:
-                if self.verbose :
-                    print("Worsen in epoch", epoch, "with loss", losses[-1], "   val_loss", val_losses[-1])
-                losses[-1] = losses[-2]
-                val_losses[-1] = val_losses[-2]
-                self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
-            else:
+            if val_losses[-1] >= best_val_loss:
+                epochs_no_improve += 1
+            else :
+                best_val_loss = val_losses[-1]
                 torch.save(self.dist_x_given_class.state_dict(), model_pth_name)
+                epochs_no_improve = 0
+                print("Updated best model in epoch", epoch)
+
+            # Menor patience que que decay en el scheduler
+            if epochs_no_improve > patience:
+                epochs_no_improve = 0
+                self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
 
 
             scheduler.step(val_losses[-1])
@@ -271,7 +269,8 @@ class ConditionalNVP(ConditionalNF):
         # Select model with median validation loss
         '''median_model_idx = np.argsort(last_vals_logl)[len(last_vals_logl)//2]
         self.dist_x_given_class.load_state_dict(last_models[median_model_idx])'''
-        # Delete the pth file
+        # Delete the pth file and load best model a last time
+        self.dist_x_given_class.load_state_dict(torch.load(model_pth_name))
         os.remove(model_pth_name)
         self.trained = True
 
