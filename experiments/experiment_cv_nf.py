@@ -12,6 +12,7 @@ from skopt.plots import plot_convergence, plot_evaluations
 from skopt.space import Real, Integer
 from skopt.utils import use_named_args
 
+from bayesace.models.conditional_normalizing_flow import NanLogProb
 from bayesace.models.conditional_nvp import ConditionalNVP
 from bayesace.models.conditional_spline import ConditionalSpline
 from bayesace.models.utils import preprocess_data
@@ -253,7 +254,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
                 # If the logl is too low, return a high value for the objective function. This allows to not overpenalize regions of the space
                 return 3e11
             return -nf_logl_means  # Assuming we want to maximize loglikelihood
-        except ValueError as e:
+        except NanLogProb as e:
             to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
                         "Consider smoothing data, decreasing the value of the lr or the complexity of the "
                         "network.") + str(params)
@@ -338,10 +339,11 @@ if __name__ == "__main__":
                                   min_unique_vals=min_unique_vals,
                                   max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=50000,
                                   minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
+
         d = len(dataset.columns) - 1
         split_dim = d // 2
         n_instances = dataset.shape[0]
-        batch_size = int((n_instances / n_batches) + 1)
+        batch_size = int((n_instances / n_batches)*0.8 + 1)
 
         if args.type == "NVP":
             param_space.pop(2)

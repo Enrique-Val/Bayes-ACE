@@ -1,4 +1,5 @@
 import os
+import warnings
 
 import numpy as np
 import torch
@@ -23,10 +24,10 @@ available in the repo https://github.com/DanieleGammelli/pyro-torch-normalizing-
 Some modifications to work with data with more than 2 dimensions were made
 """
 
-def weights_init(m):
+def weights_init(m, scale=1.0):
     if isinstance(m, nn.Linear):
-        nn.init.xavier_normal_(m.weight)
-        #nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+        nn.init.xavier_normal_(m.weight, gain=scale * (1/3) * nn.init.calculate_gain('relu'))
+        #nn.init.xavier_normal_(m.weight, gain=sacle * (1/3) * nn.init.calculate_gain('linear'))
         if m.bias is not None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, nn.BatchNorm1d):
@@ -44,7 +45,7 @@ class ConditionalNormalizingFlow(nn.Module):
         # Define series of bijective transformations
         self.transforms = nn.ModuleList([ConditionalAffineCoupling(split_dim, ConditionalDenseNN(split_dim, context_dim,
                                                                                    [hidden_dim] * num_layers,
-                                                                                   self.param_dims)) for _ in
+                                                                                   self.param_dims, nonlinearity=torch.nn.ReLU())) for _ in
                            range(flow_length)])
         # self.perms = [permute(2, torch.tensor([1, 0])) for _ in range(flow_length)]
         self.perms_instantiation = perms_instantiation
@@ -173,9 +174,11 @@ class ConditionalNVP(ConditionalNF):
         losses = []
         val_losses = []
 
+        #self.verbose = True
         last_epochs = 50
         last_models = []
         last_vals_logl = []
+        err_scale = 0.9
         torch.save(self.dist_x_given_class.state_dict(), model_pth_name)
 
         for epoch in range(steps):
@@ -222,13 +225,22 @@ class ConditionalNVP(ConditionalNF):
                     plt.show()
                 break
 
-            except NanLogProb:
+            except NanLogProb as e:
+                if err_scale < 0.2:
+                    raise e
+                if len(losses) == 0:
+                    self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
+                    self.dist_x_given_class.apply(lambda m : weights_init(m, scale=err_scale))
+                    warnings.warn("Nan in first epoch. Restarting with smaller weights")
+                    err_scale -= 0.1
+                    continue
+
                 if len(losses) > len(val_losses):
                     losses.pop(-1)
                 val_losses.append(val_losses[-1])
                 losses.append(losses[-1])
                 self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
-                if self.verbose :
+                if self.verbose:
                     print("Nan in epoch", epoch)
                 continue
 
