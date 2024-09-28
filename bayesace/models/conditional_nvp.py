@@ -128,7 +128,7 @@ class ConditionalNVP(ConditionalNF):
 
     def train(self, dataset, batch_size=1028, steps=1000, lr=1e-3, weight_decay=0, split_dim=1, hidden_units=150,
               layers=1,
-              n_flows=1, perms_instantiation=None, model_pth_name="model.pth"):
+              n_flows=1, perms_instantiation=None,patience=15, model_pth_name="model.pth"):
         super().train(dataset)
         self.input_dim = len(dataset.columns)-1
         self.split_dim = split_dim
@@ -169,7 +169,7 @@ class ConditionalNVP(ConditionalNF):
 
         # Build SVI object for actual training
         optimizer = torch.optim.Adam([{'params': self.dist_x_given_class.parameters()}], lr=lr, weight_decay=weight_decay)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=30)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=patience*2)
 
         losses = []
         val_losses = []
@@ -249,7 +249,6 @@ class ConditionalNVP(ConditionalNF):
                 best_val_loss = val_losses[-1]
                 torch.save(self.dist_x_given_class.state_dict(), model_pth_name)
                 epochs_no_improve = 0
-                print("Updated best model in epoch", epoch)
 
             # Menor patience que que decay en el scheduler
             if epochs_no_improve > patience:

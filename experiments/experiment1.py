@@ -53,12 +53,12 @@ if __name__ == "__main__":
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     likelihood_threshold_sigma = 0.0
     accuracy_threshold = 0.9
-    n_vertices = 3
-    penalties = [1, 5, 10]
+    n_vertices = 4
+    penalties = [1, 5, 10,15,20]
     # Number of points for approximating integrals:
     chunks = 10
     # Number of counterfactuals
-    n_counterfactuals = 20
+    n_counterfactuals = 30
 
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
@@ -84,7 +84,7 @@ if __name__ == "__main__":
             times_mat = np.zeros((n_counterfactuals, n_vertices))
             evaluations_mat = np.zeros((n_counterfactuals, n_vertices))
             if parallelize:
-                pool = mp.Pool(min(mp.cpu_count(), n_counterfactuals))
+                pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
                 results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
                                                 penalty, n_vertices, likelihood_threshold, accuracy_threshold,
                                                 chunks, sampling_range) for i in range(n_counterfactuals)])

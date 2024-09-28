@@ -10,6 +10,8 @@ import pandas as pd
 
 import argparse
 
+import torch
+
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
 from bayesace.algorithms.face import FACE
@@ -22,6 +24,7 @@ from experiments.utils import setup_experiment, get_constraints, get_counterfact
 
 
 def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
+    torch.set_num_threads(1)
     algorithm = pickle.load(open(algorithm_path, 'rb'))
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
     return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
