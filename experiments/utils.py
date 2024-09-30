@@ -7,6 +7,10 @@ import numpy as np
 from bayesace import get_other_class, path, path_likelihood_length
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
+import pandas as pd
+from rpy2.robjects import pandas2ri
+import rpy2.robjects.packages as rpackages
+
 
 def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int) :
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
@@ -74,3 +78,23 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
             density_estimator=gt_estimator, penalty=penalty)
         return path_length_gt, tf, result.counterfactual.values
 
+def bh_test(data) :
+    # Activate the automatic conversion of pandas objects to R data frames
+    pandas2ri.activate()
+
+    # Import the scmamp package from R
+    scmamp = rpackages.importr('scmamp', lib_loc="/home/enrique/R/x86_64-pc-linux-gnu-library/4.4")
+
+    # Convert the Pandas DataFrame to an R data frame automatically
+    r_data = pandas2ri.py2rpy(data)
+
+    # Perform the post-hoc test in R using scmamp::postHocTest
+    bh_posthoc_scmamp = scmamp.postHocTest(r_data, test="friedman", correct="bergmann")
+
+    # Convert the rpy2 ListVector to a Python dictionary
+    bh_posthoc = {}
+    bh_posthoc["summary"] = pd.Series(bh_posthoc_scmamp[0][0], index=data.columns)
+    bh_posthoc["p_values"] = pd.DataFrame(bh_posthoc_scmamp[1], index=data.columns, columns=data.columns).fillna(1.0)
+    bh_posthoc["p_adjusted"] = pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns).fillna(1.0)
+
+    return bh_posthoc
