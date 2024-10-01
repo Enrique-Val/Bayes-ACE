@@ -39,19 +39,26 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
                        seed=0, verbose=False, pop_size=100, generations=1000, parallelize=False)
         result = alg.run(instance, target_label=target_label)
         tf = time.time() - t0
-        # print(result.distance)
-        path_to_compute = path(result.path.values, chunks=chunks)
-        distances[n_vertex] = path_likelihood_length(
-            pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
-            density_estimator=gt_estimator, penalty=penalty)
-        times[n_vertex] = tf
+        if result.counterfactual is None:
+            distances[n_vertex] = np.nan
+            times[n_vertex] = tf
+        else:
+            path_to_compute = path(result.path.values, chunks=chunks)
+            pll = path_likelihood_length(
+                pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
+                density_estimator=gt_estimator, penalty=penalty)
+            if pll == np.inf:
+                warnings.warn("Path length over ground truth is infinite for instance " + str(instance.index[0]) + ", "
+                              + str(n_vertex) + " vertices, penalty of " + str(penalty) + "and estimator " + str(type(density_estimator)))
+            distances[n_vertex] = pll
+            times[n_vertex] = tf
     return distances, times
 
 
 if __name__ == "__main__":
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    likelihood_threshold_sigma = 0.0
+    likelihood_threshold_sigma = -0.5
     accuracy_threshold = 0.9
     n_vertices = 4
     penalties = [1, 5, 10,15,20]
@@ -63,6 +70,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
+    parser.add_argument('--results_dir', nargs='?', default='./results/exp_1/', type=str)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -70,8 +79,8 @@ if __name__ == "__main__":
 
     random.seed(0)
 
-    results_cv_dir = './results/exp_cv_2/' + str(dataset_id) + '/'
-    results_dir = './results/exp_1/' + str(dataset_id) + '/'
+    results_cv_dir = args.cv_dir + str(dataset_id) + '/'
+    results_dir = args.results_dir + str(dataset_id) + '/'
 
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)

@@ -1,4 +1,7 @@
 import os
+from itertools import product
+
+import numpy as np
 import pandas as pd
 from scipy.stats import friedmanchisquare, wilcoxon
 import scikit_posthocs as sp
@@ -6,72 +9,86 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
+from experiments.utils import bh_test
+
 # Path to dataset root
 root_dir = "../results/exp_1/"
 
 # Regex to match filenames like distances_data44123_pen1.csv
 file_pattern = re.compile(r"distances_data(\d+)_penalty(\d+)\.csv")
 
+# Get all the values for penalty, dataset_id, models and n_vertex
+def get_values(root_dir):
+    dataset_ids = []
+    penalties = []
+    models = []
 
-# Function to load and organize data from the directory
-def load_data(root_dir):
-    data_by_penalty = {}
-
+    # Get datasets ids
     for dataset_id in os.listdir(root_dir):
         dataset_path = os.path.join(root_dir, dataset_id)
-
         if os.path.isdir(dataset_path):
-            for model in os.listdir(dataset_path):  # "clg" and "nf" subfolders (models)
-                model_path = os.path.join(dataset_path, model)
+            dataset_ids.append(dataset_id)
 
-                if os.path.isdir(model_path):
-                    for file in os.listdir(model_path):
-                        match = file_pattern.match(file)
-                        if match:
-                            # Extract dataset_id and penalty from filename
-                            extracted_dataset_id = match.group(1)
-                            penalty = match.group(2)
+    # Get the list of models
+    dataset_path = os.path.join(root_dir, dataset_ids[0])
+    for model in os.listdir(dataset_path):  # "clg" and "nf" subfolders (models)
+        model_path = os.path.join(dataset_path, model)
+        if os.path.isdir(model_path):
+            models.append(model)
 
-                            # Read CSV
-                            file_path = os.path.join(model_path, file)
-                            df = pd.read_csv(file_path, index_col=0)
+    # Get the list of penalties
+    model_path = os.path.join(dataset_path, models[0])
+    file_pattern_mod = re.compile(r"distances_data"+str(dataset_ids[0])+"_penalty(\d+)\.csv")
+    for file in os.listdir(model_path):
+        match = file_pattern_mod.match(file)
+        if match:
+            # Extract dataset_id and penalty from filename
+            penalty = match.group(1)
+            penalties.append(penalty)
 
-                            # Initialize dictionary entry for this penalty if not exists
-                            if penalty not in data_by_penalty:
-                                data_by_penalty[penalty] = {}
+    # Get the list of n_vertex opening any file
+    any_file = os.listdir(model_path)[0]
+    file_path = os.path.join(model_path, any_file)
+    df = pd.read_csv(file_path, index_col=0)
+    vertices = list(df.columns)
+    return {"dataset_ids": dataset_ids, "models": models, "penalties": penalties, "vertices": vertices}
 
-                            # Add data to the respective dataset, model, and penalty
-                            data_by_penalty[penalty][(extracted_dataset_id, model)] = df
-    return data_by_penalty
+
+
+# Function to load and organize data from the directory
+def load_data(root_dir, values_dict):
+    data_dict = {}
+    for dataset_id in values_dict["dataset_ids"]:
+        for model in values_dict["models"]:
+            for penalty in values_dict["penalties"]:
+                # Get the path to the file
+                file_name = "distances_data"+str(dataset_id)+"_penalty"+str(penalty)+".csv"
+                file_path = os.path.join(root_dir, dataset_id, model, file_name)
+                if os.path.exists(file_path):
+                    df = pd.read_csv(file_path, index_col=0)
+                    df = df.replace([np.inf, -np.inf], np.nan)
+                    data_dict[(dataset_id, model, penalty)] = df
+    return data_dict
 
 
 # Function to run Friedman test and Nemenyi posthoc for each dataset/model/penalty
-def perform_friedman_and_nemenyi(data_dict):
+def perform_bh_by_all(data_dict, values_dict):
     results = {}
-
-    for penalty, datasets_models in data_dict.items():
-        print(datasets_models)
-        results[penalty] = {}
-        for (dataset_id, model), df in datasets_models.items():
-            # Perform Friedman test across the vertex columns
-            friedman_result = friedmanchisquare(*[df[vertex] for vertex in df.columns])
-
-            # Check if Friedman test is significant
-            if friedman_result.pvalue < 0.05:
-                # Perform Nemenyi posthoc test
-                nemenyi_result = sp.posthoc_nemenyi_friedman(df.values)
-                results[penalty][(dataset_id, model)] = {
-                    "friedman": friedman_result,
-                    "nemenyi": nemenyi_result
-                }
-            else:
-                results[penalty][(dataset_id, model)] = {
-                    "friedman": friedman_result,
-                    "nemenyi": None
-                }
-
+    for dataset_id, model, penalty in product(values_dict["dataset_ids"], values_dict["models"], values_dict["penalties"]):
+        print(f"Dataset: {dataset_id}, Model: {model}, Penalty: {penalty}")
+        results[(dataset_id, model, penalty)] = bh_test(data_dict[(dataset_id, model, penalty)].dropna())
     return results
 
+def perform_bh_by_penalty(data_dict, values_dict):
+    # First, we group by the data by penalty and model
+    data_dict_new = {}
+    for model, penalty in product(values_dict["models"], values_dict["penalties"]):
+        data_dict_new[model, penalty] = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id in values_dict["dataset_ids"]])
+
+    results = {}
+    for model, penalty in data_dict_new.keys():
+        results[(model,penalty)] = bh_test(data_dict_new[(model, penalty)].dropna())
+    return results
 
 # Function to concatenate datasets for global analysis
 def concatenate_datasets(data_by_penalty):
@@ -177,29 +194,52 @@ def print_wilcoxon_results(wilcoxon_results, output_dir="wilcoxon_results"):
 
 # Run the main function when the script is executed
 if __name__ == "__main__":
-    # Load the data
-    data_by_penalty = load_data(root_dir)
+    # Get the values for dataset_id, model, penalty and n_vertex
+    values_dict = get_values(root_dir)
 
-    print(data_by_penalty['1'][('44127', 'clg')].head())
-    print(data_by_penalty['1'][('44127', 'nf')].head())
+    # Load the data
+    data_dict = load_data(root_dir, values_dict)
+
+    print(data_dict.keys())
+
+    '''# Perform Friedman test and BH test for each dataset/model/penalty
+    friedman_bh_results = perform_bh_by_all(data_dict, values_dict)
+    for i in friedman_bh_results.keys():
+        sp.critical_difference_diagram(friedman_bh_results[i]["summary"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
+        plt.title(f"Dataset: {i[0]}, Model: {i[1]}, Penalty: {i[2]}")
+        plt.show()'''
+
+    friedman_bh_results = perform_bh_by_penalty(data_dict, values_dict)
+    for i in friedman_bh_results.keys():
+        sp.critical_difference_diagram(friedman_bh_results[i]["summary"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
+        plt.title(f"Model: {i[0]}, Penalty: {i[1]}")
+        plt.show()
+
     raise Exception("Stop here")
 
     # Perform Friedman test and Nemenyi posthoc for each dataset/model/penalty
-    friedman_nemenyi_results = perform_friedman_and_nemenyi(data_by_penalty)
+    friedman_nemenyi_results = perform_friedman_and_bh(data_by_penalty)
 
     # Plot Nemenyi test results for each significant combination
-    for penalty, models_data in friedman_nemenyi_results.items():
+    '''for penalty, models_data in friedman_nemenyi_results.items():
         print(models_data)
         for (dataset_id, model), test_results in models_data.items():
-            if test_results["nemenyi"] is not None:
-                plot_nemenyi_heatmap(test_results["nemenyi"], dataset_id, model, penalty)
-
+            if model == "clg":
+                sp.critical_difference_diagram(test_results["summary"],test_results["p_values"],label_fmt_left="{label}",label_fmt_right="{label}")
+                plt.show()
+                sp.critical_difference_diagram(test_results["summary"], test_results["p_adjusted"],
+                                               label_fmt_left="{label}", label_fmt_right="{label}")
+                plt.show()'''
     # Print and save the results
     #print_and_save_results(friedman_nemenyi_results)
 
     # For all datasets combined, concatenate and perform global analysis
-    #combined_data_by_penalty = concatenate_datasets(data_by_penalty)
-    #friedman_nemenyi_combined = perform_friedman_and_nemenyi({"combined": combined_data_by_penalty})
+    combined_data_by_penalty = concatenate_datasets(data_by_penalty)
+    for (dataset_id, model), df in combined_data_by_penalty["combined"].items():
+        # Perform Friedman test across the vertex columns
+        results = bh_test(df)
+        sp.critical_difference_diagram(results["summary"], results["p_adjusted"], label_fmt_left="{label}",)
+        plt.show()
 
     # Print and save combined results
     print("Global Analysis (All Datasets Combined):")
@@ -211,11 +251,11 @@ if __name__ == "__main__":
 
     # For all datasets combined, concatenate and perform global analysis
     combined_data_by_penalty = concatenate_datasets(data_by_penalty)
-    friedman_nemenyi_combined = perform_friedman_and_nemenyi({"combined": combined_data_by_penalty})
+    friedman_bh_combined = perform_friedman_and_bh({"combined": combined_data_by_penalty})
 
     # Print and save combined results
     print("Global Analysis (All Datasets Combined):")
-    print_and_save_results(friedman_nemenyi_combined, output_dir="global_results")
+    print_and_save_results(friedman_bh_combined, output_dir="global_results")
 
     # Perform Wilcoxon test globally across all datasets combined
     global_wilcoxon_results = perform_global_wilcoxon_test(data_by_penalty)

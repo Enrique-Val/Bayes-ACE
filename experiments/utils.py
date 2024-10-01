@@ -78,7 +78,24 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
             density_estimator=gt_estimator, penalty=penalty)
         return path_length_gt, tf, result.counterfactual.values
 
-def bh_test(data) :
+def bh_test(data) -> dict:
+    '''
+    Perform the Friedman test and the Bermann-Hommel post-hoc test using the scmamp package in R
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        A pandas DataFrame where each column is a different outcome to test and each row is a different instance.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the summary statistics of the post-hoc test. The dictionary contains the following keys:
+        - "summary": A pandas Series containing the summary statistics of the post-hoc test.
+        - "p_values": A pandas DataFrame containing the p-values of the Friedman test.
+        - "p_adjusted": A pandas DataFrame containing the adjusted p-values of the Bergmann-Hommel post-hoc test.
+    '''
+
     # Activate the automatic conversion of pandas objects to R data frames
     pandas2ri.activate()
 
@@ -98,3 +115,7 @@ def bh_test(data) :
     bh_posthoc["p_adjusted"] = pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns).fillna(1.0)
 
     return bh_posthoc
+
+
+
+
