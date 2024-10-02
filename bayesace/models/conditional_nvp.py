@@ -227,11 +227,13 @@ class ConditionalNVP(ConditionalNF):
             except NanLogProb as e:
                 if err_scale < 0.2:
                     raise e
-                if len(losses) == 0:
+                if len(val_losses) == 0:
                     self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
                     self.dist_x_given_class.apply(lambda m : weights_init(m, scale=err_scale))
                     warnings.warn("Nan in first epoch. Restarting with smaller weights")
                     err_scale -= 0.1
+                    losses = []
+                    val_losses = []
                     continue
 
                 if len(losses) > len(val_losses):

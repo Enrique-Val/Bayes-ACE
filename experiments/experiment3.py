@@ -58,7 +58,7 @@ if __name__ == "__main__":
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
     sampling_range, mu_gt, std_gt = get_constraints(results_cv_dir, df_train, dataset_id)
-    df_train = df_train.head(10000)
+    df_train = df_train.head(1000)
 
     # Names of the models
     models = [normalizing_flow, clg_network]
