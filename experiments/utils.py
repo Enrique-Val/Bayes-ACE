@@ -4,13 +4,10 @@ import time
 import pandas as pd
 import numpy as np
 
-from bayesace import get_other_class, path, path_likelihood_length
+from bayesace import get_other_class, path, path_likelihood_length, hill_climbing
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
-from rpy2.robjects import pandas2ri
-import rpy2.robjects.packages as rpackages
-
 
 def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int) :
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
@@ -36,7 +33,11 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 
     # Open the Bayesian network (conditional linear Gaussian)
     clg_network_path = results_cv_dir + 'clg_' + str(dataset_id) + '.pkl'
-    clg_network = pickle.load(open(clg_network_path, 'rb'))
+    try :
+        clg_network = pickle.load(open(clg_network_path, 'rb'))
+    except:
+        clg_network = hill_climbing(df_train, seed = 0, bn_type="CLG")
+        pickle.dump(clg_network, open(clg_network_path, 'wb'))
 
     # Open the NF
     nf_path = results_cv_dir + 'nf_' + str(dataset_id) + '.pkl'
@@ -95,6 +96,9 @@ def bh_test(data) -> dict:
         - "p_values": A pandas DataFrame containing the p-values of the Friedman test.
         - "p_adjusted": A pandas DataFrame containing the adjusted p-values of the Bergmann-Hommel post-hoc test.
     '''
+
+    from rpy2.robjects import pandas2ri
+    import rpy2.robjects.packages as rpackages
 
     # Activate the automatic conversion of pandas objects to R data frames
     pandas2ri.activate()
