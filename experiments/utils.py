@@ -1,3 +1,4 @@
+import os.path
 import pickle
 import time
 
@@ -8,6 +9,8 @@ from bayesace import get_other_class, path, path_likelihood_length, hill_climbin
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
+
+import platform
 
 def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int) :
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
@@ -79,6 +82,7 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
             density_estimator=gt_estimator, penalty=penalty)
         return path_length_gt, tf, result.counterfactual.values
 
+
 def bh_test(data) -> dict:
     '''
     Perform the Friedman test and the Bermann-Hommel post-hoc test using the scmamp package in R
@@ -104,7 +108,11 @@ def bh_test(data) -> dict:
     pandas2ri.activate()
 
     # Import the scmamp package from R
-    scmamp = rpackages.importr('scmamp', lib_loc="/home/enrique/R/x86_64-pc-linux-gnu-library/4.4")
+    if platform.system() == 'Windows':
+        r_lib_path = os.path.expanduser('~/AppData/Local/R/win-library/4.3').replace("\\", "/")
+    else:
+        r_lib_path = os.path.expanduser('~/R/x86_64-pc-linux-gnu-library/4.4')
+    scmamp = rpackages.importr('scmamp', lib_loc=r_lib_path)
 
     # Convert the Pandas DataFrame to an R data frame automatically
     r_data = pandas2ri.py2rpy(data)
@@ -114,12 +122,13 @@ def bh_test(data) -> dict:
 
     # Convert the rpy2 ListVector to a Python dictionary
     bh_posthoc = {}
-    bh_posthoc["summary"] = pd.Series(bh_posthoc_scmamp[0][0], index=data.columns)
+    summary = pd.Series(bh_posthoc_scmamp[0][0], index=data.columns)
+    bh_posthoc["summary"] = summary
+    temp = summary.argsort()
+    ranks = np.empty_like(temp)
+    ranks[temp] = np.arange(len(summary))
+    bh_posthoc["summary_ranks"] = pd.Series(ranks, index=data.columns)
     bh_posthoc["p_values"] = pd.DataFrame(bh_posthoc_scmamp[1], index=data.columns, columns=data.columns).fillna(1.0)
     bh_posthoc["p_adjusted"] = pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns).fillna(1.0)
 
     return bh_posthoc
-
-
-
-

@@ -194,7 +194,7 @@ class BayesACE(ACE):
                        termination=termination,
                        seed=self.seed,
                        verbose=self.verbose)
-        if len(res.X)>1 or res.X is None or res.F > MAX_VALUE_FLOAT:
+        if len(res.F)>1 or res.X is None or res.F > MAX_VALUE_FLOAT:
             if return_info:
                 return ACEResult(None, instance.drop("class", axis=1), np.inf), res
             return ACEResult(None, instance.drop("class", axis=1), np.inf)

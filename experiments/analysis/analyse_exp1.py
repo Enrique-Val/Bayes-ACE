@@ -14,6 +14,9 @@ from experiments.utils import bh_test
 # Path to dataset root
 root_dir = "../results/exp_1/"
 
+# Wilcoxon test alternative hypothesis
+wx_alt = ["two-sided", "greater", "less"]
+
 # Regex to match filenames like distances_data44123_pen1.csv
 file_pattern = re.compile(r"distances_data(\d+)_penalty(\d+)\.csv")
 
@@ -90,107 +93,48 @@ def perform_bh_by_penalty(data_dict, values_dict):
         results[(model,penalty)] = bh_test(data_dict_new[(model, penalty)].dropna())
     return results
 
-# Function to concatenate datasets for global analysis
-def concatenate_datasets(data_by_penalty):
-    concatenated_results = {}
-    for penalty, datasets_models in data_by_penalty.items():
-        concatenated_df = pd.concat([df for df in datasets_models.values()])
-        concatenated_results[penalty] = concatenated_df
-    return concatenated_results
+def perform_bh(data_dict, values_dict):
+    model1 = "clg"
+    model2 ="nf"
+    data_model_1 = pd.concat([data_dict[(dataset_id, model1, penalty)] for dataset_id, penalty in
+                              product(values_dict["dataset_ids"], values_dict["penalties"])])
+    data_model_2 = pd.concat([data_dict[(dataset_id, model2, penalty)] for dataset_id, penalty in
+                              product(values_dict["dataset_ids"], values_dict["penalties"])])
+    results = {model1: bh_test(data_model_1.dropna()), model2: bh_test(data_model_2.dropna())}
+    return results
 
+def compare_models_by_penalty(data_dict, values_dict):
+    # First, we group by the data by penalty and model
+    data_dict_new = {}
+    for model, penalty in product(values_dict["models"], values_dict["penalties"]):
+        data_dict_new[model, penalty] = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id in values_dict["dataset_ids"]])
 
-# Function to plot Nemenyi test results as a heatmap
-def plot_nemenyi_heatmap(nemenyi_result, dataset_id, model, penalty):
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(nemenyi_result, annot=True, cmap="coolwarm", fmt=".2f", linewidths=0.5)
-    plt.title(f"Nemenyi Posthoc Test - Dataset: {dataset_id}, Model: {model}, Penalty: {penalty}")
-    plt.xlabel("Vertex")
-    plt.ylabel("Vertex")
-    plt.show()
+    results = {}
+    # We assume to be using ONLY two models. Otherwise, we shouldn't use Wilcoxon, but Friedman
 
+    model1 = "clg"
+    model2 ="nf"
+    for penalty in values_dict["penalties"]:
+        results[penalty] = {}
+        diff_arr = data_dict_new[(model1, penalty)].values.flatten() - data_dict_new[(model2, penalty)].values.flatten()
+        # Remove nas
+        diff_arr = diff_arr[~np.isnan(diff_arr)]
+        for alt_hyp in wx_alt:
+            results[penalty][alt_hyp] = wilcoxon(diff_arr, alternative=alt_hyp)
+    return results
 
-# Function to print and save the Friedman/Nemenyi results
-def print_and_save_results(results, output_dir="results"):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    for penalty, models_data in results.items():
-        print(f"Penalty {penalty}:")
-
-        for (dataset_id, model), test_results in models_data.items():
-            friedman_p = test_results["friedman"].pvalue
-            print(f"  Dataset: {dataset_id}, Model: {model}")
-            print(f"    Friedman p-value: {friedman_p}")
-
-            if test_results["nemenyi"] is not None:
-                nemenyi_df = test_results["nemenyi"]
-                print(f"    Nemenyi Test (Vertex Comparison):")
-                print(nemenyi_df)
-
-                # Save the Nemenyi results as a CSV
-                nemenyi_file = f"nemenyi_data{dataset_id}_model{model}_pen{penalty}.csv"
-                nemenyi_df.to_csv(os.path.join(output_dir, nemenyi_file))
-
-
-def perform_wilcoxon_test(data_by_penalty):
-    wilcoxon_results = {}
-
-    for penalty, datasets_models in data_by_penalty.items():
-        wilcoxon_results[penalty] = {}
-        for dataset_id in {k[0] for k in datasets_models.keys()}:  # Unique dataset IDs
-            # Ensure both models (clg and nf) are available for comparison
-            if (dataset_id, "clg") in datasets_models and (dataset_id, "nf") in datasets_models:
-                print(datasets_models)
-                clg_df = datasets_models[(dataset_id, "clg")]
-                nf_df = datasets_models[(dataset_id, "nf")]
-
-                # Wilcoxon test across the values of all vertex columns (paired test)
-                wilcoxon_stats = []
-                for vertex in clg_df.columns:
-                    stat, p_value = wilcoxon(clg_df[vertex], nf_df[vertex])
-                    wilcoxon_stats.append((vertex, stat, p_value))
-
-                wilcoxon_results[penalty][dataset_id] = wilcoxon_stats
-
-    return wilcoxon_results
-
-def perform_global_wilcoxon_test(data_by_penalty):
-    global_wilcoxon_results = {}
-
-    for penalty, datasets_models in data_by_penalty.items():
-        # Collect and concatenate data across all datasets for clg and nf
-        combined_clg = pd.concat([df for (dataset_id, model), df in datasets_models.items() if model == "clg"])
-        combined_nf = pd.concat([df for (dataset_id, model), df in datasets_models.items() if model == "nf"])
-
-        # Wilcoxon test across all vertex columns
-        global_wilcoxon_stats = []
-        for vertex in combined_clg.columns:
-            stat, p_value = wilcoxon(combined_clg[vertex], combined_nf[vertex])
-            global_wilcoxon_stats.append((vertex, stat, p_value))
-
-        global_wilcoxon_results[penalty] = global_wilcoxon_stats
-
-    return global_wilcoxon_results
-
-
-# Function to print Wilcoxon test results
-def print_wilcoxon_results(wilcoxon_results, output_dir="wilcoxon_results"):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    for penalty, datasets_data in wilcoxon_results.items():
-        print(f"Penalty {penalty} - Wilcoxon Test:")
-        for dataset_id, stats in datasets_data.items():
-            print(f"  Dataset: {dataset_id}")
-            for vertex, stat, p_value in stats:
-                print(f"    Vertex {vertex}: stat = {stat}, p-value = {p_value}")
-
-            # Save the Wilcoxon results to a CSV
-            wilcoxon_file = f"wilcoxon_data{dataset_id}_pen{penalty}.csv"
-            pd.DataFrame(stats, columns=["Vertex", "Statistic", "P-Value"]).to_csv(
-                os.path.join(output_dir, wilcoxon_file), index=False
-            )
-
+def compare_models(data_dict, values_dict):
+    model1 = "clg"
+    model2 = "nf"
+    data_model_1 = pd.concat([data_dict[(dataset_id, model1, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])])
+    data_model_2 = pd.concat([data_dict[(dataset_id, model2, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])])
+    diff_arr = data_model_1.values.flatten() - data_model_2.values.flatten()
+    # Remove nas
+    diff_arr = diff_arr[~np.isnan(diff_arr)]
+    results = {}
+    for alt_hyp in wx_alt:
+        results[alt_hyp] = wilcoxon(diff_arr, alternative=alt_hyp)
+    return results
 
 # Run the main function when the script is executed
 if __name__ == "__main__":
@@ -202,62 +146,36 @@ if __name__ == "__main__":
 
     print(data_dict.keys())
 
-    '''# Perform Friedman test and BH test for each dataset/model/penalty
+    '''
+    # Perform Friedman test and BH test for each dataset/model/penalty
     friedman_bh_results = perform_bh_by_all(data_dict, values_dict)
     for i in friedman_bh_results.keys():
-        sp.critical_difference_diagram(friedman_bh_results[i]["summary"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
+        sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
         plt.title(f"Dataset: {i[0]}, Model: {i[1]}, Penalty: {i[2]}")
-        plt.show()'''
+        plt.show()
+    '''
 
     friedman_bh_results = perform_bh_by_penalty(data_dict, values_dict)
     for i in friedman_bh_results.keys():
-        sp.critical_difference_diagram(friedman_bh_results[i]["summary"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
+        sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
         plt.title(f"Model: {i[0]}, Penalty: {i[1]}")
         plt.show()
 
-    raise Exception("Stop here")
-
-    # Perform Friedman test and Nemenyi posthoc for each dataset/model/penalty
-    friedman_nemenyi_results = perform_friedman_and_bh(data_by_penalty)
-
-    # Plot Nemenyi test results for each significant combination
-    '''for penalty, models_data in friedman_nemenyi_results.items():
-        print(models_data)
-        for (dataset_id, model), test_results in models_data.items():
-            if model == "clg":
-                sp.critical_difference_diagram(test_results["summary"],test_results["p_values"],label_fmt_left="{label}",label_fmt_right="{label}")
-                plt.show()
-                sp.critical_difference_diagram(test_results["summary"], test_results["p_adjusted"],
-                                               label_fmt_left="{label}", label_fmt_right="{label}")
-                plt.show()'''
-    # Print and save the results
-    #print_and_save_results(friedman_nemenyi_results)
-
-    # For all datasets combined, concatenate and perform global analysis
-    combined_data_by_penalty = concatenate_datasets(data_by_penalty)
-    for (dataset_id, model), df in combined_data_by_penalty["combined"].items():
-        # Perform Friedman test across the vertex columns
-        results = bh_test(df)
-        sp.critical_difference_diagram(results["summary"], results["p_adjusted"], label_fmt_left="{label}",)
+    friedman_bh_results = perform_bh(data_dict, values_dict)
+    for i in friedman_bh_results.keys():
+        sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
+        plt.title(f"Model: {i}")
         plt.show()
 
-    # Print and save combined results
-    print("Global Analysis (All Datasets Combined):")
-    #print_and_save_results(friedman_nemenyi_combined, output_dir="global_results")
+    # Perform Wilcoxon test between clg and nf for each penalty
+    wilcoxon_results_penalty = compare_models_by_penalty(data_dict, values_dict)
+    for penalty in wilcoxon_results_penalty.keys():
+        print(f"Penalty {penalty}:")
+        print(wilcoxon_results_penalty[penalty])
+        print()
 
-    # Perform Wilcoxon test between clg and nf for each dataset and penalty
-    wilcoxon_results = perform_wilcoxon_test(data_by_penalty)
-    print_wilcoxon_results(wilcoxon_results)
-
-    # For all datasets combined, concatenate and perform global analysis
-    combined_data_by_penalty = concatenate_datasets(data_by_penalty)
-    friedman_bh_combined = perform_friedman_and_bh({"combined": combined_data_by_penalty})
-
-    # Print and save combined results
-    print("Global Analysis (All Datasets Combined):")
-    print_and_save_results(friedman_bh_combined, output_dir="global_results")
-
-    # Perform Wilcoxon test globally across all datasets combined
-    global_wilcoxon_results = perform_global_wilcoxon_test(data_by_penalty)
-    print_wilcoxon_results({"combined": global_wilcoxon_results}, output_dir="global_wilcoxon_results")
+    # Perform Wilcoxon test between clg and nf for all datasets combined
+    wilcoxon_results_global = compare_models(data_dict, values_dict)
+    print("Global comparative of models")
+    print(wilcoxon_results_global)
 
