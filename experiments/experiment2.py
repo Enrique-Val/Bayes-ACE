@@ -140,6 +140,7 @@ if __name__ == "__main__":
             for i in metrics:
                 results_dfs[i].index.name = dataset_id
             for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
+                algorithm.parallelize = False
                 # Set the proper likelihood  and accuracy thresholds
                 algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
                 algorithm.accuracy_threshold = min(mae_gt + std_mae_gt * accuracy_threshold, 0.99)

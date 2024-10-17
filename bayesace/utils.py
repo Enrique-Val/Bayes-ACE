@@ -209,8 +209,13 @@ def path_likelihood_length(path: pd.DataFrame, density_estimator, penalty=1):
     separation = np.linalg.norm(path.diff(axis=0).drop(0), axis=1)
 
     medium_points = ((path + path.shift()) / 2).drop(0).reset_index(drop=True)
-    point_evaluations = (-log_likelihood(medium_points, density_estimator)) ** penalty
-    assert (point_evaluations > 0).any()
+    logl_points = -log_likelihood(medium_points, density_estimator)
+    # Array with 1 if positive, 0 if 0 and -1 if negative
+    sign_array = np.sign(logl_points)
+    point_evaluations = logl_points ** penalty
+    # If the logl is negative, and the penalty is even, then we need to multiply for the sign array
+    if penalty % 2 == 0:
+        point_evaluations = np.multiply(point_evaluations, sign_array)
     likelihood_path = np.multiply(point_evaluations, separation)
     return np.sum(likelihood_path)
 
