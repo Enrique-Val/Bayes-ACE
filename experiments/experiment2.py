@@ -30,12 +30,12 @@ def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
     return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
 
 
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
+    parser.add_argument('--results_dir', nargs='?', default='./results/exp_2/', type=str)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -44,10 +44,10 @@ if __name__ == "__main__":
 
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    n_vertices = [0]
+    n_vertices = [0,1]
     penalty = 1
-    likelihood_dev_list = [0, 0.5, 1]
-    accuracy_threshold_list = [0.9, 0.8, 0.7]
+    likelihood_dev_list = [-1, -0.5, 0]
+    accuracy_threshold_list = [-1, -0.5, 0]
     # Number of points for approximating integrals:
     chunks = 10
     # Number of counterfactuals
@@ -55,12 +55,12 @@ if __name__ == "__main__":
     eps = np.inf
 
     # Folder for storing the results
-    results_dir = './results/exp_2/' + str(dataset_id) + '/'
+    results_dir = args.results_dir + str(dataset_id) + '/'
 
     random.seed(0)
 
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    results_cv_dir = './results/exp_cv_2/' + str(dataset_id) + '/'
+    results_cv_dir = args.cv_dir + str(dataset_id) + '/'
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, gt_estimator)
@@ -142,7 +142,7 @@ if __name__ == "__main__":
             for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
                 # Set the proper likelihood  and accuracy thresholds
                 algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
-                algorithm.accuracy_threshold = accuracy_threshold
+                algorithm.accuracy_threshold = min(mae_gt + std_mae_gt * accuracy_threshold, 0.99)
                 if parallelize :
                     # Pickle the algorithm to avoid I/O in every worker. The file will later be deleted
                     tmp_file_str = results_dir + 'algorithm_' + algorithm_str + '.pkl'
