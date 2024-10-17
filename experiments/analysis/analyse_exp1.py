@@ -69,7 +69,6 @@ def load_data(root_dir, values_dict):
                 file_path = os.path.join(root_dir, dataset_id, model, file_name)
                 if os.path.exists(file_path):
                     df = pd.read_csv(file_path, index_col=0)
-                    df = df.replace([np.inf, -np.inf], np.nan)
                     data_dict[(dataset_id, model, penalty)] = df
     return data_dict
 

@@ -136,6 +136,9 @@ if __name__ == "__main__":
         for accuracy_threshold in accuracy_threshold_list:
             # Result storage
             results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
+            # Name the index column with the dataset id
+            for i in metrics:
+                results_dfs[i].index.name = dataset_id
             for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
                 # Set the proper likelihood  and accuracy thresholds
                 algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
@@ -169,5 +172,5 @@ if __name__ == "__main__":
                 if not os.path.exists(results_dir + i + '/'):
                     os.makedirs(results_dir + i + '/')
                 results_dfs[i].to_csv(
-                    results_dir + i + '/data' + str(dataset_id) + '_likelihood' + str(likelihood_dev) + '_acc' + str(
+                    results_dir + i + '/likelihood' + str(likelihood_dev) + '_pp' + str(
                         accuracy_threshold) + '.csv')

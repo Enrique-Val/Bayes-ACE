@@ -25,11 +25,6 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     df_train = df_train.drop(df_train.columns[-1], axis=1)
     df_train["class"] = class_processed
 
-    # Get the bounds for the optimization problem. The initial sampling will rely on this, so we call it sampling_range
-    xu = df_train.drop(columns=['class']).max().values + 0.0001
-    xl = df_train.drop(columns=['class']).min().values - 0.0001
-    sampling_range = (xl, xu)
-
     # Load the pickled gt density estimator from the correct folder
     gt_estimator_path = results_cv_dir + 'gt_nf_' + str(dataset_id) + '.pkl'
     gt_estimator: ConditionalNF = pickle.load(
@@ -58,7 +53,7 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     return df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path
 
 
-def get_constraints(df_train, gt_estimator: ConditionalNF, eps=0.01):
+def get_constraints(df_train, gt_estimator: ConditionalNF, eps=0.1):
     xu = df_train.drop(columns=['class']).max().values + eps
     xl = df_train.drop(columns=['class']).min().values - eps
     sampling_range = (xl, xu)
