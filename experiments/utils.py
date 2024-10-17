@@ -9,10 +9,13 @@ from bayesace import get_other_class, path, path_likelihood_length, hill_climbin
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
+import pybnesian as pb
 
 import platform
 
-def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int) :
+
+def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int) -> tuple[
+    pd.DataFrame, pd.DataFrame, ConditionalNF, str, pb.CLGNetwork, str, ConditionalNF, str]:
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
     df_train = pd.read_csv(results_cv_dir + 'resampled_data' + str(dataset_id) + '.csv',
                            index_col=0)
@@ -36,30 +39,47 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 
     # Open the Bayesian network (conditional linear Gaussian)
     clg_network_path = results_cv_dir + 'clg_' + str(dataset_id) + '.pkl'
-    try :
+    try:
         clg_network = pickle.load(open(clg_network_path, 'rb'))
     except:
-        clg_network = hill_climbing(df_train, seed = 0, bn_type="CLG")
+        clg_network = hill_climbing(df_train, seed=0, bn_type="CLG")
         pickle.dump(clg_network, open(clg_network_path, 'wb'))
 
+    print(type(clg_network))
     # Open the NF
     nf_path = results_cv_dir + 'nf_' + str(dataset_id) + '.pkl'
     normalizing_flow = pickle.load(open(nf_path, 'rb'))
 
+    # Name the index column
+    df_train.index.name = dataset_id
+    df_counterfactuals.index.name = dataset_id
+
     return df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path
 
-def get_constraints(results_cv_dir, df_train, dataset_id) :
-    xu = df_train.drop(columns=['class']).max().values + 0.0001
-    xl = df_train.drop(columns=['class']).min().values - 0.0001
+
+def get_constraints(df_train, gt_estimator: ConditionalNF, eps=0.01):
+    xu = df_train.drop(columns=['class']).max().values + eps
+    xl = df_train.drop(columns=['class']).min().values - eps
     sampling_range = (xl, xu)
+    dataset_id = df_train.index.name
 
-    # Get the cross-validation results
-    cv_results = pd.read_csv(results_cv_dir + 'data_' + str(dataset_id) + '.csv',
-                             index_col=0)
-    mu_gt = float(cv_results.loc["Logl_mean", "GT_SD"])
-    std_gt = float(cv_results.loc["LoglStd_mean", "GT_SD"])
+    logl_train_with_class = gt_estimator.logl(df_train)
+    logl_train_without_class = gt_estimator.log_likelihood(df_train)
+    post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
 
-    return sampling_range, mu_gt, std_gt
+    return sampling_range, logl_train_without_class.mean(), logl_train_without_class.std(), post_prob_train.mean(), post_prob_train.std()
+
+
+def check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_prob_threshold, min_instances=50):
+    logl_train_with_class = gt_estimator.logl(df_train)
+    logl_train_without_class = gt_estimator.log_likelihood(df_train)
+    post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
+    is_plausible = logl_train_without_class > likelihood_threshold
+    is_accurate = post_prob_train > post_prob_threshold
+    if (is_accurate & is_plausible).sum() < min_instances:
+        print("There are not enough instances in the training set that are both accurate and plausible")
+        raise Exception("Not enough instances")
+
 
 def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks):
     target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])

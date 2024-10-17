@@ -87,7 +87,7 @@ class ConditionalNF(ABC):
 
     # The likelihood computed is just the likelihood of the data REGARDLESS of the class
     # Can also be understood as the sum of the likelihood for all classes
-    def likelihood(self, data, class_var_name="class"):
+    def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
         # If the class variable is passed, remove it
         if class_var_name in data.columns:
             data = data.values[:, :-1].astype(float)
@@ -98,7 +98,7 @@ class ConditionalNF(ABC):
             lls = lls + np.e ** self.logl_array(data, np.repeat(i,data.shape[0]))
         return lls
 
-    def log_likelihood(self, data, class_var_name="class"):
+    def log_likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
         return np.log(self.likelihood(data, class_var_name))
     '''
     # If the class variable is passed, remove it
@@ -111,8 +111,7 @@ class ConditionalNF(ABC):
         logl = logl + np.log(1+np.e ** (self.logl_array(data, np.repeat(i+1, data.shape[0]))-logl))
     return logl'''
 
-
-    def predict_proba(self, data: np.ndarray, class_var_name="class") -> np.ndarray:
+    def predict_proba(self, data: np.ndarray) -> np.ndarray:
         # We want to get P(Y|x), which will be computed as P(Y|x) = P(x,Y) / P(x)
         p_xY = np.zeros((len(self.class_dist.keys()), data.shape[0]))
         p_x = np.zeros(data.shape[0])

@@ -177,6 +177,19 @@ def auc(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
         return roc_auc_score(y_true_coded, y_pred.values)
 
 
+def mae_samples(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
+    encoder = OneHotEncoder(sparse_output=False)
+    y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
+    class_labels = encoder.categories_[0]
+    if len(y_pred.columns) == 2:
+        y_bin = y_true_coded[:, 0]
+        y_pred = y_pred[class_labels[0]]
+        return np.abs(y_bin - y_pred.values)
+    else:
+        y_pred = y_pred[class_labels]
+        return np.abs(y_true_coded - y_pred.values)
+
+
 def path(vertex_array: np.ndarray, chunks=2) -> np.ndarray:
     assert chunks > 1
     assert vertex_array.shape[0] > 1

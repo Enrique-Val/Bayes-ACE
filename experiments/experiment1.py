@@ -6,11 +6,12 @@ import pickle
 
 import argparse
 
+import numpy as np
 import torch
 
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
-from experiments.utils import setup_experiment, get_constraints
+from experiments.utils import setup_experiment, get_constraints, check_enough_instances
 
 
 # Worker function for parallelization
@@ -58,8 +59,8 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
 if __name__ == "__main__":
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    likelihood_threshold_sigma = -0.5
-    accuracy_threshold = 0.9
+    likelihood_threshold_sigma = 0.0
+    post_prob_threshold_sigma = 0.0
     n_vertices = 4
     penalties = [1, 5, 10,15,20]
     # Number of points for approximating integrals:
@@ -84,8 +85,11 @@ if __name__ == "__main__":
 
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
-    sampling_range, mu_gt, std_gt = get_constraints(results_cv_dir, df_train, dataset_id)
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, gt_estimator)
     likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
+    post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt,0.99)
+    # Check if there are instances with this threshold in the training set
+    check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_prob_threshold)
 
     for density_estimator_path,density_estimator in zip([clg_network_path,],[clg_network, normalizing_flow]):
         for penalty in penalties:
@@ -95,7 +99,7 @@ if __name__ == "__main__":
             if parallelize:
                 pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
                 results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
-                                                penalty, n_vertices, likelihood_threshold, accuracy_threshold,
+                                                penalty, n_vertices, likelihood_threshold, post_prob_threshold,
                                                 chunks, sampling_range) for i in range(n_counterfactuals)])
                 pool.close()
                 pool.join()
@@ -108,7 +112,7 @@ if __name__ == "__main__":
                     times_mat[i], evaluations_mat[i] = get_counterfactuals(instance, density_estimator, gt_estimator,
                                                                            penalty,
                                                                            n_vertices, likelihood_threshold,
-                                                                           accuracy_threshold,
+                                                                           post_prob_threshold,
                                                                            chunks, sampling_range)
 
             print("Distances mat")
