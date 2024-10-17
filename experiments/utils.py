@@ -4,6 +4,7 @@ import time
 
 import pandas as pd
 import numpy as np
+import torch
 
 from bayesace import get_other_class, path, path_likelihood_length, hill_climbing
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
@@ -35,6 +36,7 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
         open(gt_estimator_path, 'rb'))
 
     # Generate a test sample
+    torch.manual_seed(0)
     df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0).to_pandas()
 
     # Open the Bayesian network (conditional linear Gaussian)
@@ -45,7 +47,6 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
         clg_network = hill_climbing(df_train, seed=0, bn_type="CLG")
         pickle.dump(clg_network, open(clg_network_path, 'wb'))
 
-    print(type(clg_network))
     # Open the NF
     nf_path = results_cv_dir + 'nf_' + str(dataset_id) + '.pkl'
     normalizing_flow = pickle.load(open(nf_path, 'rb'))

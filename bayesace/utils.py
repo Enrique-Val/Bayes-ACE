@@ -84,6 +84,7 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mu
 
 
 def log_likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mutable=False) -> np.ndarray:
+    # Raises warning when input is 0
     return np.log(likelihood(data, density_estimator, class_var_name, mutable))
 '''if not mutable:
     data = data.copy()

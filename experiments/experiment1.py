@@ -59,8 +59,8 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
 if __name__ == "__main__":
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    likelihood_threshold_sigma = 0.0
-    post_prob_threshold_sigma = 0.0
+    likelihood_threshold_sigma = -0.5
+    post_prob_threshold_sigma = -0.5
     n_vertices = 4
     penalties = [1, 5, 10,15,20]
     # Number of points for approximating integrals:
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     # Check if there are instances with this threshold in the training set
     check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_prob_threshold)
 
-    for density_estimator_path,density_estimator in zip([clg_network_path,],[clg_network, normalizing_flow]):
+    for density_estimator_path,density_estimator in zip([clg_network_path,nf_path],[clg_network, normalizing_flow]):
         for penalty in penalties:
             # Result storage
             times_mat = np.zeros((n_counterfactuals, n_vertices))
