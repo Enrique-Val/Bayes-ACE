@@ -66,7 +66,7 @@ if __name__ == "__main__":
     # Number of points for approximating integrals:
     chunks = 10
     # Number of counterfactuals
-    n_counterfactuals = 30
+    n_counterfactuals = 20
 
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)

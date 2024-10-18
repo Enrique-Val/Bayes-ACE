@@ -95,7 +95,7 @@ class BayesACE(ACE):
 
         # This first bit of code give us the initial sample, where every counterfactual is above the likelihood and
         # probability
-        n_samples = int((self.population_size / var_probs[target_label]) * 1000)
+        n_samples = min(int((self.population_size / var_probs[target_label]) * 10), 5000)
         completed = False
         initial_sample = pd.DataFrame(columns=self.features)
         count = 0

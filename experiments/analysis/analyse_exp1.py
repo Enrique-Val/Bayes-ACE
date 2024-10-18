@@ -18,7 +18,7 @@ root_dir = "../results/exp_1/"
 wx_alt = ["two-sided", "greater", "less"]
 
 # Regex to match filenames like distances_data44123_pen1.csv
-file_pattern = re.compile(r"distances_data(\d+)_penalty(\d+)\.csv")
+file_pattern = re.compile(r"distances_data(\d+)_model([A-Z]+)_penalty(\d+)\.csv")
 
 # Get all the values for penalty, dataset_id, models and n_vertex
 def get_values(root_dir):
@@ -41,7 +41,7 @@ def get_values(root_dir):
 
     # Get the list of penalties
     model_path = os.path.join(dataset_path, models[0])
-    file_pattern_mod = re.compile(r"distances_data"+str(dataset_ids[0])+"_penalty(\d+)\.csv")
+    file_pattern_mod = re.compile(r"distances_data"+str(dataset_ids[0])+"_model"+models[0]+"_penalty(\d+)\.csv")
     for file in os.listdir(model_path):
         match = file_pattern_mod.match(file)
         if match:
@@ -65,10 +65,12 @@ def load_data(root_dir, values_dict):
         for model in values_dict["models"]:
             for penalty in values_dict["penalties"]:
                 # Get the path to the file
-                file_name = "distances_data"+str(dataset_id)+"_penalty"+str(penalty)+".csv"
+                file_name = "distances_data"+str(dataset_id)+"_model"+model+"_penalty"+str(penalty)+".csv"
                 file_path = os.path.join(root_dir, dataset_id, model, file_name)
                 if os.path.exists(file_path):
                     df = pd.read_csv(file_path, index_col=0)
+                    # Subsitute nans for inf (a good path was not found, hence infinite distance)
+                    df = df.fillna(np.inf)
                     data_dict[(dataset_id, model, penalty)] = df
     return data_dict
 
@@ -93,13 +95,11 @@ def perform_bh_by_penalty(data_dict, values_dict):
     return results
 
 def perform_bh(data_dict, values_dict):
-    model1 = "clg"
-    model2 ="nf"
-    data_model_1 = pd.concat([data_dict[(dataset_id, model1, penalty)] for dataset_id, penalty in
-                              product(values_dict["dataset_ids"], values_dict["penalties"])])
-    data_model_2 = pd.concat([data_dict[(dataset_id, model2, penalty)] for dataset_id, penalty in
-                              product(values_dict["dataset_ids"], values_dict["penalties"])])
-    results = {model1: bh_test(data_model_1.dropna()), model2: bh_test(data_model_2.dropna())}
+    results = {}
+    for model in values_dict["models"]:
+        data_model = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id, penalty in
+                                product(values_dict["dataset_ids"], values_dict["penalties"])])
+        results[model] = bh_test(data_model.dropna())
     return results
 
 def compare_models_by_penalty(data_dict, values_dict):
@@ -110,9 +110,8 @@ def compare_models_by_penalty(data_dict, values_dict):
 
     results = {}
     # We assume to be using ONLY two models. Otherwise, we shouldn't use Wilcoxon, but Friedman
-
-    model1 = "clg"
-    model2 ="nf"
+    model1 = values_dict["models"][0]
+    model2 = values_dict["models"][1]
     for penalty in values_dict["penalties"]:
         results[penalty] = {}
         diff_arr = data_dict_new[(model1, penalty)].values.flatten() - data_dict_new[(model2, penalty)].values.flatten()
@@ -123,10 +122,13 @@ def compare_models_by_penalty(data_dict, values_dict):
     return results
 
 def compare_models(data_dict, values_dict):
-    model1 = "clg"
-    model2 = "nf"
-    data_model_1 = pd.concat([data_dict[(dataset_id, model1, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])])
-    data_model_2 = pd.concat([data_dict[(dataset_id, model2, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])])
+    model1 = values_dict["models"][0]
+    model2 = values_dict["models"][1]
+    data_model_1 = pd.concat([data_dict[(dataset_id, model1, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])]).reset_index(drop=True)
+    data_model_2 = pd.concat([data_dict[(dataset_id, model2, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])]).reset_index(drop=True)
+    print(data_model_1)
+    print(data_model_2)
+    # There is an error in the substract. Iterate by rows and substract to try to locate it
     diff_arr = data_model_1.values.flatten() - data_model_2.values.flatten()
     # Remove nas
     diff_arr = diff_arr[~np.isnan(diff_arr)]
@@ -143,6 +145,7 @@ if __name__ == "__main__":
     # Load the data
     data_dict = load_data(root_dir, values_dict)
 
+    print(values_dict)
     print(data_dict.keys())
 
     '''
