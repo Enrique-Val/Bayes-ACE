@@ -64,8 +64,8 @@ minimum_spike_jitter = 0.0
 
 # Define the parameter value range IF using Bayesian optimization
 param_space = [
-    Real(1e-4, 1e-2, name='lr'),
-    Real(1e-4, 5e-1, name='weight_decay'),
+    Real(1e-4, 5e-3, name='lr'),
+    Real(1e-4, 1e-2, name='weight_decay'),
     Integer(2, 16, name='count_bins'),
     Integer(2, 10, name='hidden_units'),
     Integer(1, 5, name='layers'),
