@@ -10,6 +10,7 @@ import pandas as pd
 import argparse
 
 import torch
+from pymoo.algorithms.moo.nsga2 import NSGA2
 
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
@@ -40,9 +41,9 @@ if __name__ == "__main__":
     likelihood_dev_list = [0,0.5,1]
     accuracy_threshold_list = [0.9,0.8,0.7]
     # Number of points for approximating integrals:
-    chunks = 10
+    chunks = 20
     # Number of counterfactuals
-    n_counterfactuals = 30
+    n_counterfactuals = 20
 
     # Folder for storing the results
     results_dir = './results/exp_3/' + str(args.dataset_id) + '/'
@@ -110,10 +111,15 @@ if __name__ == "__main__":
                                accuracy_threshold=0.00, log_likelihood_threshold=0.00,
                                chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                                initialization="guided",
-                               seed=0, verbose=verbose, pop_size=100, generations=1000, parallelize=parallelize)
+                               seed=0, verbose=verbose, opt_algorithm=NSGA2,
+                               opt_algorithm_params={"pop_size": 100}, generations=1000,
+                               parallelize=parallelize)
                 tf = time.time()-t0
                 algorithms.append(alg)
                 construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex)+"_pen"+ str(), "construction_time"] = tf
+    # Set parallelism to False for each algorithm
+    for alg in algorithms:
+        alg.parallelize = False
 
     # Store the construction time. The dataset need to be identified.
     if not os.path.exists(results_dir):

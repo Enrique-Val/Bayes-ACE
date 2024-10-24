@@ -1,3 +1,6 @@
+from typing import Type
+
+from pymoo.algorithms.base.genetic import GeneticAlgorithm
 from pymoo.core.problem import Problem
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
@@ -20,7 +23,7 @@ def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estim
     return f1_i
 
 class BestPathFinder(Problem):
-    def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=2, log_likelihood_threshold=-np.inf,
+    def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=20, log_likelihood_threshold=-np.inf,
                  accuracy_threshold=0.05, sampling_range=(-3, 3), parallelize=False, **kwargs):
         n_features = (len(instance.columns) - 1)
         xl = None
@@ -154,20 +157,28 @@ class BayesACE(ACE):
                 paths_sample.append(np.linspace(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
             paths_sample = np.array(paths_sample)
             paths_sample = paths_sample[:, self.n_features:]
-            # TODO optional, add a bit of noise to the paths
             return paths_sample
 
-    def __init__(self, density_estimator, features, n_vertex, chunks=10, pop_size=100,
-                 generations=1000, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
+    def __init__(self, density_estimator, features, n_vertex, chunks=20,
+                 opt_algorithm: Type[GeneticAlgorithm] = NSGA2,
+                 opt_algorithm_params:dict=None,
+                 generations:int =1000,
+                 log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
                  initialization="guided",
                  seed=0,
                  verbose=True, parallelize=False):
         super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
                          accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
                          parallelize=parallelize)
+        if opt_algorithm_params is None:
+            opt_algorithm_params = {"pop_size": 100}
+        if "pop_size" not in opt_algorithm_params:
+            opt_algorithm_params["pop_size"] = 100
+        self.population_size = opt_algorithm_params["pop_size"]
         self.n_vertex = n_vertex
+        self.opt_algorithm = opt_algorithm
+        self.opt_algorithm_params = opt_algorithm_params
         self.generations = generations
-        self.population_size = pop_size
         if sampling_range is None:
             self.sampling_range = (np.array([-3] * self.n_features), np.array([3] * self.n_features))
         else:
@@ -187,7 +198,8 @@ class BayesACE(ACE):
                                  penalty=self.penalty, chunks=self.chunks,
                                  log_likelihood_threshold=self.log_likelihood_threshold,
                                  accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)
-        algorithm = NSGA2(pop_size=self.population_size, sampling=initial_sample)
+        # Create an algorithm of type self.opt_algorithm with the params self.opt_algorithm_params
+        algorithm = self.opt_algorithm(sampling=initial_sample, **self.opt_algorithm_params)
 
         res = minimize(problem,
                        algorithm,

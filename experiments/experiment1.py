@@ -8,6 +8,7 @@ import argparse
 
 import numpy as np
 import torch
+from pymoo.algorithms.moo.nsga2 import NSGA2
 
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
@@ -36,8 +37,8 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
                        n_vertex=n_vertex,
                        accuracy_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
                        chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                       initialization="guided",
-                       seed=0, verbose=False, pop_size=100, generations=1000, parallelize=False)
+                       initialization="guided", seed=0, verbose=True, opt_algorithm=NSGA2,
+                       opt_algorithm_params={"pop_size": 100}, generations=1000, parallelize=False)
         result = alg.run(instance, target_label=target_label)
         tf = time.time() - t0
         if result.counterfactual is None:
@@ -64,7 +65,7 @@ if __name__ == "__main__":
     n_vertices = 4
     penalties = [1, 5, 10,15,20]
     # Number of points for approximating integrals:
-    chunks = 10
+    chunks = 20
     # Number of counterfactuals
     n_counterfactuals = 20
 
