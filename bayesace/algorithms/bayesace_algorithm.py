@@ -111,6 +111,9 @@ class BayesACE(ACE):
             post_prob = posterior_probability(candidate_initial, target_label, self.density_estimator)
 
             mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)
+            # We also need to consider the sample range for the mask
+            mask = mask & (candidate_initial[self.features] >= self.sampling_range[0]).all(axis=1)
+            mask = mask & (candidate_initial[self.features] <= self.sampling_range[1]).all(axis=1)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
             candidate_initial = candidate_initial.drop("class", axis = 1)
             if candidate_initial.shape[0] > 0 :
