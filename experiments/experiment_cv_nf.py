@@ -38,7 +38,8 @@ def kfold_indices(data, k):
         folds.append((train_indices, test_indices))
     return folds
 
-def get_kfold_indices(n_instances, n_folds, i) :
+
+def get_kfold_indices(n_instances, n_folds, i):
     fold_size = n_instances // n_folds
     indices = np.arange(n_instances)
     test_indices = indices[i * fold_size: (i + 1) * fold_size]
@@ -109,11 +110,11 @@ def cross_validate_bn(dataset, fold_indices=None):
 
 
 # Convert the dataset to a NumPy array for shared memory usage
-def to_numpy_shared(df) :
+def to_numpy_shared(df):
     unique_values = df["class"].unique()
     ordinal_mapping = {value: idx for idx, value in enumerate(unique_values)}
     # Convert DataFrame to NumPy array
-    df_numpy = df.drop("class",axis=1).to_numpy()
+    df_numpy = df.drop("class", axis=1).to_numpy()
     df_numpy = np.hstack((df_numpy, np.array([ordinal_mapping[value] for value in df["class"]]).reshape(-1, 1)))
     shm = shared_memory.SharedMemory(create=True, size=df_numpy.nbytes)
     shared_array = np.ndarray(df_numpy.shape, dtype=df_numpy.dtype, buffer=shm.buf)
@@ -122,10 +123,11 @@ def to_numpy_shared(df) :
 
 
 # Worker function that accesses shared memory
-def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n_folds, i_fold, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
+def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n_folds, i_fold, model_type="NVP",
+           batch_size=64, lr=None, weight_decay=None,
            count_bins=None, hidden_units=None,
            layers=None,
-           n_flows=None, perms_instantiation=None, diretory_path = "./"):
+           n_flows=None, perms_instantiation=None, diretory_path="./"):
     torch.set_num_threads(1)
     train_index, test_index = get_kfold_indices(n_instances, n_folds, i_fold)
     # Reconstruct the DataFrame using the shared memory array
@@ -135,7 +137,8 @@ def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n
     # Create a DataFrame from the shared memory array
     df_shared = pd.DataFrame(shared_array, columns=column_names)
     # Recodify the str of the class using the ordinal mapping
-    df_shared["class"] = df_shared["class"].apply(lambda x: list(ordinal_mapping.keys())[list(ordinal_mapping.values()).index(x)])
+    df_shared["class"] = df_shared["class"].apply(
+        lambda x: list(ordinal_mapping.keys())[list(ordinal_mapping.values()).index(x)])
     # Create train and test DataFrames
     df_train = df_shared.iloc[train_index].reset_index(drop=True)
     df_test = df_shared.iloc[test_index].reset_index(drop=True)
@@ -147,7 +150,8 @@ def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n
 
 
 def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
-                             count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None,directory_path="./"):
+                             count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None,
+                             directory_path="./"):
     d = df_train.shape[1] - 1
     t0 = time.time()
     model = None
@@ -156,7 +160,7 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64,
         model.train(df_train, lr=lr, weight_decay=weight_decay, split_dim=d // 2,
                     hidden_units=hidden_units * d, layers=layers,
                     n_flows=n_flows, steps=steps, batch_size=batch_size, perms_instantiation=perms_instantiation,
-                    model_pth_name=directory_path+"model-"+str(os.getpid())+".pkl")
+                    model_pth_name=directory_path + "model-" + str(os.getpid()) + ".pkl")
     elif model_type == "Spline":
         model = ConditionalSpline()
         model.train(df_train, lr=lr, weight_decay=weight_decay, count_bins=count_bins,
@@ -176,7 +180,7 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64,
 def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
                       count_bins=None, hidden_units=None,
                       layers=None,
-                      n_flows=None, perms_instantiation=None, parallelize=False):
+                      n_flows=None, perms_instantiation=None, parallelize=False) -> list | None:
     param_dict = None
     if model_type == "NVP":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "hidden_u": hidden_units,
@@ -189,32 +193,52 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
 
     cv_iter_results = []
     if not parallelize:
-        for train_index, test_index in fold_indices:
-            df_train = dataset.iloc[train_index].reset_index(drop=True)
-            df_test = dataset.iloc[test_index].reset_index(drop=True)
-            cv_iter_results.append(
-                train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr,
-                                         weight_decay=weight_decay,
-                                         count_bins=count_bins, hidden_units=hidden_units, layers=layers,
-                                         n_flows=n_flows,
-                                         perms_instantiation=perms_instantiation))
+        try :
+            for train_index, test_index in fold_indices:
+                df_train = dataset.iloc[train_index].reset_index(drop=True)
+                df_test = dataset.iloc[test_index].reset_index(drop=True)
+                cv_iter_results.append(
+                    train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr,
+                                             weight_decay=weight_decay,
+                                             count_bins=count_bins, hidden_units=hidden_units, layers=layers,
+                                             n_flows=n_flows,
+                                             perms_instantiation=perms_instantiation))
+        except NanLogProb as e:
+            cv_iter_results = None
+            to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
+                        "Consider smoothing data, decreasing the value of the lr or the complexity of the "
+                        "network.") + str(param_dict)
+            warnings.warn(to_print, RuntimeWarning)
+            print()
     elif parallelize:
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
         df_shape = dataset.shape
         column_names = dataset.columns.tolist()
-        pool = mp.Pool(min(mp.cpu_count()-1, k))
+        pool = mp.Pool(min(mp.cpu_count() - 1, k))
         fold_tasks = [(train_index, test_index) for train_index, test_index in fold_indices]
+        try:
+            # Use starmap with the shared memory array and other needed parameters
+            cv_iter_results = pool.starmap(worker,
+                                           [(shm.name, shared_array.shape, shared_array.dtype, column_names,
+                                             ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size, lr,
+                                             weight_decay, count_bins, hidden_units, layers, n_flows,
+                                             perms_instantiation, directory_path)
+                                            for i_fold in range(k)])
+        except NanLogProb as e:
+            cv_iter_results = None
+            to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
+                        "Consider smoothing data, decreasing the value of the lr or the complexity of the "
+                        "network.") + str(param_dict)
+            warnings.warn(to_print, RuntimeWarning)
+            print()
 
-        # Use starmap with the shared memory array and other needed parameters
-        cv_iter_results = pool.starmap(worker,
-                                       [(shm.name, shared_array.shape, shared_array.dtype, column_names, ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size, lr,
-                                         weight_decay, count_bins, hidden_units, layers, n_flows, perms_instantiation, directory_path)
-                                        for i_fold in range(k)])
         pool.close()
         pool.join()
 
         shm.close()
         shm.unlink()
+    if cv_iter_results is None:
+        return None
     cv_results = {"Logl": [], "LoglStd": [], "Brier": [], "AUC": [], "Time": []}
     for cv_iter_result in cv_iter_results:
         for key in cv_results.keys():
@@ -245,22 +269,12 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
         if model_type == "NVP":
             perms_instantiation = [torch.randperm(d) for _ in range(params["n_flows"])]
             perms_list.append(perms_instantiation)
-        result = None
-        try:
-            result = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size,
-                                       perms_instantiation=perms_instantiation, parallelize=parallelize, **params)
-            nf_logl_means = result[0]
-            if nf_logl_means < -3e11 :
-                # If the logl is too low, return a high value for the objective function. This allows to not overpenalize regions of the space
-                return 3e11
-            return -nf_logl_means  # Assuming we want to maximize loglikelihood
-        except NanLogProb as e:
-            to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
-                        "Consider smoothing data, decreasing the value of the lr or the complexity of the "
-                        "network.") + str(params)
-            warnings.warn(to_print, RuntimeWarning)
-            print()
+        result_cv = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size,
+                                      perms_instantiation=perms_instantiation, parallelize=parallelize, **params)
+        if result_cv is None or result_cv[0] < -3e11:
+            # If the logl is too low, return a high value for the objective function. This allows to not overpenalize regions of the space
             return 3e11
+        return -result_cv[0]  # Assuming we want to maximize loglikelihood
 
     # Get number of features
     d = len(dataset.columns) - 1
@@ -343,7 +357,7 @@ if __name__ == "__main__":
         d = len(dataset.columns) - 1
         split_dim = d // 2
         n_instances = dataset.shape[0]
-        batch_size = int((n_instances / n_batches)*0.8 + 1)
+        batch_size = int((n_instances / n_batches) * 0.8 + 1)
 
         if args.type == "NVP":
             param_space.pop(2)
