@@ -37,14 +37,13 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
     distances = np.zeros(n_vertices)
     times = np.zeros(n_vertices)
     for n_vertex in range(n_vertices):
-        n_vertex = n_vertex + 1
         target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
         t0 = time.time()
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
-                       n_vertex=n_vertex,
+                       n_vertex=n_vertex + 1,
                        accuracy_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
                        chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                       initialization="guided", seed=0, verbose=True, opt_algorithm=NSGA2,
+                       initialization="guided", seed=0, verbose=False, opt_algorithm=NSGA2,
                        opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
                                              "mutation": PM(eta=eta_m), "selection": selection_type},
                        generations=1000, parallelize=False)
@@ -148,7 +147,7 @@ if __name__ == "__main__":
             distances_pen = distances_mat.flatten()
             distances.append(distances_pen)
         distances = np.concatenate(distances)
-        results_df[params] = distances
+        results_df[str(params)] = distances
 
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
