@@ -58,7 +58,7 @@ if __name__ == "__main__":
     results_cv_dir = './results/exp_cv_2/' + str(dataset_id) + '/'
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, gt_estimator)
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator, eps = -1)
     df_train = df_train.head(1000)
 
     # Names of the models

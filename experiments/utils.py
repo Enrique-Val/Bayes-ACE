@@ -53,11 +53,11 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     return df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path
 
 
-def get_constraints(df_train, gt_estimator: ConditionalNF, eps=1):
-    xu = df_train.drop(columns=['class']).max().values + eps
-    xl = df_train.drop(columns=['class']).min().values - eps
+def get_constraints(df_train, df_counterfactuals, gt_estimator: ConditionalNF, eps=0.01):
+    df_total = pd.concat([df_train, df_counterfactuals]).reset_index(drop=True)
+    xl = df_total.drop(columns=['class']).min().values - eps
+    xu = df_total.drop(columns=['class']).max().values + eps
     sampling_range = (xl, xu)
-    dataset_id = df_train.index.name
 
     logl_train_with_class = gt_estimator.logl(df_train)
     logl_train_without_class = gt_estimator.log_likelihood(df_train)

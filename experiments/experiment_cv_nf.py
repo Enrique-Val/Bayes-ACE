@@ -433,6 +433,12 @@ if __name__ == "__main__":
         resampled_dataset_metrics.append(results_df["GT_RD"].values[-1])
         results_df["GT_SD"] = resampled_dataset_metrics
 
+        # Prior to any validation, eliminate outliers from the resampled dataset
+        # Specifically, instances whose feature value are outside 3 std
+        for i in resampled_dataset.columns[:-1]:
+            resampled_dataset = resampled_dataset[resampled_dataset[i] < (resampled_dataset[i].mean() + resampled_dataset[i].std() * 3)]
+            resampled_dataset = resampled_dataset[resampled_dataset[i] > (resampled_dataset[i].mean() - resampled_dataset[i].std() * 3)]
+
         # Validate Gaussian network
         bn_results = cross_validate_bn(resampled_dataset, fold_indices)
         results_df["CLG"] = bn_results

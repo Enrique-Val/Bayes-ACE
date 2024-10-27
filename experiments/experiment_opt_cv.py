@@ -95,7 +95,7 @@ if __name__ == "__main__":
 
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, gt_estimator)
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator)
     likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
     post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt, 0.99)
     # Check if there are instances with this threshold in the training set
