@@ -32,8 +32,8 @@ class BestPathFinder(Problem):
             xl = np.array([-3] * (n_features * (n_vertex + 1)))
             xu = np.array([3] * (n_features * (n_vertex + 1)))
         else:
-            xl = np.repeat(sampling_range[0], n_vertex + 1)
-            xu = np.repeat(sampling_range[1], n_vertex + 1)
+            xl = np.array(list(sampling_range[0]) * (n_vertex + 1))
+            xu = np.array(list(sampling_range[1]) * (n_vertex + 1))
         super().__init__(n_var=n_features * (n_vertex + 1),
                          n_obj=1,
                          n_ieq_constr=2,
