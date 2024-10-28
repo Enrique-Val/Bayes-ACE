@@ -83,11 +83,18 @@ def perform_bh_by_all(data_dict, values_dict):
         results[(dataset_id, model, penalty)] = bh_test(data_dict[(dataset_id, model, penalty)].dropna())
     return results
 
+def perform_bh_by_dataset(data_dict, values_dict) :
+    results = {}
+    for model,dataset_id in product(values_dict["models"],values_dict["dataset_ids"]):
+        data_model = pd.concat([data_dict[(dataset_id, model, "1")] for penalty in values_dict["penalties"]]).reset_index(drop=True)
+        results[model, dataset_id] = bh_test(data_model.dropna())
+    return results
+
 def perform_bh_by_penalty(data_dict, values_dict):
     # First, we group by the data by penalty and model
     data_dict_new = {}
     for model, penalty in product(values_dict["models"], values_dict["penalties"]):
-        data_dict_new[model, penalty] = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id in values_dict["dataset_ids"]])
+        data_dict_new[model, penalty] = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id in values_dict["dataset_ids"]]).reset_index(drop=True)
 
     results = {}
     for model, penalty in data_dict_new.keys():
@@ -98,7 +105,7 @@ def perform_bh(data_dict, values_dict):
     results = {}
     for model in values_dict["models"]:
         data_model = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id, penalty in
-                                product(values_dict["dataset_ids"], values_dict["penalties"])])
+                                product(values_dict["dataset_ids"], values_dict["penalties"])]).reset_index(drop=True)
         results[model] = bh_test(data_model.dropna())
     return results
 
@@ -106,7 +113,7 @@ def compare_models_by_penalty(data_dict, values_dict):
     # First, we group by the data by penalty and model
     data_dict_new = {}
     for model, penalty in product(values_dict["models"], values_dict["penalties"]):
-        data_dict_new[model, penalty] = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id in values_dict["dataset_ids"]])
+        data_dict_new[model, penalty] = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id in values_dict["dataset_ids"]]).reset_index(drop=True)
 
     results = {}
     # We assume to be using ONLY two models. Otherwise, we shouldn't use Wilcoxon, but Friedman
@@ -115,6 +122,8 @@ def compare_models_by_penalty(data_dict, values_dict):
     for penalty in values_dict["penalties"]:
         results[penalty] = {}
         diff_arr = data_dict_new[(model1, penalty)].values.flatten() - data_dict_new[(model2, penalty)].values.flatten()
+        diff_arr[diff_arr == np.inf] = 1e300
+        diff_arr[diff_arr == -np.inf] = -1e300
         # Remove nas
         diff_arr = diff_arr[~np.isnan(diff_arr)]
         for alt_hyp in wx_alt:
@@ -126,10 +135,12 @@ def compare_models(data_dict, values_dict):
     model2 = values_dict["models"][1]
     data_model_1 = pd.concat([data_dict[(dataset_id, model1, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])]).reset_index(drop=True)
     data_model_2 = pd.concat([data_dict[(dataset_id, model2, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])]).reset_index(drop=True)
-    print(data_model_1)
-    print(data_model_2)
+    #print(data_model_1)
+    #print(data_model_2)
     # There is an error in the substract. Iterate by rows and substract to try to locate it
     diff_arr = data_model_1.values.flatten() - data_model_2.values.flatten()
+    diff_arr[diff_arr == np.inf] = 1e300
+    diff_arr[diff_arr == -np.inf] = -1e300
     # Remove nas
     diff_arr = diff_arr[~np.isnan(diff_arr)]
     results = {}
@@ -154,6 +165,14 @@ if __name__ == "__main__":
     for i in friedman_bh_results.keys():
         sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
         plt.title(f"Dataset: {i[0]}, Model: {i[1]}, Penalty: {i[2]}")
+        plt.show()
+    
+
+    friedman_bh_results = perform_bh_by_dataset(data_dict, values_dict)
+    for i in friedman_bh_results.keys():
+        sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"],
+                                       label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
+        plt.title(f"Model: {i[0]}, Dataset: {i[1]}")
         plt.show()
     '''
 
