@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
-from experiments.utils import bh_test
+from experiments.utils import friedman_posthoc
 
 # Path to dataset root
 root_dir = "../results/exp_1/"
@@ -80,14 +80,14 @@ def perform_bh_by_all(data_dict, values_dict):
     results = {}
     for dataset_id, model, penalty in product(values_dict["dataset_ids"], values_dict["models"], values_dict["penalties"]):
         print(f"Dataset: {dataset_id}, Model: {model}, Penalty: {penalty}")
-        results[(dataset_id, model, penalty)] = bh_test(data_dict[(dataset_id, model, penalty)].dropna())
+        results[(dataset_id, model, penalty)] = friedman_posthoc(data_dict[(dataset_id, model, penalty)].dropna())
     return results
 
 def perform_bh_by_dataset(data_dict, values_dict) :
     results = {}
     for model,dataset_id in product(values_dict["models"],values_dict["dataset_ids"]):
         data_model = pd.concat([data_dict[(dataset_id, model, "1")] for penalty in values_dict["penalties"]]).reset_index(drop=True)
-        results[model, dataset_id] = bh_test(data_model.dropna())
+        results[model, dataset_id] = friedman_posthoc(data_model.dropna())
     return results
 
 def perform_bh_by_penalty(data_dict, values_dict):
@@ -98,7 +98,7 @@ def perform_bh_by_penalty(data_dict, values_dict):
 
     results = {}
     for model, penalty in data_dict_new.keys():
-        results[(model,penalty)] = bh_test(data_dict_new[(model, penalty)].dropna())
+        results[(model,penalty)] = friedman_posthoc(data_dict_new[(model, penalty)].dropna())
     return results
 
 def perform_bh(data_dict, values_dict):
@@ -106,7 +106,7 @@ def perform_bh(data_dict, values_dict):
     for model in values_dict["models"]:
         data_model = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id, penalty in
                                 product(values_dict["dataset_ids"], values_dict["penalties"])]).reset_index(drop=True)
-        results[model] = bh_test(data_model.dropna())
+        results[model] = friedman_posthoc(data_model.dropna())
     return results
 
 def compare_models_by_penalty(data_dict, values_dict):

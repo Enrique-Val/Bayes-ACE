@@ -99,7 +99,7 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
         return path_length_gt, tf, result.counterfactual.values
 
 
-def bh_test(data) -> dict:
+def friedman_posthoc(data, correct = "bergmann") -> dict:
     '''
     Perform the Friedman test and the Bermann-Hommel post-hoc test using the scmamp package in R
 
@@ -107,6 +107,9 @@ def bh_test(data) -> dict:
     ----------
     data : pandas.DataFrame
         A pandas DataFrame where each column is a different outcome to test and each row is a different instance.
+    correct : str
+        String indicating the correction method to use for the p-values. The possible values are: "shaffer", "bergmann",
+         "holland", "finner", "rom" and "li"
 
     Returns
     -------
@@ -134,7 +137,7 @@ def bh_test(data) -> dict:
     r_data = pandas2ri.py2rpy(data)
 
     # Perform the post-hoc test in R using scmamp::postHocTest
-    bh_posthoc_scmamp = scmamp.postHocTest(r_data, test="friedman", correct="bergmann")
+    bh_posthoc_scmamp = scmamp.postHocTest(r_data, test="friedman", correct=correct)
 
     # Convert the rpy2 ListVector to a Python dictionary
     bh_posthoc = {}

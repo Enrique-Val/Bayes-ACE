@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
-from experiments.utils import bh_test
+from experiments.utils import friedman_posthoc
 
 # Path to dataset root
 root_dir = "../results/exp_1/"
@@ -82,7 +82,7 @@ def load_data(root_dir, values_dict):
 def perform_bh_by_all(data_dict, values_dict, metric):
     results = {}
     for dataset_id, likelihood, post_prob in product(values_dict["dataset_ids"], values_dict["likelihoods"], values_dict["post_probs"]):
-        results[(dataset_id, likelihood, post_prob)] = bh_test(data_dict[metric][(dataset_id, likelihood, post_prob)].dropna())
+        results[(dataset_id, likelihood, post_prob)] = friedman_posthoc(data_dict[metric][(dataset_id, likelihood, post_prob)].dropna())
 
 
 def perform_bh_by_thresholds(data_dict, values_dict, metric):
@@ -93,7 +93,7 @@ def perform_bh_by_thresholds(data_dict, values_dict, metric):
 
     results = {}
     for likelihood, post_prob in data_dict_new.keys():
-        results[(likelihood, post_prob)] = bh_test(data_dict_new[(likelihood, post_prob)].dropna())
+        results[(likelihood, post_prob)] = friedman_posthoc(data_dict_new[(likelihood, post_prob)].dropna())
     return results
 
 def perform_bh_by_dataset(data_dict, values_dict, metric):
@@ -103,13 +103,13 @@ def perform_bh_by_dataset(data_dict, values_dict, metric):
 
     results = {}
     for dataset_id in data_dict_new.keys():
-        results[dataset_id] = bh_test(data_dict_new[dataset_id].dropna())
+        results[dataset_id] = friedman_posthoc(data_dict_new[dataset_id].dropna())
     return results
 
 
 def perform_bh(data_dict, values_dict,metric):
     data_dict_new = pd.concat([data_dict[metric][(dataset_id, likelihood, post_prob)] for dataset_id, likelihood, post_prob in product(values_dict["dataset_ids"], values_dict["likelihoods"], values_dict["post_probs"])])
-    results = bh_test(data_dict_new.dropna())
+    results = friedman_posthoc(data_dict_new.dropna())
     return results
 
 

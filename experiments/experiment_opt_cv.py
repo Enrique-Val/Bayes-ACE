@@ -40,7 +40,7 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
         target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
         t0 = time.time()
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
-                       n_vertex=n_vertex + 1,
+                       n_vertex=n_vertex+1,
                        accuracy_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
                        chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                        initialization="guided", seed=0, verbose=False, opt_algorithm=NSGA2,
@@ -126,7 +126,7 @@ if __name__ == "__main__":
             if parallelize:
                 pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
                 results = pool.starmap(worker,
-                                       [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
+                                       [(df_counterfactuals.iloc[[i]], gt_estimator_path, gt_estimator_path,
                                          penalty, n_vertices, likelihood_threshold, post_prob_threshold,
                                          chunks, sampling_range, eta_c, eta_m, selection_type) for i in
                                         range(n_counterfactuals)])
