@@ -10,7 +10,11 @@ import pandas as pd
 import argparse
 
 import torch
-from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.algorithms.moo.nsga2 import NSGA2, binary_tournament
+from pymoo.operators.crossover.sbx import SBX
+from pymoo.operators.mutation.pm import PM
+from pymoo.operators.selection.rnd import RandomSelection
+from pymoo.operators.selection.tournament import TournamentSelection
 
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
@@ -60,6 +64,14 @@ if __name__ == "__main__":
         results_cv_dir, dataset_id, n_counterfactuals)
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator, eps = -1)
     df_train = df_train.head(1000)
+
+    # Load the best parameters for the NSGA
+    best_params = pd.read_csv(results_cv_dir + "best_params.csv", index_col=0)
+    eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
+    eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
+    selection_type = best_params.loc[dataset_id, "selection_type"]
+    selection_type = TournamentSelection(
+        func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
 
     # Names of the models
     models = [normalizing_flow, clg_network]
@@ -112,7 +124,9 @@ if __name__ == "__main__":
                                chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                                initialization="guided",
                                seed=0, verbose=verbose, opt_algorithm=NSGA2,
-                               opt_algorithm_params={"pop_size": 100}, generations=1000,
+                               opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
+                                             "mutation": PM(eta=eta_m), "selection": selection_type},
+                               generations=1000,
                                parallelize=parallelize)
                 tf = time.time()-t0
                 algorithms.append(alg)

@@ -8,7 +8,11 @@ import argparse
 
 import numpy as np
 import torch
-from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.algorithms.moo.nsga2 import NSGA2, binary_tournament
+from pymoo.operators.crossover.sbx import SBX
+from pymoo.operators.mutation.pm import PM
+from pymoo.operators.selection.rnd import RandomSelection
+from pymoo.operators.selection.tournament import TournamentSelection
 
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
@@ -17,17 +21,18 @@ from experiments.utils import setup_experiment, get_constraints, check_enough_in
 
 # Worker function for parallelization
 def worker(instance, density_estimator_path, gt_estimator_path, penalty, n_vertices, likelihood_threshold,
-           accuracy_threshold, chunks, sampling_range):
+           accuracy_threshold, chunks, sampling_range, eta_c, eta_m, selection_type):
     torch.set_num_threads(1)
     density_estimator = pickle.load(open(density_estimator_path, 'rb'))
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
     return get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices,
-                               likelihood_threshold, accuracy_threshold, chunks, sampling_range)
+                               likelihood_threshold, accuracy_threshold, chunks, sampling_range,
+                               eta_c, eta_m, selection_type)
 
 
 def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices, likelihood_threshold,
                         accuracy_threshold, chunks,
-                        sampling_range):
+                        sampling_range, eta_c, eta_m, selection_type) :
     distances = np.zeros(n_vertices)
     times = np.zeros(n_vertices)
     for n_vertex in range(n_vertices):
@@ -38,7 +43,9 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
                        accuracy_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
                        chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                        initialization="guided", seed=0, verbose=True, opt_algorithm=NSGA2,
-                       opt_algorithm_params={"pop_size": 100}, generations=1000, parallelize=False)
+                       opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
+                                             "mutation": PM(eta=eta_m), "selection": selection_type},
+                       generations=1000, parallelize=False)
         result = alg.run(instance, target_label=target_label)
         tf = time.time() - t0
         if result.counterfactual is None:
@@ -91,8 +98,14 @@ if __name__ == "__main__":
     post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt,0.99)
     # Check if there are instances with this threshold in the training set
     check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_prob_threshold)
+    # Load the best parameters for the NSGA
+    best_params = pd.read_csv(results_cv_dir + "best_params.csv", index_col=0)
+    eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
+    eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
+    selection_type = best_params.loc[dataset_id, "selection_type"]
+    selection_type = TournamentSelection(func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
 
-    for density_estimator_path,density_estimator in zip([clg_network_path,nf_path],[clg_network, normalizing_flow]):
+    for density_estimator_path, density_estimator in zip([clg_network_path,nf_path],[clg_network, normalizing_flow]):
         for penalty in penalties:
             # Result storage
             times_mat = np.zeros((n_counterfactuals, n_vertices))

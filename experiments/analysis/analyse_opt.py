@@ -25,11 +25,14 @@ def load_data(root_dir):
     for file in os.listdir(root_dir):
         file_path = os.path.join(root_dir, file)
         if not os.path.isdir(file_path):
-            dataset_id = file_pattern.match(file).group(1)
-            data = pd.read_csv(file_path, index_col=0)
-            # Substitute nan with large number
-            data = data.fillna(1e300)
-            results[dataset_id] = data
+            try :
+                dataset_id = file_pattern.match(file).group(1)
+                data = pd.read_csv(file_path, index_col=0)
+                # Substitute nan with large number
+                data = data.fillna(1e300)
+                results[dataset_id] = data
+            except:
+                continue
     return results
 
 
@@ -45,7 +48,7 @@ if __name__ == "__main__":
     combined_data = pd.concat(data_dict.values()).reset_index(drop=True)
     avg_rank = combined_data.rank(axis=1, pct=True).mean()
     # Select best nine columns
-    best_columns = avg_rank.nsmallest(9).index
+    best_columns = avg_rank.nsmallest(8).index
     best_data = combined_data[best_columns]
     # Perform the Friedman test with BH post-hoc test
     test_results = friedman_posthoc(best_data, correct="bergmann")
@@ -56,15 +59,17 @@ if __name__ == "__main__":
     # Clear plt
     plt.clf()
 
+    # Create a dataframe to store best params per dataset
+    best_params_df = pd.DataFrame(columns=["eta_crossover", "eta_mutation", "selection_type"], index=list(data_dict.keys()))
+
     # Perform the BH test for every loaded dataset
     for dataset_id in data_dict.keys():
         data:pd.DataFrame = data_dict[dataset_id]
         # Compute the ranks
         avg_rank = data.rank(axis=1, pct=True).mean()
-        print(avg_rank)
 
         # Select best nine columns
-        best_columns = avg_rank.nsmallest(9).index
+        best_columns = avg_rank.nsmallest(8).index
         best_data = data[best_columns]
 
         # Perform the Friedman test with BH post-hoc test
@@ -77,9 +82,13 @@ if __name__ == "__main__":
         plt.show()
         #Clear plt
         plt.clf()
-        '''# Get the best column of data according to the BH test
-        best_column = friedman_bh_results["summary_ranks"].idxmin()
-        best_params = data.columns[best_column]
-        # best_params is a str. Convert it back to dict
-        best_params = dict([param.split("=") for param in best_params.split(",")])
-        print(best_params)'''
+
+        # Get the best column of data according to the ranking
+        best_params_str = test_results["summary_ranks"].idxmin()
+        best_params = eval(best_params_str)
+
+        # Store the best params
+        best_params_df.loc[dataset_id] = best_params
+
+    # Save the best params dataframe
+    best_params_df.to_csv(root_dir+"best_params.csv")
