@@ -41,6 +41,10 @@ if __name__ == "__main__":
     # Load the data
     data_dict = load_data(root_dir)
 
+    # Create plot subdir if it does not exist
+    if not os.path.exists(root_dir + "plots"):
+        os.makedirs(root_dir + "plots")
+
     # Best param dataset
     pd.DataFrame(columns=["eta_crossover", "eta_mutation", "selection_type"], index=list(data_dict.keys()))
 
@@ -60,7 +64,14 @@ if __name__ == "__main__":
     plt.clf()
 
     # Create a dataframe to store best params per dataset
-    best_params_df = pd.DataFrame(columns=["eta_crossover", "eta_mutation", "selection_type"], index=list(data_dict.keys()))
+    best_params_df = pd.DataFrame(columns=["eta_crossover", "eta_mutation", "selection_type"], index=["default"]+list(data_dict.keys()))
+
+    # Store the best params for the combined dataset
+    best_params_str = test_results["summary_ranks"].idxmin()
+    best_params = eval(best_params_str)
+
+    # Store the best params
+    best_params_df.loc["default"] = best_params
 
     # Perform the BH test for every loaded dataset
     for dataset_id in data_dict.keys():

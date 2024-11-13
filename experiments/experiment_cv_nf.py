@@ -308,7 +308,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
         params["split_dim"] = d // 2
     elif model_type == "Splines":
         model = ConditionalSpline()
-    model.train(dataset, **params, steps=steps, batch_size=batch_size, perms_instantiation=best_perm)
+    model.train(dataset, **params, steps=steps, batch_size=batch_size, perms_instantiation=best_perm, model_pth_name=directory_path+"best_model.pkl")
     return model, metrics, result
 
 

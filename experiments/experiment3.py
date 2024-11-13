@@ -35,6 +35,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2_patience/', type=str)
+    parser.add_argument('--results_dir', nargs='?', default='./results/exp_3/', type=str)
+    parser.add_argument('--results_opt_dir', nargs='?', default="./results/exp_opt2/", type=str)
     args = parser.parse_args()
 
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
@@ -50,7 +53,9 @@ if __name__ == "__main__":
     n_counterfactuals = 20
 
     # Folder for storing the results
-    results_dir = './results/exp_3/' + str(args.dataset_id) + '/'
+    results_dir = args.results_dir
+    results_dir = results_dir + str(args.dataset_id) + '/'
+    results_opt_cv_dir = args.results_opt_dir
 
     dataset_id = args.dataset_id
     parallelize = args.parallelize
@@ -59,17 +64,22 @@ if __name__ == "__main__":
     random.seed(0)
 
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    results_cv_dir = './results/exp_cv_2/' + str(dataset_id) + '/'
+    results_cv_dir = args.cv_dir + str(dataset_id) + '/'
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator, eps = -1)
     df_train = df_train.head(1000)
 
     # Load the best parameters for the NSGA
-    best_params = pd.read_csv(results_cv_dir + "best_params.csv", index_col=0)
-    eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
-    eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
-    selection_type = best_params.loc[dataset_id, "selection_type"]
+    best_params = pd.read_csv(results_opt_cv_dir + "best_params.csv", index_col=0)
+    try:
+        eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
+        eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
+        selection_type = best_params.loc[dataset_id, "selection_type"]
+    except KeyError:
+        eta_c = int(best_params.loc["default", "eta_crossover"])
+        eta_m = int(best_params.loc["default", "eta_mutation"])
+        selection_type = best_params.loc["default", "selection_type"]
     selection_type = TournamentSelection(
         func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
 

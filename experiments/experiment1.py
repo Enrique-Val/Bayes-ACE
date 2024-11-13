@@ -81,6 +81,7 @@ if __name__ == "__main__":
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
     parser.add_argument('--results_dir', nargs='?', default='./results/exp_1/', type=str)
+    parser.add_argument('--cv_opt_dir', nargs='?', default='./results/exp_opt2/', type=str)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -90,6 +91,7 @@ if __name__ == "__main__":
 
     results_cv_dir = args.cv_dir + str(dataset_id) + '/'
     results_dir = args.results_dir + str(dataset_id) + '/'
+    results_opt_cv_dir = args.cv_opt_dir
 
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
@@ -99,10 +101,15 @@ if __name__ == "__main__":
     # Check if there are instances with this threshold in the training set
     check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_prob_threshold)
     # Load the best parameters for the NSGA
-    best_params = pd.read_csv(results_cv_dir + "best_params.csv", index_col=0)
-    eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
-    eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
-    selection_type = best_params.loc[dataset_id, "selection_type"]
+    best_params = pd.read_csv(results_opt_cv_dir + "best_params.csv", index_col=0)
+    try :
+        eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
+        eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
+        selection_type = best_params.loc[dataset_id, "selection_type"]
+    except KeyError:
+        eta_c = int(best_params.loc["default", "eta_crossover"])
+        eta_m = int(best_params.loc["default", "eta_mutation"])
+        selection_type = best_params.loc["default", "selection_type"]
     selection_type = TournamentSelection(func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
 
     for density_estimator_path, density_estimator in zip([clg_network_path,nf_path],[clg_network, normalizing_flow]):
@@ -114,20 +121,22 @@ if __name__ == "__main__":
                 pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
                 results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
                                                 penalty, n_vertices, likelihood_threshold, post_prob_threshold,
-                                                chunks, sampling_range) for i in range(n_counterfactuals)])
+                                                chunks, sampling_range, eta_c, eta_m, selection_type) for i in
+                                                range(n_counterfactuals)])
                 pool.close()
                 pool.join()
 
                 for i in range(n_counterfactuals):
                     times_mat[i], evaluations_mat[i] = results[i]
             else :
-                for i in range(n_counterfactuals):
+                for i in range(n_counterfactuals)[:1]:
                     instance = df_counterfactuals.iloc[[i]]
                     times_mat[i], evaluations_mat[i] = get_counterfactuals(instance, density_estimator, gt_estimator,
                                                                            penalty,
                                                                            n_vertices, likelihood_threshold,
                                                                            post_prob_threshold,
-                                                                           chunks, sampling_range)
+                                                                           chunks, sampling_range, eta_c, eta_m,
+                                                                           selection_type)
 
             print("Distances mat")
             print(times_mat)
