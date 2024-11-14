@@ -34,6 +34,7 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
                         accuracy_threshold, chunks,
                         sampling_range, eta_c, eta_m, selection_type) :
     distances = np.zeros(n_vertices)
+    real_distances = np.zeros(n_vertices)
     times = np.zeros(n_vertices)
     for n_vertex in range(n_vertices):
         target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
@@ -50,6 +51,7 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
         tf = time.time() - t0
         if result.counterfactual is None:
             distances[n_vertex] = np.nan
+            real_distances[n_vertex] = np.nan
             times[n_vertex] = tf
         else:
             path_to_compute = path(result.path.values, chunks=chunks)
@@ -59,9 +61,10 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
             if pll == np.inf:
                 warnings.warn("Path length over ground truth is infinite for instance " + str(instance.index[0]) + ", "
                               + str(n_vertex) + " vertices, penalty of " + str(penalty) + "and estimator " + str(type(density_estimator)))
-            distances[n_vertex] = pll
+            distances[n_vertex] = result.distance
+            real_distances[n_vertex] = pll
             times[n_vertex] = tf
-    return distances, times
+    return distances, real_distances, times
 
 
 if __name__ == "__main__":
@@ -115,8 +118,9 @@ if __name__ == "__main__":
     for density_estimator_path, density_estimator in zip([clg_network_path,nf_path],[clg_network, normalizing_flow]):
         for penalty in penalties:
             # Result storage
+            distances_mat = np.zeros((n_counterfactuals, n_vertices))
+            real_distances_mat = np.zeros((n_counterfactuals, n_vertices))
             times_mat = np.zeros((n_counterfactuals, n_vertices))
-            evaluations_mat = np.zeros((n_counterfactuals, n_vertices))
             if parallelize:
                 pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
                 results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
@@ -127,21 +131,21 @@ if __name__ == "__main__":
                 pool.join()
 
                 for i in range(n_counterfactuals):
-                    times_mat[i], evaluations_mat[i] = results[i]
+                    distances_mat[i], real_distances_mat[i], times_mat[i] = results[i]
             else :
                 for i in range(n_counterfactuals)[:1]:
                     instance = df_counterfactuals.iloc[[i]]
-                    times_mat[i], evaluations_mat[i] = get_counterfactuals(instance, density_estimator, gt_estimator,
-                                                                           penalty,
-                                                                           n_vertices, likelihood_threshold,
-                                                                           post_prob_threshold,
-                                                                           chunks, sampling_range, eta_c, eta_m,
-                                                                           selection_type)
+                    distances_mat[i], real_distances_mat[i], times_mat[i] = get_counterfactuals(instance, density_estimator, gt_estimator,
+                                                                         penalty,
+                                                                         n_vertices, likelihood_threshold,
+                                                                         post_prob_threshold,
+                                                                         chunks, sampling_range, eta_c, eta_m,
+                                                                         selection_type)
 
             print("Distances mat")
-            print(times_mat)
+            print(distances_mat)
             print("Evaluations mat")
-            print(evaluations_mat)
+            print(times_mat)
             print()
 
             model_str = "NF" if density_estimator == normalizing_flow else "CLG"
@@ -150,10 +154,14 @@ if __name__ == "__main__":
             if not os.path.exists(results_dir + model_str + '/'):
                 os.makedirs(results_dir + model_str + '/')
 
-            to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices))
+            to_ret = pd.DataFrame(data=distances_mat, columns=range(n_vertices))
             to_ret.to_csv(results_dir + model_str + '/distances_data' + str(dataset_id) +'_model' + model_str + '_penalty' + str(
                 penalty) + '.csv')
 
-            to_ret = pd.DataFrame(data=evaluations_mat, columns=range(n_vertices))
+            to_ret = pd.DataFrame(data=real_distances_mat, columns=range(n_vertices))
+            to_ret.to_csv(
+                results_dir + model_str + '/real_distances_data' + str(dataset_id) + '_model' + model_str + '_penalty' + str(penalty) + '.csv')
+
+            to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices))
             to_ret.to_csv(
                 results_dir + model_str + '/time_data' + str(dataset_id) + '_model' + model_str + '_penalty' + str(penalty) + '.csv')
