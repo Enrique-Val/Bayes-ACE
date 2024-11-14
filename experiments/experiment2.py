@@ -60,6 +60,20 @@ if __name__ == "__main__":
     # Number of counterfactuals
     n_counterfactuals = 20
     eps = np.inf
+    n_train_size = 1000
+    n_generations = 1000
+
+    dummy = True
+    if dummy :
+        chunks = 2
+        n_counterfactuals = 1
+        likelihood_dev_list = likelihood_dev_list[:1]
+        accuracy_threshold_list = accuracy_threshold_list[:1]
+        n_train_size = 10
+        n_vertices = n_vertices[:1]
+        n_generations = 10
+        verbose = True
+        parallelize = False
 
     # Folder for storing the results
     results_dir = args.results_dir + str(dataset_id) + '/'
@@ -72,7 +86,7 @@ if __name__ == "__main__":
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator, eps = -1)
-    df_train = df_train.head(1000)
+    df_train = df_train.head(n_train_size)
 
     # Load the best parameters for the NSGA
     best_params = pd.read_csv(results_opt_cv_dir + "best_params.csv", index_col=0)
@@ -147,7 +161,7 @@ if __name__ == "__main__":
                            seed=0, verbose=verbose, opt_algorithm=NSGA2,
                            opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
                                              "mutation": PM(eta=eta_m), "selection": selection_type},
-                           generations=1000,
+                           generations=n_generations,
                            parallelize=parallelize)
             tf = time.time() - t0
             algorithms.append(alg)
@@ -214,11 +228,16 @@ if __name__ == "__main__":
                         results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = 0
 
 
-
-            # Save the results
-            for i in metrics:
-                if not os.path.exists(results_dir + i + '/'):
-                    os.makedirs(results_dir + i + '/')
-                results_dfs[i].to_csv(
-                    results_dir + i + '/likelihood' + str(likelihood_dev) + '_pp' + str(
-                        accuracy_threshold) + '.csv')
+            if not dummy :
+                # Save the results
+                for i in metrics:
+                    if not os.path.exists(results_dir + i + '/'):
+                        os.makedirs(results_dir + i + '/')
+                    results_dfs[i].to_csv(
+                        results_dir + i + '/likelihood' + str(likelihood_dev) + '_pp' + str(
+                            accuracy_threshold) + '.csv')
+            else :
+                for i in metrics:
+                    print(i)
+                    print(results_dfs[i])
+                    print()
