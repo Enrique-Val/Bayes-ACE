@@ -218,7 +218,7 @@ class BayesACE(ACE):
                                new_shape=(self.n_vertex + 2, self.n_features))
         path_to_ret = pd.DataFrame(data=total_path,
                                    columns=self.features)
-        counterfactual = path_to_ret.iloc[-1]
+        counterfactual = path_to_ret
         path_to_compute = path(total_path, chunks=self.chunks)
         distance = path_likelihood_length(pd.DataFrame(path_to_compute, columns=self.features),
                                           density_estimator=self.density_estimator, penalty=self.penalty)

@@ -23,18 +23,29 @@ class ACEResult():
         return not self == other
 
     def __repr__(self):
-        return "BayesACEResult(counterfactual="+str(self.counterfactual.values[0])+", path=pandas.DataFrame(), distance="+str(self.distance)+")"
+        return "BayesACEResult(counterfactual=" + str(
+            self.counterfactual.values[0]) + ", path=pandas.DataFrame(), distance=" + str(self.distance) + ")"
 
 
-
-class ACE(ABC):
-    def __init__(self, density_estimator, features, chunks, log_likelihood_threshold=-np.inf, accuracy_threshold=0.5, penalty=1,
-                 seed=0, verbose=True, parallelize=False):
+class Algorithm(ABC):
+    def __init__(self, density_estimator, features):
         self.density_estimator = density_estimator
-        self.penalty = penalty
         self.features = features
         self.n_features = len(self.features)
-        self.density_estimator = density_estimator
+
+
+    @abstractmethod
+    def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
+        assert (instance["class"].values[0] != target_label)
+        return ACEResult(None, pd.DataFrame(), np.nan)
+
+
+class ACE(Algorithm):
+    def __init__(self, density_estimator, features, chunks, log_likelihood_threshold=-np.inf, accuracy_threshold=0.5,
+                 penalty=1,
+                 seed=0, verbose=True, parallelize=False):
+        super().__init__(density_estimator, features)
+        self.penalty = penalty
         self.chunks = chunks
         self.log_likelihood_threshold = log_likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
@@ -46,4 +57,4 @@ class ACE(ABC):
     @abstractmethod
     def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
         assert (instance["class"].values[0] != target_label)
-        return
+        return ACEResult(None, pd.DataFrame(), np.nan)

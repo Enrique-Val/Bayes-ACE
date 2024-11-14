@@ -341,3 +341,7 @@ def plot_path(df, res_b=None):
 
 def get_other_class(class_values, class_value):
     return class_values[class_values != class_value][0]
+
+
+def median_absolute_deviation(x, axis=None):
+    return np.median(np.abs(x - np.median(x, axis=axis)), axis=axis)

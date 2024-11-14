@@ -17,6 +17,7 @@ from pymoo.operators.mutation.pm import PM
 from pymoo.operators.selection.rnd import RandomSelection
 from pymoo.operators.selection.tournament import TournamentSelection
 
+from bayesace.algorithms.wachter import WachterCounterfactual
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
 from bayesace.algorithms.face import FACE
@@ -89,7 +90,7 @@ if __name__ == "__main__":
     # Names of the models
     models = [normalizing_flow, clg_network]
     models_str = ["nf", "clg"]
-    faces_str = ["face_baseline", "face_kde", "face_eps"]
+    faces_str = ["face_baseline", "face_kde", "face_eps", "wachter"]
     algorithm_str_list = faces_str + ["bayesace_" + model_str + "_v" + str(n_vertex) for model_str, n_vertex in
                                       product(models_str, n_vertices)]
 
@@ -127,6 +128,13 @@ if __name__ == "__main__":
     algorithms.append(alg)
     construction_time_df.loc["face_eps", "construction_time"] = tf
 
+    t0 = time.time()
+    alg = WachterCounterfactual(density_estimator=clg_network, features=df_train.columns[:-1],
+               log_likelihood_threshold=0.00, accuracy_threshold=0.00)
+    tf = time.time() - t0
+    algorithms.append(alg)
+    construction_time_df.loc["wachter", "construction_time"] = tf
+
     # I need as many BayesACE (both with normalizing flow and CLG) as vertices
     for algorithm_str, model in zip(["nf", "clg"], [normalizing_flow, clg_network]):
         for n_vertex in n_vertices:
@@ -153,7 +161,7 @@ if __name__ == "__main__":
         os.makedirs(results_dir)
     construction_time_df.to_csv(results_dir + 'construction_time_data' + str(dataset_id) + '.csv')
 
-    metrics = ["distance", "counterfactual", "time"]
+    metrics = ["distance", "counterfactual", "time", "distance_to_face_baseline"]
 
     # Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
@@ -194,6 +202,18 @@ if __name__ == "__main__":
                         results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
                         results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
                         results_dfs["time"].loc[i, algorithm_str] = tf
+
+            # Prior to save the result, compute the distance between the counterfactual found by the first
+            # FACE and the ones found by the other algorithms
+            for i in range(n_counterfactuals):
+                for algorithm_str in algorithm_str_list:
+                    if results_dfs["counterfactual"].loc[i, "face_baseline"] is not np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
+                        results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.linalg.norm(
+                            results_dfs["counterfactual"].loc[i, "face_baseline"] - results_dfs["counterfactual"].loc[i, algorithm_str])
+                    else:
+                        results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = 0
+
+
 
             # Save the results
             for i in metrics:
