@@ -143,8 +143,8 @@ if __name__ == "__main__":
     construction_time_df.loc["face_eps", "construction_time"] = tf
 
     t0 = time.time()
-    alg = WachterCounterfactual(density_estimator=clg_network, features=df_train.columns[:-1],
-               log_likelihood_threshold=0.00, accuracy_threshold=0.00)
+    alg = WachterCounterfactual(density_estimator=gt_estimator, features=df_train.columns[:-1],
+               log_likelihood_threshold=0.00, accuracy_threshold=0.00, dataset=df_train)
     tf = time.time() - t0
     algorithms.append(alg)
     construction_time_df.loc["wachter", "construction_time"] = tf
@@ -173,7 +173,8 @@ if __name__ == "__main__":
     # Store the construction time. The dataset need to be identified.
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
-    construction_time_df.to_csv(results_dir + 'construction_time_data' + str(dataset_id) + '.csv')
+    if not dummy :
+        construction_time_df.to_csv(results_dir + 'construction_time_data' + str(dataset_id) + '.csv')
 
     metrics = ["distance", "counterfactual", "time", "distance_to_face_baseline"]
 
@@ -239,5 +240,5 @@ if __name__ == "__main__":
             else :
                 for i in metrics:
                     print(i)
-                    print(results_dfs[i])
+                    print(results_dfs[i].to_string())
                     print()

@@ -6,7 +6,7 @@ from bayesace.algorithms.algorithm import Algorithm, ACEResult
 
 
 class WachterCounterfactual(Algorithm):
-    def __init__(self, density_estimator, features,
+    def __init__(self, density_estimator, features, dataset:pd.DataFrame,
                  target_proximity_weight=0.0, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50):
         """
         Initialize with the density estimator, features, dataset, and weight for proximity in the loss.
@@ -21,8 +21,19 @@ class WachterCounterfactual(Algorithm):
         self.log_likelihood_threshold = log_likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
 
+        # Ensure that the dataset features match the expected features and their order
+        columns_without_class = [col for col in dataset.columns if col != "class"]
+        assert (columns_without_class == self.features).all()
 
-    def _proximity_loss(self, candidates_cf, original_instance, feature_mad = None):
+        # Extract the features and labels from the dataset
+        self.dataset_features = dataset[self.features].values
+        self.dataset_labels = dataset["class"].values
+
+        # Compute the median absolute deviation for each feature
+        self.feature_mad = median_absolute_deviation(self.dataset_features, axis=0)
+
+
+    def _proximity_loss(self, candidates_cf, original_instance):
         """
         Compute the proximity loss for all candidates in a vectorized way.
 
@@ -33,21 +44,19 @@ class WachterCounterfactual(Algorithm):
         Returns:
             Array of weighted proximity losses.
         """
-        if feature_mad is None:
-            feature_mad = median_absolute_deviation(candidates_cf, axis=0)
 
         # Calculate the absolute differences
         diff = np.abs(candidates_cf - original_instance)
 
         # Scale each feature difference by its standard deviation and square it
-        scaled_diff = np.sum(diff / feature_mad, axis=1)
+        scaled_diff = np.sum(diff / self.feature_mad, axis=1)
 
         if self.target_proximity_weight == 0:
             return scaled_diff
         else :
             raise NotImplementedError("Proximity weight is not 0")
 
-    def run(self, instance: pd.DataFrame | pd.Series, target_label, dataset: pd.DataFrame) -> ACEResult:
+    def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
         """
         Find the best counterfactual from the dataset with the specified target label.
 
@@ -68,29 +77,21 @@ class WachterCounterfactual(Algorithm):
         # Ensure that instance features match the expected features and its order
         columns_without_class = [col for col in instance.columns if col != "class"]
         assert (columns_without_class == self.features).all()
-        columns_without_class = [col for col in dataset.columns if col != "class"]
-        assert (columns_without_class == self.features).all()
+
         # Ensure the instance class does not already match the target label
         assert (instance["class"].values[0] != target_label)
-
-        # Extract the features and labels from the dataset
-        dataset_features = dataset[self.features].values
-        dataset_labels = dataset["class"].values
-
-        # Compute the median absolute deviation for each feature
-        feature_mad = median_absolute_deviation(dataset_features, axis=0)
 
         # Convert the instance to a NumPy array for efficient calculation
         original_instance = instance[self.features].values.flatten()
 
         # Filter for instances that match the target label
-        target_indices = np.where(dataset_labels == target_label)[0]
+        target_indices = np.where(self.dataset_labels == target_label)[0]
 
         if target_indices.size == 0:
             print("No instances in the dataset match the target label.")
             return ACEResult(counterfactual=pd.DataFrame(), path=pd.DataFrame(), distance=np.nan)
         # Retrieve the features of the matching instances
-        candidate_cfs = dataset_features[target_indices]
+        candidate_cfs = self.dataset_features[target_indices]
 
         # Get likelihood and probability of the class
         logl = log_likelihood(pd.DataFrame(candidate_cfs,columns=self.features), self.density_estimator)
@@ -100,8 +101,12 @@ class WachterCounterfactual(Algorithm):
         mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)
         candidate_cfs = candidate_cfs[mask]
 
+        if candidate_cfs.size == 0:
+            print("No instances in the dataset match the likelihood and accuracy thresholds.")
+            return ACEResult(counterfactual=pd.DataFrame(), path=pd.DataFrame(), distance=np.nan)
+
         # Compute the proximity loss in a vectorized way
-        proximity_losses = self._proximity_loss(candidate_cfs, original_instance, feature_mad)
+        proximity_losses = self._proximity_loss(candidate_cfs, original_instance)
 
         # Identify the index of the best (minimum distance) counterfactual
         best_idx = np.argmin(proximity_losses)

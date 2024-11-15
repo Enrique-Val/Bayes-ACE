@@ -82,6 +82,8 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mu
             "Likelihood of some points in the space is higher than 1.")
     return likelihood_val
 
+def log_likelihood_array(data: np.ndarray, features:list, density_estimator, class_var_name="class", mutable=False) -> np.ndarray:
+    return log_likelihood(pd.DataFrame(data, columns=features), density_estimator, class_var_name, mutable)
 
 def log_likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mutable=False) -> np.ndarray:
     ll = likelihood(data, density_estimator, class_var_name, mutable)
@@ -206,6 +208,35 @@ def path(vertex_array: np.ndarray, chunks=2) -> np.ndarray:
         to_ret_path = np.vstack((to_ret_path, np.linspace(x_1, x_2, chunks)[1:]))
     return to_ret_path
 
+
+'''def path_likelihood_length2(vertex_array: pd.DataFrame, density_estimator, penalty=1):
+    columnas = list(vertex_array.columns)
+    def neg_log_likelihood(x):
+        #print("x",x)
+        return -log_likelihood_array(x, columnas, density_estimator)
+
+    def pt(t, x1, x2):
+        return x1 + t * (x2 - x1)
+
+    def line_integral(x1, x2, f):
+        def integrand(t):
+            return f(pt(t, x1, x2)) * np.linalg.norm(x2 - x1)
+
+        result,_ = quad(integrand, 0, 1)
+        print("result",result)
+        return result
+
+    try:
+        sum = 0
+        for i in range(vertex_array.shape[0] - 1):
+            x_1 = vertex_array.iloc[i].values
+            x_2 = vertex_array.iloc[i + 1].values
+            sum += line_integral(x_1, x_2, neg_log_likelihood)
+
+        return sum
+    except NanLogProb:
+        return np.inf
+'''
 
 def path_likelihood_length(path: pd.DataFrame, density_estimator, penalty=1):
     # Separation is computed between each row without for loops, fully vectorised
