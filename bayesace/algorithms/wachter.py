@@ -103,7 +103,7 @@ class WachterCounterfactual(Algorithm):
 
         if candidate_cfs.size == 0:
             print("No instances in the dataset match the likelihood and accuracy thresholds.")
-            return ACEResult(counterfactual=pd.DataFrame(), path=pd.DataFrame(), distance=np.nan)
+            return ACEResult(counterfactual=None, path=instance.drop("class",axis=1), distance=np.nan)
 
         # Compute the proximity loss in a vectorized way
         proximity_losses = self._proximity_loss(candidate_cfs, original_instance)

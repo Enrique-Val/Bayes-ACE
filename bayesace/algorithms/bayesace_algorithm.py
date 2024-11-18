@@ -82,6 +82,9 @@ class BestPathFinder(Problem):
 class BayesACE(ACE):
     def get_initial_sample(self, instance, target_label):
         assert self.initialization == "default" or self.initialization == "guided"
+        if not self.density_estimator.fitted() :
+            print(type(self.density_estimator))
+            raise Exception("The density estimator must be fitted before running the algorithm")
         y_og = instance["class"].values[0]
         class_labels = None
         probabilities = None
@@ -169,7 +172,7 @@ class BayesACE(ACE):
                  log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
                  initialization="guided",
                  seed=0,
-                 verbose=True, parallelize=False):
+                 verbose=False, parallelize=False):
         super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
                          accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
                          parallelize=parallelize)

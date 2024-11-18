@@ -29,9 +29,11 @@ import multiprocessing as mp
 from experiments.utils import setup_experiment, get_constraints, get_counterfactual_from_algorithm
 
 
-def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
+def worker(instance, algorithm_path, density_estimator_path, gt_estimator_path, penalty, chunks):
     torch.set_num_threads(1)
     algorithm = pickle.load(open(algorithm_path, 'rb'))
+    density_estimator = pickle.load(open(density_estimator_path, 'rb'))
+    algorithm.density_estimator = density_estimator
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
     return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
 
@@ -111,6 +113,9 @@ if __name__ == "__main__":
     # List for storing the models
     algorithms = []
 
+    # List for storing the density estimator path for each algorithm
+    density_estimator_paths = []
+
     # I want to store the times of building the algorithms
     construction_time_df = pd.DataFrame(columns=["construction_time"],
                                         index=algorithm_str_list)
@@ -122,6 +127,7 @@ if __name__ == "__main__":
                log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0
     algorithms.append(alg)
+    density_estimator_paths.append(gt_estimator_path)
     construction_time_df.loc["face_baseline", "construction_time"] = tf
 
     t0 = time.time()
@@ -131,6 +137,7 @@ if __name__ == "__main__":
                log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0
     algorithms.append(alg)
+    density_estimator_paths.append(nf_path)
     construction_time_df.loc["face_kde", "construction_time"] = tf
 
     t0 = time.time()
@@ -140,6 +147,7 @@ if __name__ == "__main__":
                log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0
     algorithms.append(alg)
+    density_estimator_paths.append(nf_path)
     construction_time_df.loc["face_eps", "construction_time"] = tf
 
     t0 = time.time()
@@ -147,10 +155,11 @@ if __name__ == "__main__":
                log_likelihood_threshold=0.00, accuracy_threshold=0.00, dataset=df_train)
     tf = time.time() - t0
     algorithms.append(alg)
+    density_estimator_paths.append(gt_estimator_path)
     construction_time_df.loc["wachter", "construction_time"] = tf
 
     # I need as many BayesACE (both with normalizing flow and CLG) as vertices
-    for algorithm_str, model in zip(["nf", "clg"], [normalizing_flow, clg_network]):
+    for algorithm_str, model, model_path in zip(["nf", "clg"], [normalizing_flow, clg_network], [nf_path, clg_network_path]):
         for n_vertex in n_vertices:
             t0 = time.time()
             alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
@@ -165,6 +174,7 @@ if __name__ == "__main__":
                            parallelize=parallelize)
             tf = time.time() - t0
             algorithms.append(alg)
+            density_estimator_paths.append(model_path)
             construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
     # Set parallelism to False for each algorithm
     for alg in algorithms:
@@ -189,21 +199,23 @@ if __name__ == "__main__":
             # Name the index column with the dataset id
             for i in metrics:
                 results_dfs[i].index.name = dataset_id
-            for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
-                algorithm.parallelize = False
+            for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
                 # Set the proper likelihood  and accuracy thresholds
                 algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
                 algorithm.accuracy_threshold = min(mae_gt + std_mae_gt * accuracy_threshold, 0.99)
                 if parallelize :
                     # Pickle the algorithm to avoid I/O in every worker. The file will later be deleted
+                    de = algorithm.density_estimator
+                    algorithm.density_estimator = None
                     tmp_file_str = results_dir + 'algorithm_' + algorithm_str + '.pkl'
                     pickle.dump(algorithm, open(tmp_file_str, 'wb'))
                     pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
-                    results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], tmp_file_str, gt_estimator_path,
+                    results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], tmp_file_str, density_estimator_path, gt_estimator_path,
                                                     penalty, chunks) for i in range(n_counterfactuals)])
                     pool.close()
                     pool.join()
                     os.remove(tmp_file_str)
+                    algorithm.density_estimator = de
                     for i in range(n_counterfactuals):
                         results_dfs["distance"].loc[i, algorithm_str] = results[i][0]
                         results_dfs["counterfactual"].loc[i, algorithm_str] = results[i][2]
