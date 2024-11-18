@@ -51,7 +51,7 @@ if __name__ == "__main__":
 
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    n_vertices = [0,1]
+    n_vertices = [0]
     penalty = 1
     likelihood_dev_list = [-1, -0.5, 0]
     accuracy_threshold_list = [-1, -0.5, 0]
@@ -63,10 +63,10 @@ if __name__ == "__main__":
     n_train_size = 1000
     n_generations = 1000
 
-    dummy = True
-    if dummy :
-        chunks = 2
-        n_counterfactuals = 1
+    dummy = False
+    if dummy:
+        chunks = 5
+        n_counterfactuals = 2
         likelihood_dev_list = likelihood_dev_list[:1]
         accuracy_threshold_list = accuracy_threshold_list[:1]
         n_train_size = 10
