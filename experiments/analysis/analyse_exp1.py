@@ -97,8 +97,10 @@ def perform_bh_by_penalty(data_dict, values_dict):
         data_dict_new[model, penalty] = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id in values_dict["dataset_ids"]]).reset_index(drop=True)
 
     results = {}
+    infs = {}
     for model, penalty in data_dict_new.keys():
         results[(model,penalty)] = friedman_posthoc(data_dict_new[(model, penalty)].dropna())
+        infs[(model,penalty)] = data_dict_new[(model, penalty)].replace(np.inf, np.nan).isna().sum() / data_dict_new[(model, penalty)].shape[0] * 100
     return results
 
 def perform_bh(data_dict, values_dict):
@@ -156,8 +158,7 @@ if __name__ == "__main__":
     # Load the data
     data_dict = load_data(root_dir, values_dict)
 
-    print(values_dict)
-    print(data_dict.keys())
+    heatmap_args = {'linewidths': 0.25, 'linecolor': '0.5', 'clip_on': False, 'square': True, 'cbar_ax_bbox': [0.80, 0.35, 0.04, 0.3]}
 
     '''
     # Perform Friedman test and BH test for each dataset/model/penalty
@@ -178,14 +179,18 @@ if __name__ == "__main__":
 
     friedman_bh_results = perform_bh_by_penalty(data_dict, values_dict)
     for i in friedman_bh_results.keys():
-        sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
+        sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"].clip(lower=1e-8), label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
         plt.title(f"Model: {i[0]}, Penalty: {i[1]}")
+        plt.show()
+        sp.sign_plot(friedman_bh_results[i]["p_adjusted"], **heatmap_args)
         plt.show()
 
     friedman_bh_results = perform_bh(data_dict, values_dict)
     for i in friedman_bh_results.keys():
-        sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
+        sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"].clip(lower=1e-8), label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
         plt.title(f"Model: {i}")
+        plt.show()
+        sp.sign_plot(friedman_bh_results[i]["p_adjusted"], **heatmap_args)
         plt.show()
 
     # Perform Wilcoxon test between clg and nf for each penalty

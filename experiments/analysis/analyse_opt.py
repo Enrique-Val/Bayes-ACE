@@ -56,7 +56,7 @@ if __name__ == "__main__":
     best_data = combined_data[best_columns]
     # Perform the Friedman test with BH post-hoc test
     test_results = friedman_posthoc(best_data, correct="bergmann")
-    sp.critical_difference_diagram(test_results["summary_ranks"], test_results["p_adjusted"])
+    sp.critical_difference_diagram(test_results["summary_ranks"], test_results["p_adjusted"].clip(lower=1e-8))
     plt.title(f"Data: Combined")
     plt.savefig(fname=root_dir+"plots/combined.png", bbox_inches="tight")
     plt.show(bbox_inches="tight")
@@ -86,7 +86,7 @@ if __name__ == "__main__":
         # Perform the Friedman test with BH post-hoc test
         test_results = friedman_posthoc(best_data, correct="bergmann")
         #plt.figure(figsize=(30, 10), dpi=100)
-        sp.critical_difference_diagram(test_results["summary_ranks"], test_results["p_adjusted"])
+        sp.critical_difference_diagram(test_results["summary_ranks"], test_results["p_adjusted"].clip(lower=1e-8))
         plt.title(f"Data: {dataset_id}")
         #sp.sign_plot(test_results["p_values"])
         plt.savefig(fname=root_dir+"plots/"+str(dataset_id)+".png", bbox_inches="tight")

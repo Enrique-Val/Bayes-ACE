@@ -99,7 +99,7 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
         return path_length_gt, tf, result.counterfactual.values
 
 
-def friedman_posthoc(data, correct = "bergmann") -> dict:
+def friedman_posthoc(data, correct = "bergmann") -> dict[str, pd.DataFrame | pd.Series]:
     '''
     Perform the Friedman test and the Bermann-Hommel post-hoc test using the scmamp package in R
 
@@ -143,10 +143,7 @@ def friedman_posthoc(data, correct = "bergmann") -> dict:
     bh_posthoc = {}
     summary = pd.Series(bh_posthoc_scmamp[0][0], index=data.columns)
     bh_posthoc["summary"] = summary
-    temp = summary.argsort()
-    ranks = np.empty_like(temp)
-    ranks[temp] = np.arange(len(summary))
-    bh_posthoc["summary_ranks"] = pd.Series(ranks, index=data.columns)
+    bh_posthoc["summary_ranks"] = data.rank("columns").mean(axis=0)
     bh_posthoc["p_values"] = pd.DataFrame(bh_posthoc_scmamp[1], index=data.columns, columns=data.columns).fillna(1.0)
     bh_posthoc["p_adjusted"] = pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns).fillna(1.0)
 
