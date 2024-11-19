@@ -186,7 +186,7 @@ if __name__ == "__main__":
     if not dummy :
         construction_time_df.to_csv(results_dir + 'construction_time_data' + str(dataset_id) + '.csv')
 
-    metrics = ["distance", "counterfactual", "time", "distance_to_face_baseline"]
+    metrics = ["distance", "counterfactual", "time", "distance_to_face_baseline", "real_logl", "real_pp"]
 
     # Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
@@ -220,15 +220,19 @@ if __name__ == "__main__":
                         results_dfs["distance"].loc[i, algorithm_str] = results[i][0]
                         results_dfs["counterfactual"].loc[i, algorithm_str] = results[i][2]
                         results_dfs["time"].loc[i, algorithm_str] = results[i][1]
+                        results_dfs["real_logl"].loc[i, algorithm_str] = -results[i][3]
+                        results_dfs["real_pp"].loc[i, algorithm_str] = results[i][4]
 
                 else :
                     for i in range(n_counterfactuals):
                         instance = df_counterfactuals.iloc[[i]]
-                        path_length_gt, tf, counterfactual = get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
+                        path_length_gt, tf, counterfactual, real_logl, real_pp = get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
                                                                                 chunks)
                         results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
                         results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
                         results_dfs["time"].loc[i, algorithm_str] = tf
+                        results_dfs["real_logl"].loc[i, algorithm_str] = -real_logl
+                        results_dfs["real_pp"].loc[i, algorithm_str] = real_pp
 
             # Prior to save the result, compute the distance between the counterfactual found by the first
             # FACE and the ones found by the other algorithms
@@ -237,8 +241,11 @@ if __name__ == "__main__":
                     if results_dfs["counterfactual"].loc[i, "face_baseline"] is not np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
                         results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.linalg.norm(
                             results_dfs["counterfactual"].loc[i, "face_baseline"] - results_dfs["counterfactual"].loc[i, algorithm_str])
-                    else:
+                    elif results_dfs["counterfactual"].loc[i, "face_baseline"] is np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
                         results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = 0
+                    else :
+                        results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.inf
+
 
 
             if not dummy :

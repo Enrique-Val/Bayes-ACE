@@ -6,7 +6,7 @@ import numpy as np
 
 
 class ACEResult():
-    def __init__(self, counterfactual, path, distance):
+    def __init__(self, counterfactual: pd.Series, path: pd.DataFrame, distance: float):
         self.counterfactual = counterfactual
         self.path = path
         self.distance = distance
@@ -24,7 +24,7 @@ class ACEResult():
 
     def __repr__(self):
         return "BayesACEResult(counterfactual=" + str(
-            self.counterfactual.values[0]) + ", path=pandas.DataFrame(), distance=" + str(self.distance) + ")"
+            self.counterfactual.values) + ", path=pandas.DataFrame(), distance=" + str(self.distance) + ")"
 
 
 class Algorithm(ABC):

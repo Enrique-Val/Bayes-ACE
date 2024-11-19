@@ -134,7 +134,7 @@ class BayesACE(ACE):
             if initial_sample.shape[0] > self.population_size:
                 completed = True
             count += 1
-            if count > 100 and initial_sample.shape[0] < 1:
+            if count > 100 and initial_sample.shape[0] < 5:
                 warnings.warn("Could not find enough samples to start the optimization process. Please, try again "
                                 "with a lower likelihood or probability threshold.")
                 return None
@@ -221,7 +221,7 @@ class BayesACE(ACE):
                                new_shape=(self.n_vertex + 2, self.n_features))
         path_to_ret = pd.DataFrame(data=total_path,
                                    columns=self.features)
-        counterfactual = path_to_ret
+        counterfactual = path_to_ret.iloc[-1]
         path_to_compute = path(total_path, chunks=self.chunks)
         distance = path_likelihood_length(pd.DataFrame(path_to_compute, columns=self.features),
                                           density_estimator=self.density_estimator, penalty=self.penalty)

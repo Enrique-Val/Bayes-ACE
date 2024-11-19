@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import torch
 
-from bayesace import get_other_class, path, path_likelihood_length, hill_climbing
+from bayesace import get_other_class, path, path_likelihood_length, hill_climbing, log_likelihood, posterior_probability
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
@@ -90,13 +90,16 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
     '''
     # Check first if indeed a counterfactual was found
     if result.counterfactual is None:
-        return np.nan, tf, np.nan
+        return np.nan, tf, np.nan, -np.inf, 0
     else:
         path_to_compute = path(result.path.values, chunks=chunks)
         path_length_gt = path_likelihood_length(
             pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
             density_estimator=gt_estimator, penalty=penalty)
-        return path_length_gt, tf, result.counterfactual.values
+        cfx_df = pd.DataFrame([result.counterfactual.values], columns=instance.columns[:-1])
+        real_logl = log_likelihood(cfx_df, gt_estimator)
+        real_pp = posterior_probability(cfx_df, target_label , gt_estimator)
+        return path_length_gt, tf, result.counterfactual.values, real_logl, real_pp
 
 
 def friedman_posthoc(data, correct = "bergmann") -> dict[str, pd.DataFrame | pd.Series]:

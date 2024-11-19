@@ -197,7 +197,21 @@ class FACE(ACE):
         source_node = len(self.dataset.index)
 
         # Mark target nodes based on the accuracy and likelihood threshold
-        target_nodes = self.dataset.index[self.y_pred[target_label] > self.accuracy_threshold]
+
+        # Get likelihood and probability of the class
+        logl = log_likelihood(pd.DataFrame(self.dataset, columns=self.features), self.density_estimator)
+        #print(self.log_likelihood_threshold)
+        #print(logl)
+        post_prob = posterior_probability(pd.DataFrame(self.dataset, columns=self.features), target_label,
+                                          self.density_estimator)
+        #print(self.accuracy_threshold)
+        #print(post_prob)
+
+        # Filter for instances whose likelihood and posterior probability is above the threshold
+        mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)# & (self.dataset["class"] == target_label)
+        target_nodes = self.dataset.index[mask]
+
+        #target_nodes = self.dataset.index[self.y_pred[target_label] > self.accuracy_threshold]
 
         if len(target_nodes) > 0:
             true_array = log_likelihood(self.dataset.iloc[target_nodes], self.density_estimator) > self.log_likelihood_threshold

@@ -113,7 +113,7 @@ class WachterCounterfactual(Algorithm):
         best_counterfactual = candidate_cfs[best_idx]
 
         # Convert the best counterfactual back to a DataFrame for consistency
-        counterfactual_df = pd.DataFrame([best_counterfactual], columns=self.features)
+        counterfactual_df = pd.Series(best_counterfactual, index=self.features)
 
         # The path will just contain the original and cfx instance
         vertices = pd.DataFrame([original_instance, best_counterfactual], columns=self.features)
