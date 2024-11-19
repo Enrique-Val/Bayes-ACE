@@ -1,4 +1,5 @@
 import os
+import time
 from itertools import product
 
 import numpy as np
@@ -12,7 +13,7 @@ import re
 from experiments.utils import friedman_posthoc
 
 # Path to dataset root
-root_dir = "../results/exp_1/"
+root_dir = "../results/exp_2/"
 
 # Wilcoxon test alternative hypothesis
 wx_alt = ["two-sided", "greater", "less"]
@@ -42,7 +43,7 @@ def get_values(root_dir):
 
     # Get the list of likelihood and post_prob thresholds
     metric_path = os.path.join(dataset_path, metrics[0])
-    file_pattern_mod = re.compile(r"likelihood(\d+)_pp(\d+)\.csv")
+    file_pattern_mod = re.compile(r"likelihood(-?[\d.]+)_pp(-?[\d.]+)\.csv")
     for file in os.listdir(metric_path):
         match = file_pattern_mod.match(file)
         if match:
@@ -74,6 +75,8 @@ def load_data(root_dir, values_dict):
             file_path = os.path.join(root_dir, dataset_id, metric, file_name)
             if os.path.exists(file_path):
                 df = pd.read_csv(file_path, index_col=0)
+                # Subsitute nans for inf (a good path was not found, hence infinite distance)
+                df = df.fillna(np.inf)
                 data_dict[metric][(dataset_id, likelihood, post_prob)] = df
     return data_dict
 
@@ -89,17 +92,18 @@ def perform_bh_by_thresholds(data_dict, values_dict, metric):
     # First, we group by the data by penalty and model
     data_dict_new = {}
     for likelihood, post_prob in product(values_dict["likelihoods"], values_dict["post_probs"]):
-        data_dict_new[likelihood, post_prob] = pd.concat([data_dict[metric][(dataset_id, likelihood, post_prob)] for dataset_id in values_dict["dataset_ids"]])
+        data_dict_new[likelihood, post_prob] = pd.concat([data_dict[metric][(dataset_id, likelihood, post_prob)] for dataset_id in values_dict["dataset_ids"]]).reset_index(drop=True)
 
     results = {}
     for likelihood, post_prob in data_dict_new.keys():
+        print(data_dict_new[(likelihood, post_prob)])
         results[(likelihood, post_prob)] = friedman_posthoc(data_dict_new[(likelihood, post_prob)].dropna())
     return results
 
 def perform_bh_by_dataset(data_dict, values_dict, metric):
     data_dict_new = {}
     for dataset_id in values_dict["dataset_ids"]:
-        data_dict_new[dataset_id] = pd.concat([data_dict[metric][(dataset_id, likelihood, post_prob)] for likelihood, post_prob in product(values_dict["likelihoods"], values_dict["post_probs"])])
+        data_dict_new[dataset_id] = pd.concat([data_dict[metric][(dataset_id, likelihood, post_prob)] for likelihood, post_prob in product(values_dict["likelihoods"], values_dict["post_probs"])]).reset_index(drop=True)
 
     results = {}
     for dataset_id in data_dict_new.keys():
@@ -108,7 +112,7 @@ def perform_bh_by_dataset(data_dict, values_dict, metric):
 
 
 def perform_bh(data_dict, values_dict,metric):
-    data_dict_new = pd.concat([data_dict[metric][(dataset_id, likelihood, post_prob)] for dataset_id, likelihood, post_prob in product(values_dict["dataset_ids"], values_dict["likelihoods"], values_dict["post_probs"])])
+    data_dict_new = pd.concat([data_dict[metric][(dataset_id, likelihood, post_prob)] for dataset_id, likelihood, post_prob in product(values_dict["dataset_ids"], values_dict["likelihoods"], values_dict["post_probs"])]).reset_index(drop=True)
     results = friedman_posthoc(data_dict_new.dropna())
     return results
 
@@ -152,14 +156,17 @@ def compare_models(data_dict, values_dict):
 if __name__ == "__main__":
     # Get the values for dataset_id, model, penalty and n_vertex
     values_dict = get_values(root_dir)
-    print(values_dict["metrics"])
+    metrics = list(values_dict["metrics"])
+    print(metrics)
 
     # Load the data
     data_dict = load_data(root_dir, values_dict)
 
     print(data_dict.keys())
 
-    for metric in ["distance", "time"]:
+    heatmap_args = {'linewidths': 0.25, 'linecolor': '0.5', 'clip_on': False, 'square': True, 'cbar_ax_bbox': [0.80, 0.35, 0.04, 0.3]}
+
+    for metric in metrics[2:] :
         '''
         # Perform BH test for the metric distances segregated by dataset_id, likelihood and post_prob
         friedman_bh_results = perform_bh_by_thresholds(data_dict, values_dict, "distances")
@@ -178,14 +185,18 @@ if __name__ == "__main__":
         # Perform BH test for the metric distances segregated by thresholds
         friedman_bh_results = perform_bh_by_thresholds(data_dict, values_dict, metric)
         for i in friedman_bh_results.keys():
-            sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
-            plt.title(f"Likelihood: {i[0]}, Post_prob: {i[1]}")
+            time.sleep(1)
+            sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
+            plt.title(f"Metric: {metric}, Likelihood: {i[0]}, Post_prob: {i[1]}")
+            plt.show()
+            sp.sign_plot(friedman_bh_results[i]["p_adjusted"], **heatmap_args)
             plt.show()
 
         # Perform BH test for the metric distances globally
         friedman_bh_results = perform_bh(data_dict, values_dict, metric)
-        for i in friedman_bh_results.keys():
-            sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label} vertices", label_fmt_right="{label} vertices")
-            plt.title(f"Model: {i}")
-            plt.show()
+        sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
+        plt.title(f"Metric: {metric}")
+        plt.show()
+        sp.sign_plot(friedman_bh_results[i]["p_adjusted"], **heatmap_args)
+        plt.show()
 
