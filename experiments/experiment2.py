@@ -29,6 +29,14 @@ import multiprocessing as mp
 from experiments.utils import setup_experiment, get_constraints, get_counterfactual_from_algorithm
 
 
+# Constant string
+FACE_BASELINE = "face_baseline"
+FACE_KDE = "face_kde"
+FACE_EPS = "face_eps"
+WACHTER = "wachter"
+BAYESACE = "bayesace"
+
+
 def worker(instance, algorithm_path, density_estimator_path, gt_estimator_path, penalty, chunks):
     torch.set_num_threads(1)
     algorithm = pickle.load(open(algorithm_path, 'rb'))
@@ -45,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
     parser.add_argument('--results_dir', nargs='?', default='./results/exp_2/', type=str)
     parser.add_argument('--cv_opt_dir', nargs='?', default='./results/exp_opt2/', type=str)
+    parser.add_argument('--multiobjective', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -64,6 +73,9 @@ if __name__ == "__main__":
     eps = np.inf
     n_train_size = 1000
     n_generations = 1000
+
+    # Activate for multiple objectives
+    multi_objective = args.multiobjective
 
     dummy = False
     if dummy:
@@ -106,8 +118,8 @@ if __name__ == "__main__":
     # Names of the models
     models = [normalizing_flow, clg_network]
     models_str = ["nf", "clg"]
-    faces_str = ["face_baseline", "face_kde", "face_eps", "wachter"]
-    algorithm_str_list = faces_str + ["bayesace_" + model_str + "_v" + str(n_vertex) for model_str, n_vertex in
+    faces_str = [FACE_BASELINE, FACE_KDE, FACE_EPS, WACHTER]
+    algorithm_str_list = faces_str + [BAYESACE + "_" + model_str + "_v" + str(n_vertex) for model_str, n_vertex in
                                       product(models_str, n_vertices)]
 
     # List for storing the models
@@ -128,7 +140,7 @@ if __name__ == "__main__":
     tf = time.time() - t0
     algorithms.append(alg)
     density_estimator_paths.append(gt_estimator_path)
-    construction_time_df.loc["face_baseline", "construction_time"] = tf
+    construction_time_df.loc[FACE_BASELINE, "construction_time"] = tf
 
     t0 = time.time()
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
@@ -138,7 +150,7 @@ if __name__ == "__main__":
     tf = time.time() - t0
     algorithms.append(alg)
     density_estimator_paths.append(nf_path)
-    construction_time_df.loc["face_kde", "construction_time"] = tf
+    construction_time_df.loc[FACE_KDE, "construction_time"] = tf
 
     t0 = time.time()
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
@@ -148,7 +160,7 @@ if __name__ == "__main__":
     tf = time.time() - t0
     algorithms.append(alg)
     density_estimator_paths.append(nf_path)
-    construction_time_df.loc["face_eps", "construction_time"] = tf
+    construction_time_df.loc[FACE_EPS, "construction_time"] = tf
 
     t0 = time.time()
     alg = WachterCounterfactual(density_estimator=gt_estimator, features=df_train.columns[:-1],
@@ -156,9 +168,9 @@ if __name__ == "__main__":
     tf = time.time() - t0
     algorithms.append(alg)
     density_estimator_paths.append(gt_estimator_path)
-    construction_time_df.loc["wachter", "construction_time"] = tf
+    construction_time_df.loc[WACHTER, "construction_time"] = tf
 
-    # I need as many BayesACE (both with normalizing flow and CLG) as vertices
+    # Create as many BayesACE (both with normalizing flow and CLG) as vertices
     for algorithm_str, model, model_path in zip(["nf", "clg"], [normalizing_flow, clg_network], [nf_path, clg_network_path]):
         for n_vertex in n_vertices:
             t0 = time.time()
@@ -175,7 +187,7 @@ if __name__ == "__main__":
             tf = time.time() - t0
             algorithms.append(alg)
             density_estimator_paths.append(model_path)
-            construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
+            construction_time_df.loc[BAYESACE + "_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
     # Set parallelism to False for each algorithm
     for alg in algorithms:
         alg.parallelize = False
@@ -216,34 +228,57 @@ if __name__ == "__main__":
                     pool.join()
                     os.remove(tmp_file_str)
                     algorithm.density_estimator = de
-                    for i in range(n_counterfactuals):
-                        results_dfs["distance"].loc[i, algorithm_str] = results[i][0]
-                        results_dfs["counterfactual"].loc[i, algorithm_str] = results[i][2]
-                        results_dfs["time"].loc[i, algorithm_str] = results[i][1]
-                        results_dfs["time_w_construct"].loc[i, algorithm_str] = results[i][1] + construction_time_df.loc[algorithm_str, "construction_time"]
-                        results_dfs["real_logl"].loc[i, algorithm_str] = -results[i][3]
-                        results_dfs["real_pp"].loc[i, algorithm_str] = results[i][4]
-
                 else :
+                    results = []
                     for i in range(n_counterfactuals):
                         instance = df_counterfactuals.iloc[[i]]
-                        path_length_gt, tf, counterfactual, real_logl, real_pp = get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
+                        results = get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
                                                                                 chunks)
-                        results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
-                        results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
-                        results_dfs["time"].loc[i, algorithm_str] = tf
-                        results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[algorithm_str, "construction_time"]
-                        results_dfs["real_logl"].loc[i, algorithm_str] = -real_logl
-                        results_dfs["real_pp"].loc[i, algorithm_str] = real_pp
+                for i in range(n_counterfactuals):
+                    path_length_gt, tf, counterfactual, real_logl, real_pp = results
+                    # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
+                    if isinstance(path_length_gt, np.ndarray) and len(path_length_gt) > 1:
+                        # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
+                        # to FACE baseline
+                        logl_baseline = -results_dfs["real_logl"].loc[i, FACE_BASELINE]
+                        pp_baseline = results_dfs["real_pp"].loc[i, FACE_BASELINE]
+                        distance_baseline = results_dfs["distance"].loc[i, FACE_BASELINE]
+
+                        mask: np.ndarray = real_logl > logl_baseline & real_pp > pp_baseline
+
+                        if mask.any():
+                            path_length_gt[mask] = 0
+                            index = np.argmax(path_length_gt)
+                            path_length_gt = path_length_gt[index]
+                            counterfactual = counterfactual[index]
+                            real_logl = real_logl[index]
+                            real_pp = real_pp[index]
+                        # If none surpasses it take the one that is closer in terms of likelihood and posterior prob
+                        else:
+                            # Normalize the logl between 0 and 1 (take percentiles instead of max and min)
+                            normalized_real_logl = (real_logl-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
+                            normalized_logl_baseline = (logl_baseline-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
+                            total_diff = np.abs(normalized_logl_baseline-normalized_real_logl) + np.abs(pp_baseline-real_pp)
+                            index = np.argmin(total_diff)
+                            path_length_gt = path_length_gt[index]
+                            counterfactual = counterfactual[index]
+                            real_logl = real_logl[index]
+                            real_pp = real_pp[index]
+                    results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
+                    results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
+                    results_dfs["time"].loc[i, algorithm_str] = tf
+                    results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[algorithm_str, "construction_time"]
+                    results_dfs["real_logl"].loc[i, algorithm_str] = -real_logl
+                    results_dfs["real_pp"].loc[i, algorithm_str] = real_pp
 
             # Prior to save the result, compute the distance between the counterfactual found by the first
             # FACE and the ones found by the other algorithms
             for i in range(n_counterfactuals):
                 for algorithm_str in algorithm_str_list:
-                    if results_dfs["counterfactual"].loc[i, "face_baseline"] is not np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
+                    if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is not np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
                         results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.linalg.norm(
-                            results_dfs["counterfactual"].loc[i, "face_baseline"] - results_dfs["counterfactual"].loc[i, algorithm_str])
-                    elif results_dfs["counterfactual"].loc[i, "face_baseline"] is np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
+                            results_dfs["counterfactual"].loc[i, FACE_BASELINE] - results_dfs["counterfactual"].loc[i, algorithm_str])
+                    elif results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
                         results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = 0
                     else :
                         results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.inf

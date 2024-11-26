@@ -88,8 +88,23 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
     likelihood_dev) + '_acc' + str(accuracy_threshold) +  + algorithm_str + '_counterfactual' + 
     str(i) + '.csv') 
     '''
-    # Check first if indeed a counterfactual was found
-    if result.counterfactual is None:
+    # Check first if the algorithm is multiobjective (i.e., a list of counterfactuals is returned)
+    if isinstance(result, list):
+        cfx_array = np.empty()
+        path_lengths_gt = np.zeros(shape=len(result))
+        for i,_ in enumerate(result):
+            path_to_compute = path(result[i].path.values, chunks=chunks)
+            path_length_gt = path_likelihood_length(
+                pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
+                density_estimator=gt_estimator, penalty=penalty)
+            path_lengths_gt[i] = path_length_gt
+            cfx_array = np.vstack((cfx_array, result[i].counterfactual.values))
+        cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
+        real_logl = log_likelihood(cfx_df, gt_estimator)
+        real_pp = posterior_probability(cfx_df, target_label, gt_estimator)
+        return path_lengths_gt, tf, cfx_array, real_logl, real_pp
+    # Check if indeed a counterfactual was found
+    elif result.counterfactual is None:
         return np.nan, tf, np.nan, -np.inf, 0
     else:
         path_to_compute = path(result.path.values, chunks=chunks)
@@ -148,6 +163,6 @@ def friedman_posthoc(data, correct = "bergmann") -> dict[str, pd.DataFrame | pd.
     bh_posthoc["summary"] = summary
     bh_posthoc["summary_ranks"] = data.rank("columns").mean(axis=0)
     bh_posthoc["p_values"] = pd.DataFrame(bh_posthoc_scmamp[1], index=data.columns, columns=data.columns).fillna(1.0)
-    bh_posthoc["p_adjusted"] = pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns).fillna(1.0)
+    bh_posthoc["p_adjusted"] = (pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns)).fillna(1.0)+0.0001
 
     return bh_posthoc
