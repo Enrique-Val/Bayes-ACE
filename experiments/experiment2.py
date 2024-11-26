@@ -62,16 +62,16 @@ if __name__ == "__main__":
 
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    n_vertices = [0]
+    n_vertices = [0,1]
     penalty = 1
-    likelihood_dev_list = [-1, -0.5, 0]
-    accuracy_threshold_list = [-1, -0.5, 0]
+    likelihood_dev_list = [-1, -0.5, 0, 0.5]
+    accuracy_threshold_list = [-1, -0.5, 0, 0.5]
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
     n_counterfactuals = 20
     eps = np.inf
-    n_train_size = 1000
+    n_train_size = 3000
     n_generations = 1000
 
     # Activate for multiple objectives
