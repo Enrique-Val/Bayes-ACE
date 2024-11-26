@@ -31,7 +31,7 @@ def get_values(root_dir):
     # Get datasets ids
     for dataset_id in os.listdir(root_dir):
         dataset_path = os.path.join(root_dir, dataset_id)
-        if os.path.isdir(dataset_path):
+        if os.path.isdir(dataset_path) and dataset_id != "plots":
             dataset_ids.append(dataset_id)
 
     # Get the list of metrics
@@ -96,7 +96,6 @@ def perform_bh_by_thresholds(data_dict, values_dict, metric):
 
     results = {}
     for likelihood, post_prob in data_dict_new.keys():
-        print(data_dict_new[(likelihood, post_prob)])
         results[(likelihood, post_prob)] = friedman_posthoc(data_dict_new[(likelihood, post_prob)].dropna())
     return results
 
@@ -117,43 +116,12 @@ def perform_bh(data_dict, values_dict,metric):
     return results
 
 
-
-
-def compare_models_by_penalty(data_dict, values_dict):
-    # First, we group by the data by penalty and model
-    data_dict_new = {}
-    for model, penalty in product(values_dict["models"], values_dict["penalties"]):
-        data_dict_new[model, penalty] = pd.concat([data_dict[(dataset_id, model, penalty)] for dataset_id in values_dict["dataset_ids"]])
-
-    results = {}
-    # We assume to be using ONLY two models. Otherwise, we shouldn't use Wilcoxon, but Friedman
-
-    model1 = "clg"
-    model2 ="nf"
-    for penalty in values_dict["penalties"]:
-        results[penalty] = {}
-        diff_arr = data_dict_new[(model1, penalty)].values.flatten() - data_dict_new[(model2, penalty)].values.flatten()
-        # Remove nas
-        diff_arr = diff_arr[~np.isnan(diff_arr)]
-        for alt_hyp in wx_alt:
-            results[penalty][alt_hyp] = wilcoxon(diff_arr, alternative=alt_hyp)
-    return results
-
-def compare_models(data_dict, values_dict):
-    model1 = "clg"
-    model2 = "nf"
-    data_model_1 = pd.concat([data_dict[(dataset_id, model1, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])])
-    data_model_2 = pd.concat([data_dict[(dataset_id, model2, penalty)] for dataset_id, penalty in product(values_dict["dataset_ids"], values_dict["penalties"])])
-    diff_arr = data_model_1.values.flatten() - data_model_2.values.flatten()
-    # Remove nas
-    diff_arr = diff_arr[~np.isnan(diff_arr)]
-    results = {}
-    for alt_hyp in wx_alt:
-        results[alt_hyp] = wilcoxon(diff_arr, alternative=alt_hyp)
-    return results
-
 # Run the main function when the script is executed
 if __name__ == "__main__":
+    # Create subfolder plots if it does not exist in the root dir
+    if not os.path.exists(os.path.join(root_dir, "plots")):
+        os.makedirs(os.path.join(root_dir, "plots"))
+
     # Get the values for dataset_id, model, penalty and n_vertex
     values_dict = get_values(root_dir)
     metrics = list(values_dict["metrics"])
@@ -166,7 +134,21 @@ if __name__ == "__main__":
 
     heatmap_args = {'linewidths': 0.25, 'linecolor': '0.5', 'clip_on': False, 'square': True, 'cbar_ax_bbox': [0.80, 0.35, 0.04, 0.3]}
 
-    for metric in metrics[2:] :
+    for metric in ["distance", "time", "distance_to_face_baseline", "real_logl", "real_pp"]:
+        # Perform BH test for the metric distances globally
+        friedman_bh_results = perform_bh(data_dict, values_dict, metric)
+        sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"],
+                                       label_fmt_left="{label}", label_fmt_right="{label}")
+        plt.title(f"Metric: {metric}")
+        plt.savefig(os.path.join(root_dir, "plots", f"bh_{metric}.png"))
+        #plt.show()
+        plt.clf()
+        sp.sign_plot(friedman_bh_results["p_adjusted"], **heatmap_args)
+        plt.savefig(os.path.join(root_dir, "plots", f"heatmap_{metric}.png"))
+        #plt.show()
+        plt.clf()
+
+    for metric in ["distance", "time", "distance_to_face_baseline", "real_logl", "real_pp"] :
         '''
         # Perform BH test for the metric distances segregated by dataset_id, likelihood and post_prob
         friedman_bh_results = perform_bh_by_thresholds(data_dict, values_dict, "distances")
@@ -185,18 +167,15 @@ if __name__ == "__main__":
         # Perform BH test for the metric distances segregated by thresholds
         friedman_bh_results = perform_bh_by_thresholds(data_dict, values_dict, metric)
         for i in friedman_bh_results.keys():
-            time.sleep(1)
+            #time.sleep(1)
             sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
             plt.title(f"Metric: {metric}, Likelihood: {i[0]}, Post_prob: {i[1]}")
-            plt.show()
+            plt.savefig(os.path.join(root_dir, "plots", f"bh_{metric}_ll{i[0]}_pp{i[1]}.png"))
+            #plt.show()
+            plt.clf()
             sp.sign_plot(friedman_bh_results[i]["p_adjusted"], **heatmap_args)
-            plt.show()
+            plt.savefig(os.path.join(root_dir, "plots", f"heatmap_{metric}_ll{i[0]}_pp{i[1]}.png"))
+            #plt.show()
+            plt.clf()
 
-        # Perform BH test for the metric distances globally
-        friedman_bh_results = perform_bh(data_dict, values_dict, metric)
-        sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
-        plt.title(f"Metric: {metric}")
-        plt.show()
-        sp.sign_plot(friedman_bh_results[i]["p_adjusted"], **heatmap_args)
-        plt.show()
 

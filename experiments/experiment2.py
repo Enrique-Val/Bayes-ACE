@@ -186,7 +186,7 @@ if __name__ == "__main__":
     if not dummy :
         construction_time_df.to_csv(results_dir + 'construction_time_data' + str(dataset_id) + '.csv')
 
-    metrics = ["distance", "counterfactual", "time", "distance_to_face_baseline", "real_logl", "real_pp"]
+    metrics = ["distance", "counterfactual", "time", "time_w_construct", "distance_to_face_baseline", "real_logl", "real_pp"]
 
     # Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
@@ -220,6 +220,7 @@ if __name__ == "__main__":
                         results_dfs["distance"].loc[i, algorithm_str] = results[i][0]
                         results_dfs["counterfactual"].loc[i, algorithm_str] = results[i][2]
                         results_dfs["time"].loc[i, algorithm_str] = results[i][1]
+                        results_dfs["time_w_construct"].loc[i, algorithm_str] = results[i][1] + construction_time_df.loc[algorithm_str, "construction_time"]
                         results_dfs["real_logl"].loc[i, algorithm_str] = -results[i][3]
                         results_dfs["real_pp"].loc[i, algorithm_str] = results[i][4]
 
@@ -231,6 +232,7 @@ if __name__ == "__main__":
                         results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
                         results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
                         results_dfs["time"].loc[i, algorithm_str] = tf
+                        results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[algorithm_str, "construction_time"]
                         results_dfs["real_logl"].loc[i, algorithm_str] = -real_logl
                         results_dfs["real_pp"].loc[i, algorithm_str] = real_pp
 

@@ -10,7 +10,8 @@ from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
 
 MAX_VALUE_FLOAT = 1e+307
-n_processes = np.max((1, int(mp.cpu_count()/1)))
+n_processes = np.max((1, int(mp.cpu_count() / 1)))
+
 
 # Helper function to encapsulate the parallelization logic
 def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estimator, penalty):
@@ -22,9 +23,11 @@ def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estim
         f1_i = MAX_VALUE_FLOAT
     return f1_i
 
+
 class BestPathFinder(Problem):
-    def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=20, log_likelihood_threshold=-np.inf,
-                 accuracy_threshold=0.05, sampling_range=(-3, 3), parallelize=False, **kwargs):
+    def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=20,
+                 log_likelihood_threshold=-np.inf,
+                 accuracy_threshold=0.05, sampling_range=(-3, 3), parallelize=False, multi_objective=False, **kwargs):
         n_features = (len(instance.columns) - 1)
         xl = None
         xu = None
@@ -53,15 +56,17 @@ class BestPathFinder(Problem):
         self.log_likelihood_threshold = log_likelihood_threshold
         self.accuracy_threshold = accuracy_threshold
         self.parallelize = parallelize
+        self.multi_objective = multi_objective
 
     def _evaluate(self, x, out, *args, **kwargs):
         assert len(np.append(self.x_og, x[0])) == (self.n_vertex + 2) * self.n_features
         f1 = []
-        if self.parallelize :
+        if self.parallelize:
             with mp.Pool(n_processes) as pool:
-                f1 = pool.starmap(process_x_i, [(x_i, self.x_og, self.n_vertex, self.n_features, self.chunks, self.features,
-                                                 self.density_estimator, self.penalty) for x_i in x])
-        else :
+                f1 = pool.starmap(process_x_i,
+                                  [(x_i, self.x_og, self.n_vertex, self.n_features, self.chunks, self.features,
+                                    self.density_estimator, self.penalty) for x_i in x])
+        else:
             for x_i in x:
                 vertex_array = np.resize(np.append(self.x_og, x_i), new_shape=(self.n_vertex + 2, self.n_features))
                 paths = path(vertex_array, chunks=self.chunks)
@@ -70,19 +75,27 @@ class BestPathFinder(Problem):
                 if f1_i > MAX_VALUE_FLOAT:
                     f1_i = MAX_VALUE_FLOAT
                 f1.append(f1_i)
-        out["F"] = np.column_stack(f1)
 
-        x_cfx = pd.DataFrame(x[:,-self.n_features:], columns=self.features)
-        g1 = -posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.target_label,
-                                    self.density_estimator) + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
-        g2 = -log_likelihood(pd.DataFrame(x_cfx, columns=self.features), self.density_estimator) + self.log_likelihood_threshold
+        x_cfx = pd.DataFrame(x[:, -self.n_features:], columns=self.features)
+        neg_posterior_prob = -posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.target_label,
+                                                    self.density_estimator)
+        neg_log_likel = -log_likelihood(pd.DataFrame(x_cfx, columns=self.features), self.density_estimator)
+        if self.multi_objective:
+            f2 = neg_posterior_prob
+            f3 = neg_log_likel
+            out["F"] = np.column_stack([f1, f2, f3])
+        else:
+            out["F"] = np.column_stack(f1)
+
+        g1 = neg_posterior_prob + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
+        g2 = neg_log_likel + self.log_likelihood_threshold
         out["G"] = np.column_stack([g1, g2])
 
 
 class BayesACE(ACE):
     def get_initial_sample(self, instance, target_label):
         assert self.initialization == "default" or self.initialization == "guided"
-        if not self.density_estimator.fitted() :
+        if not self.density_estimator.fitted():
             print(type(self.density_estimator))
             raise Exception("The density estimator must be fitted before running the algorithm")
         y_og = instance["class"].values[0]
@@ -105,8 +118,9 @@ class BayesACE(ACE):
         completed = False
         initial_sample = pd.DataFrame(columns=self.features)
         count = 0
-        while not completed :
-            candidate_initial = self.density_estimator.sample(n_samples, ordered=True, seed=self.seed + count).to_pandas()
+        while not completed:
+            candidate_initial = self.density_estimator.sample(n_samples, ordered=True,
+                                                              seed=self.seed + count).to_pandas()
             candidate_initial = candidate_initial[candidate_initial["class"] == target_label]
 
             # Get likelihood and probability of the class
@@ -118,10 +132,11 @@ class BayesACE(ACE):
             mask = mask & (candidate_initial[self.features] >= self.sampling_range[0]).all(axis=1)
             mask = mask & (candidate_initial[self.features] <= self.sampling_range[1]).all(axis=1)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
-            candidate_initial = candidate_initial.drop("class", axis = 1)
-            if candidate_initial.shape[0] > 0 :
+            candidate_initial = candidate_initial.drop("class", axis=1)
+            if candidate_initial.shape[0] > 0:
                 count = 0
-            # We concatenate the new samples to the initial sample. We have to do a couple checks in case some of them is empty
+            # We concatenate the new samples to the initial sample. We have to do a couple checks in case some of
+            # them is empty
             if not initial_sample.empty and not candidate_initial.empty:
                 initial_sample = pd.concat([initial_sample, candidate_initial], axis=0)
             elif not initial_sample.empty:
@@ -136,18 +151,16 @@ class BayesACE(ACE):
             count += 1
             if count > 100 and initial_sample.shape[0] < 5:
                 warnings.warn("Could not find enough samples to start the optimization process. Please, try again "
-                                "with a lower likelihood or probability threshold.")
+                              "with a lower likelihood or probability threshold.")
                 return None
-
-
-        initial_sample = initial_sample.head(self.population_size).reset_index(drop = True)
+        initial_sample = initial_sample.head(self.population_size).reset_index(drop=True)
         initial_sample = initial_sample.clip(self.sampling_range[0], self.sampling_range[1])
         initial_sample = initial_sample.to_numpy()
 
         if self.n_vertex == 0:
             return initial_sample
 
-        if self.initialization == "random" :
+        if self.initialization == "random":
             paths_sample = self.density_estimator.sample(self.n_vertex * self.population_size, ordered=True,
                                                          seed=self.seed).to_pandas()
             paths_sample = paths_sample.drop("class", axis=1)
@@ -167,12 +180,12 @@ class BayesACE(ACE):
 
     def __init__(self, density_estimator, features, n_vertex, chunks=20,
                  opt_algorithm: Type[GeneticAlgorithm] = NSGA2,
-                 opt_algorithm_params:dict=None,
-                 generations:int =1000,
+                 opt_algorithm_params: dict = None,
+                 generations: int = 1000,
                  log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
                  initialization="guided",
                  seed=0,
-                 verbose=False, parallelize=False):
+                 verbose=False, parallelize=False, multi_objective=False):
         super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
                          accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
                          parallelize=parallelize)
@@ -190,13 +203,14 @@ class BayesACE(ACE):
         else:
             self.sampling_range = sampling_range
         self.initialization = initialization
+        self.multi_objective = multi_objective
 
-    def run(self, instance: pd.DataFrame, target_label, return_info=False):
+    def run(self, instance: pd.DataFrame, target_label):
         super().run(instance, target_label)
         termination = DefaultSingleObjectiveTermination(n_max_gen=self.generations)
         initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)
         # Check if it was possible to even initialize the problem
-        if initial_sample is None :
+        if initial_sample is None:
             return ACEResult(None, instance.drop("class", axis=1), np.inf)
 
         problem = BestPathFinder(density_estimator=self.density_estimator, instance=instance,
@@ -212,12 +226,17 @@ class BayesACE(ACE):
                        termination=termination,
                        seed=self.seed,
                        verbose=self.verbose)
-        if len(res.F)>1 or res.X is None or res.F > MAX_VALUE_FLOAT:
-            if return_info:
-                return ACEResult(None, instance.drop("class", axis=1), np.inf), res
+        if self.multi_objective:
+            cf_list = []
+            for i in range(res.F.shape[0]):
+                cf_list.append(self.create_ACEResult(instance, res.X[i]))
+        elif len(res.F) > 1 or res.X is None or res.F > MAX_VALUE_FLOAT:
             return ACEResult(None, instance.drop("class", axis=1), np.inf)
+        else:
+            return self.create_ACEResult(instance, res.X)
 
-        total_path = np.resize(np.append(separate_dataset_and_class(instance)[0].values[0], res.X),
+    def create_ACEResult(self, instance: pd.DataFrame, cfx: np.ndarray):
+        total_path = np.resize(np.append(separate_dataset_and_class(instance)[0].values[0], cfx),
                                new_shape=(self.n_vertex + 2, self.n_features))
         path_to_ret = pd.DataFrame(data=total_path,
                                    columns=self.features)
@@ -225,6 +244,4 @@ class BayesACE(ACE):
         path_to_compute = path(total_path, chunks=self.chunks)
         distance = path_likelihood_length(pd.DataFrame(path_to_compute, columns=self.features),
                                           density_estimator=self.density_estimator, penalty=self.penalty)
-        if return_info:
-            return ACEResult(counterfactual, path_to_ret, distance), res
         return ACEResult(counterfactual, path_to_ret, distance)
