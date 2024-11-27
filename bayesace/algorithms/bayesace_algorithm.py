@@ -229,7 +229,12 @@ class BayesACE(ACE):
         if self.multi_objective:
             cf_list = []
             for i in range(res.F.shape[0]):
-                cf_list.append(self.create_ACEResult(instance, res.X[i]))
+                if res.F[i][0] < MAX_VALUE_FLOAT:
+                    cf_list.append(self.create_ACEResult(instance, res.X[i]))
+            if len(cf_list) == 0:
+                return ACEResult(None, instance.drop("class", axis=1), np.inf)
+            else:
+                return cf_list
         elif len(res.F) > 1 or res.X is None or res.F > MAX_VALUE_FLOAT:
             return ACEResult(None, instance.drop("class", axis=1), np.inf)
         else:

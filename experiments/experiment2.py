@@ -238,6 +238,13 @@ if __name__ == "__main__":
                     path_length_gt, tf, counterfactual, real_logl, real_pp = results
                     # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
                     if isinstance(path_length_gt, np.ndarray) and len(path_length_gt) > 1:
+                        # First, if the no baseline counterfactual was found, then we just return the one with lower distance
+                        if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan:
+                            index = np.argmin(path_length_gt)
+                            path_length_gt = path_length_gt[index]
+                            counterfactual = counterfactual[index]
+                            real_logl = real_logl[index]
+                            real_pp = real_pp[index]
                         # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
                         # to FACE baseline
                         logl_baseline = -results_dfs["real_logl"].loc[i, FACE_BASELINE]
