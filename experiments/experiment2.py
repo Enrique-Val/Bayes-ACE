@@ -48,9 +48,9 @@ def worker(instance, algorithm_path, density_estimator_path, gt_estimator_path, 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=44120, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
+    parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2_patience/', type=str)
     parser.add_argument('--results_dir', nargs='?', default='./results/exp_2/', type=str)
     parser.add_argument('--cv_opt_dir', nargs='?', default='./results/exp_opt2/', type=str)
     parser.add_argument('--multiobjective', action=argparse.BooleanOptionalAction)
@@ -232,8 +232,8 @@ if __name__ == "__main__":
                     results = []
                     for i in range(n_counterfactuals):
                         instance = df_counterfactuals.iloc[[i]]
-                        results = get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
-                                                                                chunks)
+                        results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
+                                                                                chunks))
                 for i in range(n_counterfactuals):
                     path_length_gt, tf, counterfactual, real_logl, real_pp = results
                     # Check if we are dealing with multiobjective BayesACE by checking the number of outputs

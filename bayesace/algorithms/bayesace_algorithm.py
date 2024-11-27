@@ -37,8 +37,11 @@ class BestPathFinder(Problem):
         else:
             xl = np.array(list(sampling_range[0]) * (n_vertex + 1))
             xu = np.array(list(sampling_range[1]) * (n_vertex + 1))
+        n_obj = 1
+        if multi_objective:
+            n_obj = 3
         super().__init__(n_var=n_features * (n_vertex + 1),
-                         n_obj=1,
+                         n_obj=n_obj,
                          n_ieq_constr=2,
                          xl=xl,
                          xu=xu, **kwargs)
@@ -217,7 +220,7 @@ class BayesACE(ACE):
                                  target_label=target_label, n_vertex=self.n_vertex,
                                  penalty=self.penalty, chunks=self.chunks,
                                  log_likelihood_threshold=self.log_likelihood_threshold,
-                                 accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range)
+                                 accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range, multi_objective=self.multi_objective)
         # Create an algorithm of type self.opt_algorithm with the params self.opt_algorithm_params
         algorithm = self.opt_algorithm(sampling=initial_sample, **self.opt_algorithm_params)
 
