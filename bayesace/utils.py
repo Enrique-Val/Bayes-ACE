@@ -183,6 +183,21 @@ def auc(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
         return roc_auc_score(y_true_coded, y_pred.values)
 
 
+def l0_path(path: np.ndarray, eps=0.1):
+    # Preallocate L0 array for columns
+    l0_array = np.zeros(path.shape[1])
+    N = path.shape[0]
+
+    for i in range(N):
+        # Compute differences for all rows compared to row `i`
+        diff = path[i] - path[i:N]  # Shape: (N-i, M)
+
+        # Apply threshold and update l0_array
+        l0_array = np.max(((np.abs(diff) > eps).any(axis=0).astype(int), l0_array), axis=0)
+
+    return np.sum(l0_array)
+
+
 def mae_samples(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
     encoder = OneHotEncoder(sparse_output=False)
     y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
