@@ -77,7 +77,7 @@ def check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_pr
         raise Exception("Not enough instances")
 
 
-def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks):
+def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator, penalty, chunks):
     target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
     t0 = time.time()
     result = algorithm.run(instance, target_label=target_label)
@@ -102,10 +102,11 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
         real_logl = log_likelihood(cfx_df, gt_estimator)
         real_pp = posterior_probability(cfx_df, target_label, gt_estimator)
-        return path_lengths_gt, tf, cfx_array, real_logl, real_pp
+        path_l2 = np.linalg.norm(cfx_array - instance.drop(columns="class").values.flatten(), axis=1)
+        return path_lengths_gt, path_l2, tf, cfx_array, real_logl, real_pp
     # Check if indeed a counterfactual was found
     elif result.counterfactual is None:
-        return np.nan, tf, np.nan, -np.inf, 0
+        return np.nan, np.inf, tf, np.nan, -np.inf, 0
     else:
         path_to_compute = path(result.path.values, chunks=chunks)
         path_length_gt = path_likelihood_length(
@@ -114,7 +115,8 @@ def get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty
         cfx_df = pd.DataFrame([result.counterfactual.values], columns=instance.columns[:-1])
         real_logl = log_likelihood(cfx_df, gt_estimator)
         real_pp = posterior_probability(cfx_df, target_label , gt_estimator)
-        return path_length_gt, tf, result.counterfactual.values, real_logl, real_pp
+        path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns="class").values.flatten())
+        return path_length_gt, path_l2, tf, result.counterfactual.values, real_logl, real_pp
 
 
 def friedman_posthoc(data, correct = "bergmann") -> dict[str, pd.DataFrame | pd.Series]:

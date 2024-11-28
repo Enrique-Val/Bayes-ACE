@@ -198,7 +198,7 @@ if __name__ == "__main__":
     if not dummy :
         construction_time_df.to_csv(results_dir + 'construction_time_data' + str(dataset_id) + '.csv')
 
-    metrics = ["distance", "counterfactual", "time", "time_w_construct", "distance_to_face_baseline", "real_logl", "real_pp"]
+    metrics = ["distance", "distance_l2", "counterfactual", "time", "time_w_construct", "distance_to_face_baseline", "real_logl", "real_pp"]
 
     # Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
@@ -235,43 +235,38 @@ if __name__ == "__main__":
                         results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
                                                                                 chunks))
                 for i in range(n_counterfactuals):
-                    path_length_gt, tf, counterfactual, real_logl, real_pp = results
+                    path_length_gt, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
                     # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
-                    if isinstance(path_length_gt, np.ndarray) and len(path_length_gt) > 1:
+                    if multi_objective:
                         # First, if the no baseline counterfactual was found, then we just return the one with lower distance
                         if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan:
                             index = np.argmin(path_length_gt)
-                            path_length_gt = path_length_gt[index]
-                            counterfactual = counterfactual[index]
-                            real_logl = real_logl[index]
-                            real_pp = real_pp[index]
-                        # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
-                        # to FACE baseline
-                        logl_baseline = -results_dfs["real_logl"].loc[i, FACE_BASELINE]
-                        pp_baseline = results_dfs["real_pp"].loc[i, FACE_BASELINE]
-                        distance_baseline = results_dfs["distance"].loc[i, FACE_BASELINE]
+                        else :
+                            # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
+                            # to FACE baseline
+                            logl_baseline = -results_dfs["real_logl"].loc[i, FACE_BASELINE]
+                            pp_baseline = results_dfs["real_pp"].loc[i, FACE_BASELINE]
+                            distance_baseline = results_dfs["distance"].loc[i, FACE_BASELINE]
 
-                        mask: np.ndarray = real_logl > logl_baseline & real_pp > pp_baseline
+                            mask: np.ndarray = real_logl > logl_baseline & real_pp > pp_baseline
 
-                        if mask.any():
-                            path_length_gt[mask] = 0
-                            index = np.argmax(path_length_gt)
-                            path_length_gt = path_length_gt[index]
-                            counterfactual = counterfactual[index]
-                            real_logl = real_logl[index]
-                            real_pp = real_pp[index]
-                        # If none surpasses it take the one that is closer in terms of likelihood and posterior prob
-                        else:
-                            # Normalize the logl between 0 and 1 (take percentiles instead of max and min)
-                            normalized_real_logl = (real_logl-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
-                            normalized_logl_baseline = (logl_baseline-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
-                            total_diff = np.abs(normalized_logl_baseline-normalized_real_logl) + np.abs(pp_baseline-real_pp)
-                            index = np.argmin(total_diff)
-                            path_length_gt = path_length_gt[index]
-                            counterfactual = counterfactual[index]
-                            real_logl = real_logl[index]
-                            real_pp = real_pp[index]
+                            if mask.any():
+                                path_length_gt[mask] = np.inf
+                                index = np.argmin(path_length_gt)
+                            # If none surpasses it take the one that is closer in terms of likelihood and posterior prob
+                            else:
+                                # Normalize the logl between 0 and 1 (take percentiles instead of max and min)
+                                normalized_real_logl = (real_logl-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
+                                normalized_logl_baseline = (logl_baseline-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
+                                total_diff = np.abs(normalized_logl_baseline-normalized_real_logl) + np.abs(pp_baseline-real_pp)
+                                index = np.argmin(total_diff)
+                        path_length_gt = path_length_gt[index]
+                        path_l2 = path_l2[index]
+                        counterfactual = counterfactual[index]
+                        real_logl = real_logl[index]
+                        real_pp = real_pp[index]
                     results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
+                    results_dfs["distance_l2"].loc[i, algorithm_str] = path_l2
                     results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
                     results_dfs["time"].loc[i, algorithm_str] = tf
                     results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[algorithm_str, "construction_time"]
