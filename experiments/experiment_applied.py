@@ -1,9 +1,13 @@
 # Import Taiwan bankrupcy dataset from UCI
+import argparse
+import os
+import pickle
+
 import numpy as np
 import pandas as pd
 from pymoo.algorithms.moo.nsga2 import NSGA2
 
-from bayesace import hill_climbing, get_other_class, brier_score, predict_class
+from bayesace import hill_climbing, get_other_class, brier_score, predict_class, auc
 from bayesace.algorithms.bayesace_algorithm import BayesACE
 from bayesace.algorithms.face import FACE
 from bayesace.algorithms.wachter import WachterCounterfactual
@@ -21,6 +25,14 @@ DATASET_SELECTED = COMMUNITIES_CRIME
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Arguments")
+    parser.add_argument('--results_dir', nargs='?', default='./results/exp_applied/', type=str)
+    args = parser.parse_args()
+
+    # Create results dir if it does not exist
+    if not os.path.exists(args.results_dir):
+        os.makedirs(args.results_dir)
+
     uci_dataset = ucimlrepo.fetch_ucirepo(id=DATASET_SELECTED)
     data = uci_dataset.data.features
     data_og = data.copy()
@@ -43,6 +55,7 @@ if __name__ == "__main__":
         data["class"] = data["class"].apply(lambda x: "Safe" if x <= q1 else "Regular" if x <= q2 else "Unsafe").astype('category')
         # Drop rows labelled as "Regular"
         #data = data[data["class"] != "Regular"]
+        data["class"] = data["class"].cat.remove_unused_categories()
         data = data[["population","householdsize","pctUrban","medFamInc","PctPopUnderPov","PctLess9thGrade","PctUnemployed","PersPerFam","PctNotSpeakEnglWell","PctPersDenseHous","RentMedian","MedRentPctHousInc","NumInShelters","NumStreet","PopDens","class"]]
     # Drop nan rows
     data = data.dropna()
@@ -50,6 +63,8 @@ if __name__ == "__main__":
     # Use a StandardScaler
     scaler = StandardScaler()
     data[data.columns[:-1]] = scaler.fit_transform(data[data.columns[:-1]])
+    # Pickle scaler in the corresponding dir
+    pickle.dump(scaler, open(args.results_dir + 'scaler.pkl', 'wb'))
 
     xl = data.drop(columns=['class']).min().values - 0.01
     xu = data.drop(columns=['class']).max().values + 0.01
@@ -65,16 +80,18 @@ if __name__ == "__main__":
     predictions_c = predictions.copy()
     predictions_c["real_class"] = data_test["class"].reset_index(drop=True)
     predictions_c["logl"] = bn.logl(data_test)
-    print(predictions_c)
+    #print(predictions_c)
     brier_i = brier_score(data_test["class"].values, predictions)
-    print(brier_i)
+    print("Brier",brier_i)
+    auc_i = auc(data_test["class"].values, predictions)
+    print("AUC",auc_i)
 
     data_set_unsafe = data_test[data_test["class"] == "Unsafe"]
     target_label = "Safe"
 
     chunks = 20
-    logl_thresh = -10
-    pp_thresh = 0.95
+    logl_thresh = -3
+    pp_thresh = 0.99
 
     algorithms = []
     alg = BayesACE(bn, data_train.columns[:-1], chunks=chunks, log_likelihood_threshold=logl_thresh, n_vertex=0, accuracy_threshold=pp_thresh, penalty=1, seed=0, verbose=True, parallelize=False,
@@ -91,6 +108,10 @@ if __name__ == "__main__":
                        log_likelihood_threshold=logl_thresh, accuracy_threshold=pp_thresh, penalty=1, parallelize=False)
     algorithms_str = ["BayesACE", "Wachter", "FACE"]'''
     algorithms_str = ["BayesACE", "Wachter"]
+
+    # Store of results
+
+
     for i in data_set_unsafe.index:
         # Look for a counterfactual
         og_instance = data_set_unsafe.loc[[i]]
