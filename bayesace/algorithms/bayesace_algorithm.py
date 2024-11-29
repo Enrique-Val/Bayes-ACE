@@ -131,9 +131,6 @@ class BayesACE(ACE):
             post_prob = posterior_probability(candidate_initial, target_label, self.density_estimator)
 
             mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)
-            # We also need to consider the sample range for the mask
-            mask = mask & (candidate_initial[self.features] >= self.sampling_range[0]).all(axis=1)
-            mask = mask & (candidate_initial[self.features] <= self.sampling_range[1]).all(axis=1)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
             candidate_initial = candidate_initial.drop("class", axis=1)
             if candidate_initial.shape[0] > 0:
@@ -157,7 +154,8 @@ class BayesACE(ACE):
                               "with a lower likelihood or probability threshold.")
                 return None
         initial_sample = initial_sample.head(self.population_size).reset_index(drop=True)
-        initial_sample = initial_sample.clip(self.sampling_range[0], self.sampling_range[1])
+        eps = 0.001
+        initial_sample = initial_sample.clip(self.sampling_range[0]+eps, self.sampling_range[1]-eps)
         initial_sample = initial_sample.to_numpy()
 
         if self.n_vertex == 0:
@@ -208,7 +206,7 @@ class BayesACE(ACE):
         self.initialization = initialization
         self.multi_objective = multi_objective
 
-    def run(self, instance: pd.DataFrame, target_label):
+    def run(self, instance: pd.DataFrame, target_label) -> ACEResult | list[ACEResult]:
         super().run(instance, target_label)
         termination = DefaultSingleObjectiveTermination(n_max_gen=self.generations)
         initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)

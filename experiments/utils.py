@@ -6,7 +6,8 @@ import pandas as pd
 import numpy as np
 import torch
 
-from bayesace import get_other_class, path, path_likelihood_length, hill_climbing, log_likelihood, posterior_probability
+from bayesace import get_other_class, path, path_likelihood_length, hill_climbing, log_likelihood, \
+    posterior_probability, total_l0_path
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
@@ -78,7 +79,7 @@ def check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_pr
         raise Exception("Not enough instances")
 
 
-def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator, penalty, chunks):
+def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator, penalty, chunks, l0_epsilon=0.1):
     print(instance.index[0])
     target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
     t0 = time.time()
@@ -94,21 +95,24 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
     if isinstance(result, list):
         cfx_array = np.empty()
         path_lengths_gt = np.zeros(shape=len(result))
+        path_l0 = np.zeros(shape=len(result))
         for i,_ in enumerate(result):
             path_to_compute = path(result[i].path.values, chunks=chunks)
             path_length_gt = path_likelihood_length(
                 pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
                 density_estimator=gt_estimator, penalty=penalty)
             path_lengths_gt[i] = path_length_gt
+            path_l0[i] = total_l0_path(result[i].path.values, l0_epsilon)
             cfx_array = np.vstack((cfx_array, result[i].counterfactual.values))
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
         real_logl = log_likelihood(cfx_df, gt_estimator)
         real_pp = posterior_probability(cfx_df, target_label, gt_estimator)
         path_l2 = np.linalg.norm(cfx_array - instance.drop(columns="class").values.flatten(), axis=1)
-        return path_lengths_gt, path_l2, tf, cfx_array, real_logl, real_pp
+        return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp
     # Check if indeed a counterfactual was found
     elif result.counterfactual is None:
-        return np.nan, np.inf, tf, np.nan, -np.inf, 0
+        print("Counterfactual:", instance.index[0], "not found")
+        return np.nan, np.inf, np.inf, tf, np.nan, -np.inf, 0
     else:
         path_to_compute = path(result.path.values, chunks=chunks)
         path_length_gt = path_likelihood_length(
@@ -118,8 +122,9 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         real_logl = log_likelihood(cfx_df, gt_estimator)
         real_pp = posterior_probability(cfx_df, target_label , gt_estimator)
         path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns="class").values.flatten())
-        return path_length_gt, path_l2, tf, result.counterfactual.values, real_logl, real_pp
+        path_l0 = total_l0_path(result.path.values, l0_epsilon)
         print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)
+        return path_length_gt, path_l0, path_l2, tf, result.counterfactual.values, real_logl, real_pp
 
 
 def friedman_posthoc(data, correct = "bergmann") -> dict[str, pd.DataFrame | pd.Series]:

@@ -198,7 +198,7 @@ if __name__ == "__main__":
     if not dummy :
         construction_time_df.to_csv(results_dir + 'construction_time_data' + str(dataset_id) + '.csv')
 
-    metrics = ["distance", "distance_l2", "counterfactual", "time", "time_w_construct", "distance_to_face_baseline", "real_logl", "real_pp"]
+    metrics = ["distance", "path_l0", "distance_l2", "counterfactual", "time", "time_w_construct", "distance_to_face_baseline", "real_logl", "real_pp"]
 
     # Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
@@ -237,7 +237,7 @@ if __name__ == "__main__":
                         results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
                                                                                 chunks))
                 for i in range(n_counterfactuals):
-                    path_length_gt, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
+                    path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
                     # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
                     if multi_objective:
                         # First, if the no baseline counterfactual was found, then we just return the one with lower distance
@@ -263,11 +263,13 @@ if __name__ == "__main__":
                                 total_diff = np.abs(normalized_logl_baseline-normalized_real_logl) + np.abs(pp_baseline-real_pp)
                                 index = np.argmin(total_diff)
                         path_length_gt = path_length_gt[index]
+                        path_l0 = path_l0[index]
                         path_l2 = path_l2[index]
                         counterfactual = counterfactual[index]
                         real_logl = real_logl[index]
                         real_pp = real_pp[index]
                     results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
+                    results_dfs["path_l0"].loc[i, algorithm_str] = path_l0
                     results_dfs["distance_l2"].loc[i, algorithm_str] = path_l2
                     results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
                     results_dfs["time"].loc[i, algorithm_str] = tf
