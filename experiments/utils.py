@@ -54,6 +54,7 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 
 
 def get_constraints(df_train, df_counterfactuals, gt_estimator: ConditionalNF, eps=0.01):
+    assert eps >= 0, "Epsilon must be greater or equal to 0"
     df_total = pd.concat([df_train, df_counterfactuals]).reset_index(drop=True)
     xl = df_total.drop(columns=['class']).min().values - eps
     xu = df_total.drop(columns=['class']).max().values + eps
@@ -78,6 +79,7 @@ def check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_pr
 
 
 def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator, penalty, chunks):
+    print(instance.index[0])
     target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
     t0 = time.time()
     result = algorithm.run(instance, target_label=target_label)
@@ -117,6 +119,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         real_pp = posterior_probability(cfx_df, target_label , gt_estimator)
         path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns="class").values.flatten())
         return path_length_gt, path_l2, tf, result.counterfactual.values, real_logl, real_pp
+        print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)
 
 
 def friedman_posthoc(data, correct = "bergmann") -> dict[str, pd.DataFrame | pd.Series]:

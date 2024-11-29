@@ -183,7 +183,7 @@ def auc(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
         return roc_auc_score(y_true_coded, y_pred.values)
 
 
-def l0_path(path: np.ndarray, eps=0.1):
+def total_l0_path(path: np.ndarray, eps=0.1) -> int:
     # Preallocate L0 array for columns
     l0_array = np.zeros(path.shape[1])
     N = path.shape[0]

@@ -99,7 +99,7 @@ if __name__ == "__main__":
     results_opt_cv_dir = args.cv_opt_dir
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator, eps = -1)
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator)
     df_train = df_train.head(n_train_size)
 
     # Load the best parameters for the NSGA
@@ -206,12 +206,14 @@ if __name__ == "__main__":
 
     for likelihood_dev in likelihood_dev_list:
         for accuracy_threshold in accuracy_threshold_list:
+            print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", accuracy_threshold)
             # Result storage
             results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
             # Name the index column with the dataset id
             for i in metrics:
                 results_dfs[i].index.name = dataset_id
             for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
+                print("Algorithm:", algorithm_str)
                 # Set the proper likelihood  and accuracy thresholds
                 algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
                 algorithm.accuracy_threshold = min(mae_gt + std_mae_gt * accuracy_threshold, 0.99)
