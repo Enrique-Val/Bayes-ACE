@@ -183,7 +183,8 @@ if __name__ == "__main__":
                            opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
                                              "mutation": PM(eta=eta_m), "selection": selection_type},
                            generations=n_generations,
-                           parallelize=parallelize)
+                           parallelize=parallelize,
+                           multi_objective=multi_objective)
             tf = time.time() - t0
             algorithms.append(alg)
             density_estimator_paths.append(model_path)
@@ -239,7 +240,7 @@ if __name__ == "__main__":
                 for i in range(n_counterfactuals):
                     path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
                     # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
-                    if multi_objective:
+                    if multi_objective and algorithm_str.startswith(BAYESACE) and counterfactual is not np.nan:
                         # First, if the no baseline counterfactual was found, then we just return the one with lower distance
                         if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan:
                             index = np.argmin(path_length_gt)
@@ -249,8 +250,7 @@ if __name__ == "__main__":
                             logl_baseline = -results_dfs["real_logl"].loc[i, FACE_BASELINE]
                             pp_baseline = results_dfs["real_pp"].loc[i, FACE_BASELINE]
                             distance_baseline = results_dfs["distance"].loc[i, FACE_BASELINE]
-
-                            mask: np.ndarray = real_logl > logl_baseline & real_pp > pp_baseline
+                            mask = np.logical_and(real_logl > logl_baseline, real_pp > pp_baseline)
 
                             if mask.any():
                                 path_length_gt[mask] = np.inf

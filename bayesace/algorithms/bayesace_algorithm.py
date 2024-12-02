@@ -4,7 +4,7 @@ from pymoo.algorithms.base.genetic import GeneticAlgorithm
 from pymoo.core.problem import Problem
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
-from pymoo.termination.default import DefaultSingleObjectiveTermination
+from pymoo.termination.default import DefaultSingleObjectiveTermination, DefaultMultiObjectiveTermination
 
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
@@ -208,7 +208,8 @@ class BayesACE(ACE):
 
     def run(self, instance: pd.DataFrame, target_label) -> ACEResult | list[ACEResult]:
         super().run(instance, target_label)
-        termination = DefaultSingleObjectiveTermination(n_max_gen=self.generations)
+        termination = DefaultSingleObjectiveTermination(n_max_gen=self.generations) if not self.multi_objective \
+            else DefaultMultiObjectiveTermination(n_max_gen=self.generations)
         initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)
         # Check if it was possible to even initialize the problem
         if initial_sample is None:

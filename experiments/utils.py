@@ -80,7 +80,7 @@ def check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_pr
 
 
 def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator, penalty, chunks, l0_epsilon=0.1):
-    print(instance.index[0])
+    print("Instance",instance.index[0])
     target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
     t0 = time.time()
     result = algorithm.run(instance, target_label=target_label)
@@ -93,7 +93,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
     '''
     # Check first if the algorithm is multiobjective (i.e., a list of counterfactuals is returned)
     if isinstance(result, list):
-        cfx_array = np.empty()
+        cfx_array = np.empty(shape=(len(result), len(instance.columns) - 1))
         path_lengths_gt = np.zeros(shape=len(result))
         path_l0 = np.zeros(shape=len(result))
         for i,_ in enumerate(result):
@@ -103,7 +103,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
                 density_estimator=gt_estimator, penalty=penalty)
             path_lengths_gt[i] = path_length_gt
             path_l0[i] = total_l0_path(result[i].path.values, l0_epsilon)
-            cfx_array = np.vstack((cfx_array, result[i].counterfactual.values))
+            cfx_array[i] = result[i].counterfactual.values
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
         real_logl = log_likelihood(cfx_df, gt_estimator)
         real_pp = posterior_probability(cfx_df, target_label, gt_estimator)
@@ -111,7 +111,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp
     # Check if indeed a counterfactual was found
     elif result.counterfactual is None:
-        print("Counterfactual:", instance.index[0], "not found")
+        print("Counterfactual for:", instance.index[0], "not found")
         return np.nan, np.inf, np.inf, tf, np.nan, -np.inf, 0
     else:
         path_to_compute = path(result.path.values, chunks=chunks)
