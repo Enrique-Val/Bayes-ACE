@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
     # Names of the models
     models = [normalizing_flow, clg_network]
-    models_str = ["nf", "clg"]
+    models_str = ["nf", "clg", "gt"]
     faces_str = [FACE_BASELINE, FACE_KDE, FACE_EPS, WACHTER]
     algorithm_str_list = faces_str + [BAYESACE + "_" + model_str + "_v" + str(n_vertex) for model_str, n_vertex in
                                       product(models_str, n_vertices)]
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     construction_time_df.loc[WACHTER, "construction_time"] = tf
 
     # Create as many BayesACE (both with normalizing flow and CLG) as vertices
-    for algorithm_str, model, model_path in zip(["nf", "clg"], [normalizing_flow, clg_network], [nf_path, clg_network_path]):
+    for algorithm_str, model, model_path in zip(models_str, [normalizing_flow, clg_network, gt_estimator], [nf_path, clg_network_path, gt_estimator_path]):
         for n_vertex in n_vertices:
             t0 = time.time()
             alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
@@ -247,7 +247,7 @@ if __name__ == "__main__":
                         else :
                             # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
                             # to FACE baseline
-                            logl_baseline = -results_dfs["real_logl"].loc[i, FACE_BASELINE]
+                            logl_baseline = results_dfs["real_logl"].loc[i, FACE_BASELINE]
                             pp_baseline = results_dfs["real_pp"].loc[i, FACE_BASELINE]
                             distance_baseline = results_dfs["distance"].loc[i, FACE_BASELINE]
                             mask = np.logical_and(real_logl > logl_baseline, real_pp > pp_baseline)
@@ -274,7 +274,7 @@ if __name__ == "__main__":
                     results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
                     results_dfs["time"].loc[i, algorithm_str] = tf
                     results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[algorithm_str, "construction_time"]
-                    results_dfs["real_logl"].loc[i, algorithm_str] = -real_logl
+                    results_dfs["real_logl"].loc[i, algorithm_str] = real_logl
                     results_dfs["real_pp"].loc[i, algorithm_str] = real_pp
 
             # Prior to save the result, compute the distance between the counterfactual found by the first
