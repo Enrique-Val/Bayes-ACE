@@ -76,7 +76,7 @@ param_space = [
 
 def cross_validate_bn(dataset, fold_indices=None):
     # Validate Gaussian network
-    bn_results = np.zeros((k, len(result_metrics)))
+    bn_results = []
     for i, (train_index, test_index) in enumerate(fold_indices):
         bn_results_i = []
         df_train = dataset.iloc[train_index].reset_index(drop=True)
@@ -95,16 +95,12 @@ def cross_validate_bn(dataset, fold_indices=None):
         auc_i = auc(df_test["class"].values, predictions)
         bn_results_i.append(auc_i)
         bn_results_i.append(time_i)
-        bn_results[i] = bn_results_i
+        bn_results.append(bn_results_i)
 
+    bn_results = np.array(bn_results)
     bn_results_mean = np.mean(bn_results, axis=0)
     bn_results = list(np.vstack((np.mean(bn_results, axis=0), np.std(bn_results, axis=0))).ravel('F'))
     bn_results.append("BIC")
-
-    print("Bayesian network learned")
-    dict_print = {result_metrics[i]: bn_results_mean[i] for i in range(len(result_metrics))}
-    print(str(dict_print))
-    print()
 
     return bn_results
 
@@ -124,10 +120,10 @@ def to_numpy_shared(df):
 
 # Worker function that accesses shared memory
 def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n_folds, i_fold, model_type="NVP",
-           batch_size=64, lr=None, weight_decay=None,
+           batch_size=64, steps=500, lr=None, weight_decay=None,
            count_bins=None, hidden_units=None,
            layers=None,
-           n_flows=None, perms_instantiation=None, diretory_path="./"):
+           n_flows=None, perms_instantiation=None, directory_path="./"):
     torch.set_num_threads(1)
     train_index, test_index = get_kfold_indices(n_instances, n_folds, i_fold)
     # Reconstruct the DataFrame using the shared memory array
@@ -143,13 +139,13 @@ def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n
     df_train = df_shared.iloc[train_index].reset_index(drop=True)
     df_test = df_shared.iloc[test_index].reset_index(drop=True)
     # Proceed with training
-    return train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr,
+    return train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, steps=steps, lr=lr,
                                     weight_decay=weight_decay,
                                     count_bins=count_bins, hidden_units=hidden_units, layers=layers, n_flows=n_flows,
-                                    perms_instantiation=perms_instantiation, directory_path=diretory_path)
+                                    perms_instantiation=perms_instantiation, directory_path=directory_path)
 
 
-def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
+def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64, steps=500, lr=None, weight_decay=None,
                              count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None,
                              directory_path="./"):
     d = df_train.shape[1] - 1
@@ -177,10 +173,10 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64,
             "Time": np.mean(it_time)}
 
 
-def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, lr=None, weight_decay=None,
+def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, steps=500, lr=None, weight_decay=None,
                       count_bins=None, hidden_units=None,
                       layers=None,
-                      n_flows=None, perms_instantiation=None, parallelize=False) -> list | None:
+                      n_flows=None, perms_instantiation=None, parallelize=False, working_dir = "./") -> list | None:
     param_dict = None
     if model_type == "NVP":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "hidden_u": hidden_units,
@@ -198,11 +194,11 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
                 df_train = dataset.iloc[train_index].reset_index(drop=True)
                 df_test = dataset.iloc[test_index].reset_index(drop=True)
                 cv_iter_results.append(
-                    train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, lr=lr,
+                    train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, steps=steps, lr=lr,
                                              weight_decay=weight_decay,
                                              count_bins=count_bins, hidden_units=hidden_units, layers=layers,
                                              n_flows=n_flows,
-                                             perms_instantiation=perms_instantiation))
+                                             perms_instantiation=perms_instantiation, directory_path=working_dir))
         except NanLogProb as e:
             cv_iter_results = None
             to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
@@ -220,9 +216,9 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
             # Use starmap with the shared memory array and other needed parameters
             cv_iter_results = pool.starmap(worker,
                                            [(shm.name, shared_array.shape, shared_array.dtype, column_names,
-                                             ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size, lr,
+                                             ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size, steps, lr,
                                              weight_decay, count_bins, hidden_units, layers, n_flows,
-                                             perms_instantiation, directory_path)
+                                             perms_instantiation, working_dir)
                                             for i_fold in range(k)])
         except NanLogProb as e:
             cv_iter_results = None
@@ -255,22 +251,26 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [param_dict]
 
 
-def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", parallelize=False):
+def get_best_normalizing_flow(dataset, fold_indices, n_iter = 50, batch_size = 64, steps=500, model_type="NVP", parallelize=False,
+                              param_space=None, working_dir="./"):
     # Bayesian optimization
 
     # List to store the random permutations
+    if param_space is None:
+        raise ValueError("The parameter param_space must be defined")
     perms_list = []
 
     # Define the objective function
     @use_named_args(param_space)
     def objective(**params):
         # First, if using NVP, define a random permutation and store it in a global list
+        print("Minimize")
         perms_instantiation = None
         if model_type == "NVP":
             perms_instantiation = [torch.randperm(d) for _ in range(params["n_flows"])]
             perms_list.append(perms_instantiation)
-        result_cv = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size,
-                                      perms_instantiation=perms_instantiation, parallelize=parallelize, **params)
+        result_cv = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size, steps=steps,
+                                      perms_instantiation=perms_instantiation, parallelize=parallelize, working_dir=working_dir, **params)
         if result_cv is None or result_cv[0] < -3e11:
             # If the logl is too low, return a high value for the objective function. This allows to not overpenalize regions of the space
             return 3e11
@@ -296,8 +296,8 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
     print("Gt params:", gt_params)
 
     # Cross validate again to get the rest of the metrics
-    metrics = cross_validate_nf(dataset, fold_indices, batch_size=batch_size,
-                                perms_instantiation=best_perm, **gt_params)
+    metrics = cross_validate_nf(dataset, fold_indices, batch_size=batch_size, steps=steps,
+                                perms_instantiation=best_perm, working_dir=working_dir, **gt_params)
     params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
     params["hidden_units"] = d * gt_params["hidden_units"]
 
@@ -308,7 +308,7 @@ def get_best_normalizing_flow(dataset, fold_indices, model_type="NVP", paralleli
         params["split_dim"] = d // 2
     elif model_type == "Splines":
         model = ConditionalSpline()
-    model.train(dataset, **params, steps=steps, batch_size=batch_size, perms_instantiation=best_perm, model_pth_name=directory_path+"best_model.pkl")
+    model.train(dataset, **params, steps=steps, batch_size=batch_size, perms_instantiation=best_perm, model_pth_name=working_dir+"best_model.pkl")
     return model, metrics, result
 
 
@@ -377,9 +377,17 @@ if __name__ == "__main__":
         bn_results = cross_validate_bn(dataset, fold_indices)
         results_df["CLG_RD"] = bn_results
 
+        # Print results
+        print("Bayesian network learned")
+        dict_print = {result_metrics[i]: bn_results[i*2] for i in range(len(result_metrics))}
+        print(str(dict_print))
+        print()
+
         # First, learn a normalizing now and sample new synthetic data
         gt_model, metrics, result = get_best_normalizing_flow(dataset, fold_indices, model_type=args.type,
-                                                              parallelize=parallelize)
+                                                              n_iter=n_iter, batch_size=batch_size, steps=steps,
+                                                              parallelize=parallelize, param_space=param_space,
+                                                              working_dir=directory_path)
         results_df["GT_RD"] = metrics
         if GRAPHIC:
             # Visualize the convergence of the objective function
@@ -445,13 +453,21 @@ if __name__ == "__main__":
         bn_results = cross_validate_bn(resampled_dataset, fold_indices)
         results_df["CLG"] = bn_results
 
+        # Print results
+        print("Bayesian network learned")
+        dict_print = {result_metrics[i]: bn_results[i * 2] for i in range(len(result_metrics))}
+        print(str(dict_print))
+        print()
+
         # Train a and pickle the Bayesian network
         bn = hill_climbing(data=resampled_dataset, bn_type="CLG")
         pickle.dump(bn, open(directory_path + "clg_" + str(dataset_id) + ".pkl", "wb"))
 
         # Validate normalizing flow with different params
         nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type,
-                                                              parallelize=parallelize)
+                                                              n_iter=n_iter, batch_size=batch_size, steps=steps,
+                                                              parallelize=parallelize, param_space=param_space,
+                                                              working_dir=directory_path)
         results_df["NF"] = metrics
 
         pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))

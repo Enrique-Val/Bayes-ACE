@@ -1,0 +1,16 @@
+pybnesian~=0.4.3
+numpy~=1.26.4
+pandas~=2.1.4
+scikit-learn~=1.4.0
+bayesace~=0.1
+torch~=2.2.1
+pyarrow~=12.0.1
+openml~=0.14.2
+matplotlib~=3.8.2
+networkx~=3.2.1
+pymoo~=0.6.1.1
+setuptools~=68.2.2
+scipy~=1.11.4
+seaborn~=0.13.2
+pingouin~=0.5.4
+ucimlrepo~=0.0.7

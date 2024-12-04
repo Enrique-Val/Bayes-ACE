@@ -36,7 +36,7 @@ def get_values(root_dir):
 
     # Get the list of metrics
     dataset_path = os.path.join(root_dir, dataset_ids[0])
-    for metric in os.listdir(dataset_path):  # "clg" and "nf" subfolders (models)
+    for metric in os.listdir(dataset_path):
         metric_path = os.path.join(dataset_path, metric)
         if os.path.isdir(metric_path):
             metrics.append(metric)
@@ -54,6 +54,10 @@ def get_values(root_dir):
             post_probs.append(post_prob)
     likelihoods = list(set(likelihoods))
     post_probs = list(set(post_probs))
+
+    # Order the likelihoods and post_probs
+    likelihoods = sorted(likelihoods, key=lambda x: float(x))
+    post_probs = sorted(post_probs, key=lambda x: float(x))
 
     # Get the list of algorithms opening any file
     any_file = os.listdir(metric_path)[0]
@@ -125,7 +129,16 @@ if __name__ == "__main__":
     # Get the values for dataset_id, model, penalty and n_vertex
     values_dict = get_values(root_dir)
     metrics = list(values_dict["metrics"])
+
+    # Remove paths and counterfactuals from the metrics
+    metrics.remove("paths")
+    metrics.remove("counterfactual")
     print(metrics)
+
+    # Create a subfolder for each metric
+    for metric in metrics:
+        if not os.path.exists(os.path.join(root_dir, "plots", metric)):
+            os.makedirs(os.path.join(root_dir, "plots", metric))
 
     # Load the data
     data_dict = load_data(root_dir, values_dict)
@@ -134,21 +147,21 @@ if __name__ == "__main__":
 
     heatmap_args = {'linewidths': 0.25, 'linecolor': '0.5', 'clip_on': False, 'square': True, 'cbar_ax_bbox': [0.80, 0.35, 0.04, 0.3]}
 
-    for metric in ["distance", "time", "distance_to_face_baseline", "real_logl", "real_pp"]:
+    for metric in metrics:
         # Perform BH test for the metric distances globally
         friedman_bh_results = perform_bh(data_dict, values_dict, metric)
         sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"],
                                        label_fmt_left="{label}", label_fmt_right="{label}")
         plt.title(f"Metric: {metric}")
-        plt.savefig(os.path.join(root_dir, "plots", f"bh_{metric}.png"))
-        #plt.show()
+        plt.savefig(os.path.join(root_dir, "plots",metric, f"bh_{metric}.pdf"), bbox_inches='tight')
+        plt.show()
         plt.clf()
         sp.sign_plot(friedman_bh_results["p_adjusted"], **heatmap_args)
-        plt.savefig(os.path.join(root_dir, "plots", f"heatmap_{metric}.png"))
+        plt.savefig(os.path.join(root_dir, "plots",metric, f"heatmap_{metric}.pdf"), bbox_inches='tight')
         #plt.show()
         plt.clf()
 
-    for metric in ["distance", "time", "distance_to_face_baseline", "real_logl", "real_pp"] :
+    for metric in metrics :
         '''
         # Perform BH test for the metric distances segregated by dataset_id, likelihood and post_prob
         friedman_bh_results = perform_bh_by_thresholds(data_dict, values_dict, "distances")
@@ -170,11 +183,11 @@ if __name__ == "__main__":
             #time.sleep(1)
             sp.critical_difference_diagram(friedman_bh_results[i]["summary_ranks"], friedman_bh_results[i]["p_adjusted"], label_fmt_left="{label}", label_fmt_right="{label}")
             plt.title(f"Metric: {metric}, Likelihood: {i[0]}, Post_prob: {i[1]}")
-            plt.savefig(os.path.join(root_dir, "plots", f"bh_{metric}_ll{i[0]}_pp{i[1]}.png"))
+            plt.savefig(os.path.join(root_dir, "plots", metric, f"bh_{metric}_ll{i[0]}_pp{i[1]}.pdf"), bbox_inches='tight')
             #plt.show()
             plt.clf()
             sp.sign_plot(friedman_bh_results[i]["p_adjusted"], **heatmap_args)
-            plt.savefig(os.path.join(root_dir, "plots", f"heatmap_{metric}_ll{i[0]}_pp{i[1]}.png"))
+            plt.savefig(os.path.join(root_dir, "plots", metric, f"heatmap_{metric}_ll{i[0]}_pp{i[1]}.pdf"), bbox_inches='tight')
             #plt.show()
             plt.clf()
 
