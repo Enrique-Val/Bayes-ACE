@@ -71,7 +71,7 @@ if __name__ == "__main__":
     # Number of counterfactuals
     n_counterfactuals = 20
     eps = np.inf
-    n_train_size = 3000
+    n_train_size = 2500
     n_generations = 1000
 
     # Activate for multiple objectives
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     t0 = time.time()
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
                dataset=df_train.drop("class", axis=1),
-               distance_threshold=eps, graph_type="epsilon", f_tilde="identity", seed=0, verbose=verbose,
+               distance_threshold=eps, graph_type="epsilon", f_tilde=None, seed=0, verbose=verbose,
                log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0
     algorithms.append(alg)
@@ -205,102 +205,101 @@ if __name__ == "__main__":
     if not os.path.exists(results_dir + 'paths/'):
         os.makedirs(results_dir + 'paths/')
 
-    for likelihood_dev in likelihood_dev_list:
-        for accuracy_threshold in accuracy_threshold_list:
-            print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", accuracy_threshold)
-            # Result storage
-            results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
-            # Name the index column with the dataset id
-            for i in metrics:
-                results_dfs[i].index.name = dataset_id
-            for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
-                print("Algorithm:", algorithm_str)
-                # Set the proper likelihood  and accuracy thresholds
-                algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
-                algorithm.accuracy_threshold = min(mae_gt + std_mae_gt * accuracy_threshold, 0.99)
-                if parallelize :
-                    # Pickle the algorithm to avoid I/O in every worker. The file will later be deleted
-                    de = algorithm.density_estimator
-                    algorithm.density_estimator = None
-                    tmp_file_str = results_dir + 'algorithm_' + algorithm_str + '.pkl'
-                    pickle.dump(algorithm, open(tmp_file_str, 'wb'))
-                    pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
-                    results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], tmp_file_str, density_estimator_path, gt_estimator_path,
-                                                    penalty, chunks) for i in range(n_counterfactuals)])
-                    pool.close()
-                    pool.join()
-                    os.remove(tmp_file_str)
-                    algorithm.density_estimator = de
-                else :
-                    results = []
-                    for i in range(n_counterfactuals):
-                        instance = df_counterfactuals.iloc[[i]]
-                        results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
-                                                                                chunks))
-                for i in range(n_counterfactuals):
-                    path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
-                    # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
-                    if multi_objective and algorithm_str.startswith(BAYESACE) and counterfactual is not np.nan:
-                        # First, if the no baseline counterfactual was found, then we just return the one with lower distance
-                        if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan:
-                            index = np.argmin(path_length_gt)
-                        else :
-                            # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
-                            # to FACE baseline
-                            logl_baseline = results_dfs["real_logl"].loc[i, FACE_BASELINE]
-                            pp_baseline = results_dfs["real_pp"].loc[i, FACE_BASELINE]
-                            distance_baseline = results_dfs["distance"].loc[i, FACE_BASELINE]
-                            mask = np.logical_and(real_logl > logl_baseline, real_pp > pp_baseline)
+    for likelihood_dev,accuracy_threshold in zip(likelihood_dev_list, accuracy_threshold_list):
+        print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", accuracy_threshold)
+        # Result storage
+        results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
+        # Name the index column with the dataset id
+        for i in metrics:
+            results_dfs[i].index.name = dataset_id
+        # Set the proper likelihood  and accuracy thresholds
+        for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
+            algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
+            algorithm.accuracy_threshold = min(mae_gt + std_mae_gt * accuracy_threshold, 0.99)
 
-                            if mask.any():
-                                path_length_gt[mask] = np.inf
-                                index = np.argmin(path_length_gt)
-                            # If none surpasses it take the one that is closer in terms of likelihood and posterior prob
-                            else:
-                                # Normalize the logl between 0 and 1 (take percentiles instead of max and min)
-                                normalized_real_logl = (real_logl-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
-                                normalized_logl_baseline = (logl_baseline-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
-                                total_diff = np.abs(normalized_logl_baseline-normalized_real_logl) + np.abs(pp_baseline-real_pp)
-                                index = np.argmin(total_diff)
-                        path_length_gt = path_length_gt[index]
-                        path_l0 = path_l0[index]
-                        path_l2 = path_l2[index]
-                        counterfactual = counterfactual[index]
-                        real_logl = real_logl[index]
-                        real_pp = real_pp[index]
-                    results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
-                    results_dfs["path_l0"].loc[i, algorithm_str] = path_l0
-                    results_dfs["distance_l2"].loc[i, algorithm_str] = path_l2
-                    results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
-                    results_dfs["time"].loc[i, algorithm_str] = tf
-                    results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[algorithm_str, "construction_time"]
-                    results_dfs["real_logl"].loc[i, algorithm_str] = real_logl
-                    results_dfs["real_pp"].loc[i, algorithm_str] = real_pp
-
-            # Prior to save the result, compute the distance between the counterfactual found by the first
-            # FACE and the ones found by the other algorithms
-            for i in range(n_counterfactuals):
-                for algorithm_str in algorithm_str_list:
-                    if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is not np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
-                        results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.linalg.norm(
-                            results_dfs["counterfactual"].loc[i, FACE_BASELINE] - results_dfs["counterfactual"].loc[i, algorithm_str])
-                    elif results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
-                        results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = 0
-                    else :
-                        results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.inf
-
-
-
-            if not dummy :
-                # Save the results
-                for i in metrics:
-                    if not os.path.exists(results_dir + i + '/'):
-                        os.makedirs(results_dir + i + '/')
-                    results_dfs[i].to_csv(
-                        results_dir + i + '/likelihood' + str(likelihood_dev) + '_pp' + str(
-                            accuracy_threshold) + '.csv')
+        for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
+            print("Algorithm:", algorithm_str)
+            if parallelize :
+                # Pickle the algorithm to avoid I/O in every worker. The file will later be deleted
+                de = algorithm.density_estimator
+                algorithm.density_estimator = None
+                tmp_file_str = results_dir + 'algorithm_' + algorithm_str + '.pkl'
+                pickle.dump(algorithm, open(tmp_file_str, 'wb'))
+                pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
+                results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], tmp_file_str, density_estimator_path, gt_estimator_path,
+                                                penalty, chunks) for i in range(n_counterfactuals)])
+                pool.close()
+                pool.join()
+                os.remove(tmp_file_str)
+                algorithm.density_estimator = de
             else :
-                for i in metrics:
-                    print(i)
-                    print(results_dfs[i].to_string())
-                    print()
+                results = []
+                for i in range(n_counterfactuals):
+                    instance = df_counterfactuals.iloc[[i]]
+                    results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
+                                                                            chunks))
+            for i in range(n_counterfactuals):
+                path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
+                # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
+                if multi_objective and algorithm_str.startswith(BAYESACE) and counterfactual is not np.nan:
+                    # First, if the no baseline counterfactual was found, then we just return the one with lower distance
+                    if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan:
+                        index = np.argmin(path_length_gt)
+                    else :
+                        # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
+                        # to FACE baseline
+                        logl_baseline = results_dfs["real_logl"].loc[i, FACE_BASELINE]
+                        pp_baseline = results_dfs["real_pp"].loc[i, FACE_BASELINE]
+                        distance_baseline = results_dfs["distance"].loc[i, FACE_BASELINE]
+                        mask = np.logical_and(real_logl > logl_baseline, real_pp > pp_baseline)
+
+                        if mask.any():
+                            path_length_gt[mask] = np.inf
+                            index = np.argmin(path_length_gt)
+                        # If none surpasses it take the one that is closer in terms of likelihood and posterior prob
+                        else:
+                            # Normalize the logl between 0 and 1 (take percentiles instead of max and min)
+                            normalized_real_logl = (real_logl-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
+                            normalized_logl_baseline = (logl_baseline-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
+                            total_diff = np.abs(normalized_logl_baseline-normalized_real_logl) + np.abs(pp_baseline-real_pp)
+                            index = np.argmin(total_diff)
+                    path_length_gt = path_length_gt[index]
+                    path_l0 = path_l0[index]
+                    path_l2 = path_l2[index]
+                    counterfactual = counterfactual[index]
+                    real_logl = real_logl[index]
+                    real_pp = real_pp[index]
+                results_dfs["distance"].loc[i, algorithm_str] = path_length_gt
+                results_dfs["path_l0"].loc[i, algorithm_str] = path_l0
+                results_dfs["distance_l2"].loc[i, algorithm_str] = path_l2
+                results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
+                results_dfs["time"].loc[i, algorithm_str] = tf
+                results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[algorithm_str, "construction_time"]
+                results_dfs["real_logl"].loc[i, algorithm_str] = real_logl
+                results_dfs["real_pp"].loc[i, algorithm_str] = real_pp
+
+        # Prior to save the result, compute the distance between the counterfactual found by the first
+        # FACE and the ones found by the other algorithms
+        for i in range(n_counterfactuals):
+            for algorithm_str in algorithm_str_list:
+                if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is not np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
+                    results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.linalg.norm(
+                        results_dfs["counterfactual"].loc[i, FACE_BASELINE] - results_dfs["counterfactual"].loc[i, algorithm_str])
+                elif results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
+                    results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = 0
+                else :
+                    results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.inf
+
+        if not dummy :
+            # Save the results
+            for i in metrics:
+                if not os.path.exists(results_dir + i + '/'):
+                    os.makedirs(results_dir + i + '/')
+                results_dfs[i].to_csv(
+                    results_dir + i + '/likelihood' + str(likelihood_dev) + '_pp' + str(
+                        accuracy_threshold) + '.csv')
+        else :
+            for i in metrics:
+                print(i)
+                print(results_dfs[i].to_string())
+                print()

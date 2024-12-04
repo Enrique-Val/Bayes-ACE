@@ -21,8 +21,7 @@ def compute_weight(point_i, point_j, epsilon, weight_function, *args):
 
 def epsilon_weight(point1, point2, distance, epsilon, f_tilde):
     d = len(point1)
-    f_tilde(epsilon ** d / distance) * distance
-    return 1
+    return f_tilde(epsilon ** d / distance) * distance
 
 
 def kde_weight(point1, point2, distance, density_estimator, f_tilde, variables):
