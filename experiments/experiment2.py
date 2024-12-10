@@ -242,10 +242,11 @@ if __name__ == "__main__":
                 path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
                 # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
                 if multi_objective and algorithm_str.startswith(BAYESACE) and counterfactual is not np.nan:
+                    print("Counterfactual multi", i, "Path length:", path_length_gt)
                     # First, if the no baseline counterfactual was found, then we just return the one with lower distance
                     if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan:
                         index = np.argmin(path_length_gt)
-                    else :
+                    else:
                         # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
                         # to FACE baseline
                         logl_baseline = results_dfs["real_logl"].loc[i, FACE_BASELINE]
@@ -258,11 +259,8 @@ if __name__ == "__main__":
                             index = np.argmin(path_length_gt)
                         # If none surpasses it take the one that is closer in terms of likelihood and posterior prob
                         else:
-                            # Normalize the logl between 0 and 1 (take percentiles instead of max and min)
-                            normalized_real_logl = (real_logl-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
-                            normalized_logl_baseline = (logl_baseline-np.quantile(real_logl,0.05)) / (np.quantile(real_logl,0.95)-np.quantile(real_logl,0.05))
-                            total_diff = np.abs(normalized_logl_baseline-normalized_real_logl) + np.abs(pp_baseline-real_pp)
-                            index = np.argmin(total_diff)
+                            # Return path with minimum distance
+                            index = np.argmin(path_length_gt)
                     path_length_gt = path_length_gt[index]
                     path_l0 = path_l0[index]
                     path_l2 = path_l2[index]
