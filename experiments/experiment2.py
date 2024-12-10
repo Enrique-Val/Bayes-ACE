@@ -118,7 +118,7 @@ if __name__ == "__main__":
     # Names of the models
     models = [normalizing_flow, clg_network]
     models_str = ["nf", "clg", "gt"]
-    faces_str = [FACE_BASELINE, FACE_KDE, FACE_EPS, WACHTER]
+    faces_str = [FACE_BASELINE, FACE_KDE, WACHTER]
     algorithm_str_list = faces_str + [BAYESACE + "_" + model_str + "_v" + str(n_vertex) for model_str, n_vertex in
                                       product(models_str, n_vertices)]
 
@@ -152,6 +152,8 @@ if __name__ == "__main__":
     density_estimator_paths.append(nf_path)
     construction_time_df.loc[FACE_KDE, "construction_time"] = tf
 
+    '''
+    # Not necessary, as having an infinite epsilon equates this algorithm to the Wachter algorithm
     t0 = time.time()
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
                dataset=df_train.drop("class", axis=1),
@@ -160,7 +162,7 @@ if __name__ == "__main__":
     tf = time.time() - t0
     algorithms.append(alg)
     density_estimator_paths.append(nf_path)
-    construction_time_df.loc[FACE_EPS, "construction_time"] = tf
+    construction_time_df.loc[FACE_EPS, "construction_time"] = tf'''
 
     t0 = time.time()
     alg = WachterCounterfactual(density_estimator=gt_estimator, features=df_train.columns[:-1],
