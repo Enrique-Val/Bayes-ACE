@@ -243,10 +243,9 @@ if __name__ == "__main__":
             for i in range(n_counterfactuals):
                 path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
                 # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
-                if multi_objective and algorithm_str.startswith(BAYESACE) and counterfactual is not np.nan:
-                    print("Counterfactual multi", i, "Path length:", path_length_gt)
+                if multi_objective and algorithm_str.startswith(BAYESACE) and not np.isnan(counterfactual):
                     # First, if the no baseline counterfactual was found, then we just return the one with lower distance
-                    if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan:
+                    if np.isnan(results_dfs["counterfactual"].loc[i, FACE_BASELINE]):
                         index = np.argmin(path_length_gt)
                     else:
                         # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
@@ -282,10 +281,10 @@ if __name__ == "__main__":
         # FACE and the ones found by the other algorithms
         for i in range(n_counterfactuals):
             for algorithm_str in algorithm_str_list:
-                if results_dfs["counterfactual"].loc[i, FACE_BASELINE] is not np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
+                if not np.isnan(results_dfs["counterfactual"].loc[i, FACE_BASELINE]) and not np.isnan(results_dfs["counterfactual"].loc[i, algorithm_str]):
                     results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.linalg.norm(
                         results_dfs["counterfactual"].loc[i, FACE_BASELINE] - results_dfs["counterfactual"].loc[i, algorithm_str])
-                elif results_dfs["counterfactual"].loc[i, FACE_BASELINE] is np.nan and results_dfs["counterfactual"].loc[i, algorithm_str] is not np.nan:
+                elif np.isnan(results_dfs["counterfactual"].loc[i, FACE_BASELINE]) and not np.isnan(results_dfs["counterfactual"].loc[i, algorithm_str]) :
                     results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = 0
                 else :
                     results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.inf
