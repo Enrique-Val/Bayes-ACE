@@ -112,7 +112,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
     # Check if indeed a counterfactual was found
     elif result.counterfactual is None:
         print("Counterfactual for:", instance.index[0], "not found")
-        return np.inf, np.inf, np.inf, tf, np.nan, -np.inf, 0
+        return np.inf, np.inf, np.inf, tf, None, -np.inf, 0
     else:
         path_to_compute = path(result.path.values, chunks=chunks)
         path_length_gt = path_likelihood_length(
