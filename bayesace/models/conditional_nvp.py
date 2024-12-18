@@ -26,7 +26,7 @@ Some modifications to work with data with more than 2 dimensions were made
 
 def weights_init(m, scale=1.0):
     if isinstance(m, nn.Linear):
-        nn.init.xavier_normal_(m.weight, gain=scale * (1/3) * nn.init.calculate_gain('relu'))
+        nn.init.xavier_normal_(m.weight, gain=scale * (1/2) * nn.init.calculate_gain('relu'))
         #nn.init.xavier_normal_(m.weight, gain=sacle * (1/3) * nn.init.calculate_gain('linear'))
         if m.bias is not None:
             nn.init.zeros_(m.bias)

@@ -10,6 +10,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from collections import Counter
 
+from bayesace.models.conditional_kde import ConditionalKDE
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 from bayesace.models.utils import hill_climbing
 import time
@@ -144,7 +145,7 @@ def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class")
     if class_var_name in data.columns:
         Warning("The class variable is already in the dataset. It will be removed for the prediction.")
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, ConditionalNF):
+    if isinstance(density_estimator, ConditionalNF) or isinstance(density_estimator, ConditionalKDE):
         return pd.DataFrame(density_estimator.predict_proba(data.values), columns=density_estimator.get_class_labels())
     else:
         class_values = density_estimator.cpd(class_var_name).variable_values()

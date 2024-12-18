@@ -11,9 +11,13 @@ bayesace.egg-info/top_level.txt
 bayesace/algorithms/__init__.py
 bayesace/algorithms/algorithm.py
 bayesace/algorithms/bayesace_algorithm.py
-bayesace/algorithms/bayesace_multi.py
 bayesace/algorithms/face.py
+bayesace/algorithms/wachter.py
+bayesace/dataset/__init__.py
+bayesace/dataset/real_imf_categorical.py
+bayesace/dataset/utils.py
 bayesace/models/__init__.py
+bayesace/models/conditional_kde.py
 bayesace/models/conditional_normalizing_flow.py
 bayesace/models/conditional_nvp.py
 bayesace/models/conditional_spline.py

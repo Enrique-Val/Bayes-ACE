@@ -1,6 +1,8 @@
 from sklearn.neighbors import KernelDensity
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+
 
 class ConditionalKDE:
     def __init__(self, bandwidth=1.0, kernel='gaussian'):
@@ -14,6 +16,10 @@ class ConditionalKDE:
         self.class_priors = {}  # Maps each class to its prior
         self.classes = []  # Ordered list of class labels for easy access
 
+        # Auxiliary attributes filled when the cKDE is trained. The columns exclude the class column
+        self.columns = None
+        self.n_dims = 0
+
     def train(self, dataset: pd.DataFrame, class_var_name: str = "class"):
         """
         Train the KDE model.
@@ -21,6 +27,10 @@ class ConditionalKDE:
         - dataset: pd.DataFrame with the last column as the target/class variable.
         - class_var_name: name of the class column.
         """
+        # New class attributes
+        self.columns = dataset.columns[:-1]
+        self.n_dims = len(self.columns)
+
         # Separate features and labels
         X = dataset.drop(columns=class_var_name).values
         y = dataset[class_var_name].values
@@ -57,7 +67,7 @@ class ConditionalKDE:
         total_labels = np.unique(data[class_var_name])
         for i, label in enumerate(class_labels):
             if label in total_labels:
-                log_likelihood[data[class_var_name] == label] = self.kdes[label].score_samples(data.drop(columns=class_var_name).values)
+                log_likelihood[data[class_var_name] == label] = self.kdes[label].score_samples(data[data[class_var_name] == label].drop(columns=class_var_name).values)
         return log_likelihood
 
 
@@ -96,3 +106,30 @@ class ConditionalKDE:
 
     def get_class_labels(self):
         return list(self.class_priors.keys()).copy()
+
+    def sample(self, n_samples, seed=None):
+        np.random.seed(seed)
+        samples = []
+        samples_class_label = []
+        for i, cls in enumerate(self.classes):
+            n_samples_cls = int(n_samples * self.class_priors[cls])+1
+            samples_cls = self.kdes[cls].sample(n_samples_cls)
+            samples.append(samples_cls)
+            samples_class_label.append(np.repeat(cls, n_samples_cls))
+        samples = np.concatenate(samples, axis=0)
+        samples_class_label = np.concatenate(samples_class_label, axis=0)
+        samples_class_label = samples_class_label[:n_samples]
+        samples = pd.DataFrame(samples, columns=self.columns).head(n_samples)
+        samples["class"] = samples_class_label
+        # Shuffle the samples
+        samples = samples.sample(frac=1, random_state=seed)
+        return pa.Table.from_pandas(samples)
+        return samples
+
+    def sample_given_class(self, n_samples, class_label, seed=None):
+        if class_label not in self.class_priors:
+            raise ValueError(f"Class {class_label} not found in the training data.")
+        kde = self.kdes[class_label]
+        np.random.seed(seed)
+        samples = kde.sample(n_samples)
+        return samples

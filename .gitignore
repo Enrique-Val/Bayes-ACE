@@ -75,3 +75,13 @@ results/exp_1_relaxed/
 checkpoint_data*
 
 .ipynb_checkpoints/opt_testing-checkpoint.ipynb
+
+experiments/results/
+
+results/
+
+bayesace/dataset/data/real_imf_categorical/
+
+bayesace/dataset/real_imf_categorical.py
+
+build/lib/*
