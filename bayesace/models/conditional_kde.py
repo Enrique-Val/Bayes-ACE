@@ -3,22 +3,19 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from bayesace import ConditionalDE
 
-class ConditionalKDE:
+
+class ConditionalKDE(ConditionalDE):
     def __init__(self, bandwidth=1.0, kernel='gaussian'):
         """
         A model that estimates conditional densities using scikit-learn KDEs.
         Each class has its own KDE, and priors are stored for posterior calculations.
         """
+        super().__init__()
         self.bandwidth = bandwidth
         self.kernel = kernel
         self.kdes = {}  # Maps each class to its KDE
-        self.class_priors = {}  # Maps each class to its prior
-        self.classes = []  # Ordered list of class labels for easy access
-
-        # Auxiliary attributes filled when the cKDE is trained. The columns exclude the class column
-        self.columns = None
-        self.n_dims = 0
 
     def train(self, dataset: pd.DataFrame, class_var_name: str = "class"):
         """
@@ -38,7 +35,7 @@ class ConditionalKDE:
         # Compute class priors
         unique_classes, counts = np.unique(y, return_counts=True)
         total_samples = len(y)
-        self.class_priors = {cls: count / total_samples for cls, count in zip(unique_classes, counts)}
+        self.class_distribution = {cls: count / total_samples for cls, count in zip(unique_classes, counts)}
 
         # Store the classes in a sorted order for consistent access
         self.classes = sorted(unique_classes)
@@ -49,6 +46,7 @@ class ConditionalKDE:
             kde = KernelDensity(bandwidth=self.bandwidth, kernel=self.kernel)
             kde.fit(cls_data)
             self.kdes[cls] = kde
+        self.trained = True
 
     def logl(self, data: pd.DataFrame, class_var_name="class"):
         """
@@ -59,7 +57,7 @@ class ConditionalKDE:
         Returns:
         - Log-likelihood
         """
-        class_labels = list(self.class_priors.keys())
+        class_labels = list(self.class_distribution.keys())
 
         log_likelihood = np.full(data.shape[0], -np.inf)
 
@@ -86,33 +84,21 @@ class ConditionalKDE:
         ])
 
         # Compute P(X) as the sum of P(X|Y)P(Y)
-        p_x = np.sum(p_x_given_y * np.array([self.class_priors[cls] for cls in self.classes])[:, None], axis=0)
+        p_x = np.sum(p_x_given_y * np.array([self.class_distribution[cls] for cls in self.classes])[:, None], axis=0)
 
         # Compute P(Y|X) = P(X|Y)P(Y) / P(X)
-        p_y_given_x = (p_x_given_y.T * np.array([self.class_priors[cls] for cls in self.classes])).T / p_x
+        p_y_given_x = (p_x_given_y.T * np.array([self.class_distribution[cls] for cls in self.classes])).T / p_x
         return p_y_given_x.T
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        """
-        Predict class labels for the given data.
-        Parameters:
-        - X: Features of shape (n_samples, n_features).
-        Returns:
-        - Predicted class labels for each sample.
-        """
-        posterior_probs = self.predict_proba(X)
-        predicted_indices = np.argmax(posterior_probs, axis=1)
-        return np.array(self.classes)[predicted_indices]
-
     def get_class_labels(self):
-        return list(self.class_priors.keys()).copy()
+        return list(self.class_distribution.keys()).copy()
 
     def sample(self, n_samples, seed=None):
         np.random.seed(seed)
         samples = []
         samples_class_label = []
         for i, cls in enumerate(self.classes):
-            n_samples_cls = int(n_samples * self.class_priors[cls])+1
+            n_samples_cls = int(n_samples * self.class_distribution[cls]) + 1
             samples_cls = self.kdes[cls].sample(n_samples_cls)
             samples.append(samples_cls)
             samples_class_label.append(np.repeat(cls, n_samples_cls))
@@ -127,7 +113,7 @@ class ConditionalKDE:
         return samples
 
     def sample_given_class(self, n_samples, class_label, seed=None):
-        if class_label not in self.class_priors:
+        if class_label not in self.class_distribution:
             raise ValueError(f"Class {class_label} not found in the training data.")
         kde = self.kdes[class_label]
         np.random.seed(seed)

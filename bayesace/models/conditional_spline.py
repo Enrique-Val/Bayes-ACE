@@ -106,14 +106,14 @@ class ConditionalSpline(ConditionalNF):
         self.trained = True
 
     def sample(self, n_samples, ordered=True, seed=None):
-        class_sampler = dist.Categorical(torch.tensor(list(self.class_dist.values())))
+        class_sampler = dist.Categorical(torch.tensor(list(self.class_distribution.values())))
         classes = class_sampler.sample((n_samples,))
         # Reshape the class sampling
         classes_res = torch.reshape(classes, (-1, 1)).to(self.device, dtype=torch.get_default_dtype())
         X = self.dist_x_given_class.condition(classes_res).sample(
             (n_samples,)).cpu()  # .reshape(-1, self.n_dims).float()
         sample_df = pd.DataFrame(X, columns=self.columns)
-        sample_df["class"] = pd.Categorical([list(self.class_dist.keys())[i] for i in classes],
+        sample_df["class"] = pd.Categorical([list(self.class_distribution.keys())[i] for i in classes],
                                             categories=self.get_class_labels())
         return pa.Table.from_pandas(sample_df)
         return sample_df
@@ -124,5 +124,5 @@ class ConditionalSpline(ConditionalNF):
         X_tensor = torch.tensor(X).to(self.device, dtype=torch.get_default_dtype())
 
         return (self.dist_x_given_class.condition(y_tensor).log_prob(X_tensor).cpu().detach().numpy() + np.log(
-            np.array([list(self.class_dist.values())[i] for i in y])))
+            np.array([list(self.class_distribution.values())[i] for i in y])))
 

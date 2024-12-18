@@ -104,7 +104,7 @@ class BayesACE(ACE):
         y_og = instance["class"].values[0]
         class_labels = None
         probabilities = None
-        if isinstance(self.density_estimator, ConditionalNF):
+        if isinstance(self.density_estimator, ConditionalDE):
             class_labels = self.density_estimator.get_class_labels()
             probabilities = list(self.density_estimator.get_class_distribution().values())
 

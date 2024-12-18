@@ -1,19 +1,13 @@
 import pandas as pd
 import numpy as np
-import pybnesian as pb
 import warnings
-import math
-import multiprocessing as mp
-import openml as oml
 from matplotlib import pyplot as plt
 from sklearn.metrics import roc_auc_score
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import  OneHotEncoder
 from collections import Counter
 
-from bayesace.models.conditional_kde import ConditionalKDE
-from bayesace.models.conditional_normalizing_flow import ConditionalNF
+from bayesace.models.conditional_density_estimator import ConditionalDE
 from bayesace.models.utils import hill_climbing
-import time
 
 
 def identity(x):
@@ -67,7 +61,7 @@ def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mu
     '''
     if not mutable:
         data = data.copy()
-    if isinstance(density_estimator, ConditionalNF):
+    if isinstance(density_estimator, ConditionalDE):
         return density_estimator.likelihood(data, class_var_name=class_var_name)
     if class_var_name in data.columns:
         data = data.drop(class_var_name, axis=1)
@@ -119,7 +113,7 @@ return log_likelihood_val'''
 def posterior_probability(x_cfx: pd.DataFrame, y_og: str | list, density_estimator, class_var_name="class"):
     # Obtain the labels accesing either the MultiBNAF model or the cpd of the bn
     class_labels = None
-    if isinstance(density_estimator, ConditionalNF):
+    if isinstance(density_estimator, ConditionalDE):
         class_labels = density_estimator.get_class_labels()
     else:
         class_cpd = density_estimator.cpd(class_var_name)
@@ -145,7 +139,7 @@ def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class")
     if class_var_name in data.columns:
         Warning("The class variable is already in the dataset. It will be removed for the prediction.")
         data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, ConditionalNF) or isinstance(density_estimator, ConditionalKDE):
+    if isinstance(density_estimator, ConditionalDE):
         return pd.DataFrame(density_estimator.predict_proba(data.values), columns=density_estimator.get_class_labels())
     else:
         class_values = density_estimator.cpd(class_var_name).variable_values()
@@ -282,7 +276,7 @@ def get_probability_plot(density_estimator, class_var_name="class", limit=3, ste
     ])
     resolution = len(np.arange(-limit, limit, step))
     class_labels = None
-    if isinstance(density_estimator, ConditionalNF):
+    if isinstance(density_estimator, ConditionalDE):
         class_labels = density_estimator.get_class_labels()
     else:
         class_labels = density_estimator.cpd(class_var_name).variable_values()
