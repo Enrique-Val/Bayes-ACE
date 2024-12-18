@@ -78,17 +78,21 @@ class ConditionalKDE(ConditionalDE):
         - Posterior probabilities as a 2D array of shape (n_samples, n_classes).
         """
         # Compute P(X|Y) for each class
-        p_x_given_y = np.array([
-            np.exp(self.kdes[cls].score_samples(X)) if cls in self.kdes else np.zeros(X.shape[0])
-            for cls in self.classes
-        ])
+        p_x_given_y = np.zeros((X.shape[0], len(self.classes)))
+        for i, cls in enumerate(self.classes):
+            if not cls in self.kdes:
+                raise ValueError(f"Class {cls} not found in the training data.")
+            p_x_given_y[:, i] = np.exp(self.kdes[cls].score_samples(X))
 
         # Compute P(X) as the sum of P(X|Y)P(Y)
-        p_x = np.sum(p_x_given_y * np.array([self.class_distribution[cls] for cls in self.classes])[:, None], axis=0)
+        p_x = np.sum(p_x_given_y * np.array([self.class_distribution[cls] for cls in self.classes]), axis=1)
+        p_x_given_y[p_x == 0] = 1 / len(self.classes)
+        p_x[p_x == 0] = 1
 
-        # Compute P(Y|X) = P(X|Y)P(Y) / P(X)
-        p_y_given_x = (p_x_given_y.T * np.array([self.class_distribution[cls] for cls in self.classes])).T / p_x
-        return p_y_given_x.T
+        # Compute P(Y|X) = P(X|Y)P(Y) / P(X), but only if p_x>0. Else, uniform probability
+        p_y_given_x = p_x_given_y * np.array([self.class_distribution[cls] for cls in self.classes])
+        p_y_given_x = p_y_given_x / p_x[:, np.newaxis]
+        return p_y_given_x
 
     def get_class_labels(self):
         return list(self.class_distribution.keys()).copy()
