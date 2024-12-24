@@ -121,6 +121,7 @@ if __name__ == "__main__":
         selection_type = TournamentSelection(func_comp=binary_tournament) if params['selection_type'] == "tourn" else RandomSelection()
         distances = []
         for penalty in penalties:
+            print("Running with parameters: " + str(params) + "      Penalty " + str(penalty))
             # Result storage
             distances_mat = np.zeros((n_counterfactuals, n_vertices))
             if parallelize:
