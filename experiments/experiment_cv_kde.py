@@ -171,10 +171,11 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64,
             "Time": np.mean(it_time)}
 
 
-def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, steps=500, lr=None, weight_decay=None,
+def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, steps=500, lr=None,
+                      weight_decay=None,
                       count_bins=None, hidden_units=None,
                       layers=None,
-                      n_flows=None, perms_instantiation=None, parallelize=False, working_dir = "./") -> list | None:
+                      n_flows=None, perms_instantiation=None, parallelize=False, working_dir="./") -> list | None:
     param_dict = None
     if model_type == "NVP":
         param_dict = {"lr": lr, "weight_decay": weight_decay, "hidden_u": hidden_units,
@@ -187,12 +188,13 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
 
     cv_iter_results = []
     if not parallelize:
-        try :
+        try:
             for train_index, test_index in fold_indices:
                 df_train = dataset.iloc[train_index].reset_index(drop=True)
                 df_test = dataset.iloc[test_index].reset_index(drop=True)
                 cv_iter_results.append(
-                    train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, steps=steps, lr=lr,
+                    train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size,
+                                             steps=steps, lr=lr,
                                              weight_decay=weight_decay,
                                              count_bins=count_bins, hidden_units=hidden_units, layers=layers,
                                              n_flows=n_flows,
@@ -214,7 +216,8 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
             # Use starmap with the shared memory array and other needed parameters
             cv_iter_results = pool.starmap(worker,
                                            [(shm.name, shared_array.shape, shared_array.dtype, column_names,
-                                             ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size, steps, lr,
+                                             ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size,
+                                             steps, lr,
                                              weight_decay, count_bins, hidden_units, layers, n_flows,
                                              perms_instantiation, working_dir)
                                             for i_fold in range(k)])
@@ -249,7 +252,8 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [param_dict]
 
 
-def get_best_normalizing_flow(dataset, fold_indices, n_iter = 50, batch_size = 64, steps=500, model_type="NVP", parallelize=False,
+def get_best_normalizing_flow(dataset, fold_indices, n_iter=50, batch_size=64, steps=500, model_type="NVP",
+                              parallelize=False,
                               param_space=None, working_dir="./"):
     # Bayesian optimization
 
@@ -268,7 +272,8 @@ def get_best_normalizing_flow(dataset, fold_indices, n_iter = 50, batch_size = 6
             perms_instantiation = [torch.randperm(d) for _ in range(params["n_flows"])]
             perms_list.append(perms_instantiation)
         result_cv = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size, steps=steps,
-                                      perms_instantiation=perms_instantiation, parallelize=parallelize, working_dir=working_dir, **params)
+                                      perms_instantiation=perms_instantiation, parallelize=parallelize,
+                                      working_dir=working_dir, **params)
         if result_cv is None or result_cv[0] < -3e11:
             # If the logl is too low, return a high value for the objective function. This allows to not overpenalize regions of the space
             return 3e11
@@ -306,7 +311,8 @@ def get_best_normalizing_flow(dataset, fold_indices, n_iter = 50, batch_size = 6
         params["split_dim"] = d // 2
     elif model_type == "Splines":
         model = ConditionalSpline()
-    model.train(dataset, **params, steps=steps, batch_size=batch_size, perms_instantiation=best_perm, model_pth_name=working_dir+"best_model.pkl")
+    model.train(dataset, **params, steps=steps, batch_size=batch_size, perms_instantiation=best_perm,
+                model_pth_name=working_dir + "best_model.pkl")
     return model, metrics, result
 
 
@@ -384,15 +390,14 @@ def cross_validate_ckde(dataset, fold_indices=None, bandwidth=1.0, kernel="gauss
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [{"bandwidth": bandwidth, "kernel": kernel}]
 
 
-def get_best_ckde(dataset, fold_indices, param_space=None):
-    # Param space is a grid of parameters. Instead of Bayesian optimization, we will use a grid search
-    if param_space is None:
-        param_space = {"bandwidth": np.logspace(-1, 0, num=10),
-                       "kernel": ["gaussian", "epanechnikov", "linear"]}
-
+def grid_search_ckde(dataset, fold_indices, param_space, previous_best=None):
     best_bandwidth = None
     best_kernel = None
     best_logl = -np.inf
+    if previous_best is not None:
+        best_logl = previous_best["logl"]
+        best_bandwidth = previous_best["bandwidth"]
+        best_kernel = previous_best["kernel"]
     for bandwidth, kernel in product(param_space["bandwidth"], param_space["kernel"]):
         metrics = cross_validate_ckde(dataset, fold_indices, bandwidth=bandwidth, kernel=kernel)
         # Get the mean_logl
@@ -401,7 +406,26 @@ def get_best_ckde(dataset, fold_indices, param_space=None):
             best_logl = mean_logl
             best_bandwidth = bandwidth
             best_kernel = kernel
+    return best_logl, best_bandwidth, best_kernel
 
+
+def get_best_ckde(dataset, fold_indices, param_space=None):
+    # Param space is a grid of parameters. Instead of Bayesian optimization, we will use a grid search
+    if param_space is None:
+        param_space_gauss = {"bandwidth": np.logspace(-1, 0, num=10),
+                             "kernel": ["gaussian"]}
+        param_space_linear = {"bandwidth": np.logspace(0, 1, num=10),
+                              "kernel": ["epanechnikov", "linear"]}
+        best_logl, best_bandwidth, best_kernel = grid_search_ckde(dataset, fold_indices,
+                                                                  param_space_gauss)
+        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, fold_indices,
+                                                          param_space_linear,
+                                                          previous_best={
+                                                              "logl": best_logl,
+                                                              "bandwidth": best_bandwidth,
+                                                              "kernel": best_kernel})
+    else:
+        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, fold_indices, param_space)
 
     # Cross validate again to get the rest of the metrics
     metrics = cross_validate_ckde(dataset, fold_indices, bandwidth=best_bandwidth, kernel=best_kernel)
@@ -479,7 +503,7 @@ if __name__ == "__main__":
 
         # Print results
         print("Bayesian network learned")
-        dict_print = {result_metrics[i]: bn_results[i*2] for i in range(len(result_metrics))}
+        dict_print = {result_metrics[i]: bn_results[i * 2] for i in range(len(result_metrics))}
         print(str(dict_print))
         print()
 
