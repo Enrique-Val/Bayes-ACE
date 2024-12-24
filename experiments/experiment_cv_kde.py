@@ -373,7 +373,7 @@ def cross_validate_ckde(dataset, fold_indices=None, bandwidth=1.0, kernel="gauss
         for key in cv_results.keys():
             cv_results[key].append(cv_iter_result[key])
 
-    print("CKDE learned.   Bandwidth: ", bandwidth)
+    print("CKDE learned.   Params:", {"bandwidth": bandwidth, "kernel": kernel})
     cv_results_summary = {"Logl_mean": np.mean(cv_results["Logl"]), "Logl_std": np.std(cv_results["Logl"]),
                           "LoglStd_mean": np.mean(cv_results["LoglStd"]), "LoglStd_std": np.std(cv_results["LoglStd"]),
                           "Brier_mean": np.mean(cv_results["Brier"]), "Brier_std": np.std(cv_results["Brier"]),
@@ -381,30 +381,33 @@ def cross_validate_ckde(dataset, fold_indices=None, bandwidth=1.0, kernel="gauss
                           "Time_mean": np.mean(cv_results["Time"]), "Time_std": np.std(cv_results["Time"])}
     print(cv_results_summary)
     print()
-    return [cv_results_summary[i] for i in cv_results_summary.keys()] + [bandwidth]
+    return [cv_results_summary[i] for i in cv_results_summary.keys()] + [{"bandwidth": bandwidth, "kernel": kernel}]
 
 
 def get_best_ckde(dataset, fold_indices, param_space=None):
     # Param space is a grid of parameters. Instead of Bayesian optimization, we will use a grid search
     if param_space is None:
-        param_space = {"bandwidth": np.logspace(-1, 0, num=10)}
+        param_space = {"bandwidth": np.logspace(-1, 0, num=10),
+                       "kernel": ["gaussian", "epanechnikov", "linear"]}
 
     best_bandwidth = None
+    best_kernel = None
     best_logl = -np.inf
-    print(param_space["bandwidth"])
-    for bandwidth in param_space["bandwidth"]:
-        metrics = cross_validate_ckde(dataset, fold_indices, bandwidth=bandwidth)
+    for bandwidth, kernel in product(param_space["bandwidth"], param_space["kernel"]):
+        metrics = cross_validate_ckde(dataset, fold_indices, bandwidth=bandwidth, kernel=kernel)
         # Get the mean_logl
         mean_logl = metrics[0]
         if mean_logl > best_logl:
             best_logl = mean_logl
             best_bandwidth = bandwidth
+            best_kernel = kernel
+
 
     # Cross validate again to get the rest of the metrics
-    metrics = cross_validate_ckde(dataset, fold_indices, bandwidth=best_bandwidth)
+    metrics = cross_validate_ckde(dataset, fold_indices, bandwidth=best_bandwidth, kernel=best_kernel)
 
     # Train once again to return the object
-    model = ConditionalKDE(bandwidth=best_bandwidth)
+    model = ConditionalKDE(bandwidth=best_bandwidth, kernel=best_kernel)
     model.train(dataset)
     return model, metrics, best_bandwidth
 

@@ -8,6 +8,7 @@ from pymoo.termination.default import DefaultSingleObjectiveTermination, Default
 
 from bayesace.utils import *
 from bayesace.algorithms.algorithm import ACE, ACEResult
+import multiprocessing as mp
 
 MAX_VALUE_FLOAT = 1e+307
 n_processes = np.max((1, int(mp.cpu_count() / 1)))
