@@ -10,11 +10,16 @@ class PybnesianParallelizationError(Exception):
     pass
 
 
-def get_naive_structure(data: pd.DataFrame, bn_type):
-    naive = bn_type(data.columns)
-    for i in [i for i in data.columns if i != "class"]:
-        naive.add_arc("class", i)
-    return naive
+def get_initial_structure(data: pd.DataFrame, bn_type, structure_type="naive"):
+    initial = bn_type(data.columns)
+    if structure_type == "naive":
+        for i in [i for i in data.columns if i != "class"]:
+            initial.add_arc("class", i)
+    elif structure_type == "empty":
+        pass
+    else:
+        raise ValueError("Invalid structure type. Only valid types are naive and empty.")
+    return initial
 
 
 def copy_structure(bn: pb.BayesianNetwork):
@@ -72,13 +77,14 @@ def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outli
         return data
 
 
-def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, seed=0):
+def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, max_indegree=0,
+                  arc_blacklist=[], arc_whitelist=[], initial_structure="naive", seed=0):
     bn = None
     if bn_type == "CLG":
         if score is None:
             score = "bic"
-        bn = pb.hc(data, start=get_naive_structure(data, pb.CLGNetwork), operators=["arcs"], score=score,
-                   seed=seed)
+        bn = pb.hc(data, start=get_initial_structure(data, pb.CLGNetwork,initial_structure), operators=["arcs"], score=score,
+                   arc_blacklist=arc_blacklist, arc_whitelist=arc_whitelist, max_indegree=max_indegree, seed=seed)
         bn = copy_structure(bn)
     elif bn_type == "SP":
         if score is None:
@@ -86,15 +92,14 @@ def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, seed=0):
         # est = MMHC()
         # test = pb.MutualInformation(data, True)
         # bn = pb.MMHC().estimate(hypot_test = test, operators = pb.OperatorPool([pb.ChangeNodeTypeSet(),pb.ArcOperatorSet()]), score = pb.CVLikelihood(data), bn_type = pb.SemiparametricBNType(), patience = 20) #, score = "cv-lik"
-        bn = pb.hc(data, start=get_naive_structure(data, pb.SemiparametricBN), operators=["arcs", "node_type"],
-                   score=score,
-                   seed=seed)
+        bn = pb.hc(data, start=get_initial_structure(data, pb.SemiparametricBN,initial_structure), operators=["arcs", "node_type"],
+                   arc_blacklist=arc_blacklist, arc_whitelist=arc_whitelist, max_indegree = max_indegree, score=score,seed=seed)
         bn = copy_structure(bn)
     elif bn_type == "Gaussian":
         if score is None:
             score = "bic"
-        bn = pb.hc(data, start=get_naive_structure(data, pb.GaussianNetwork), operators=["arcs"], score=score,
-                   seed=seed)
+        bn = pb.hc(data, start=get_initial_structure(data, pb.GaussianNetwork,initial_structure), operators=["arcs"], score=score,
+                   arc_blacklist=arc_blacklist, arc_whitelist=arc_whitelist, max_indegree=max_indegree, seed=seed)
         bn = copy_structure(bn)
     else:
         raise PybnesianParallelizationError(
