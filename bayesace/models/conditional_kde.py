@@ -68,6 +68,21 @@ class ConditionalKDE(ConditionalDE):
                 log_likelihood[data[class_var_name] == label] = self.kdes[label].score_samples(data[data[class_var_name] == label].drop(columns=class_var_name).values)
         return log_likelihood
 
+    def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
+        # If the class variable is passed, remove it
+        if class_var_name in data.columns:
+            data = data.drop(columns=class_var_name)
+
+        lls = np.zeros(data.shape[0])
+        for i in self.class_distribution.keys():
+            data_with_class = data.copy()
+            data_with_class["class"] = i
+            lls += np.exp(self.logl(data_with_class))
+        return lls
+
+    def log_likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
+        return np.log(self.likelihood(data, class_var_name))
+
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
