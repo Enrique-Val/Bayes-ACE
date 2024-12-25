@@ -1,0 +1,144 @@
+﻿Domain;Variable Definition;Variable Name;Units;Log Transformed
+ID;FIPS code to state and county level;stfips;;
+ID;Name of county;county_name;;
+ID;State;state;;
+ID;Rural-urban continuum code category;cat_rucc;;
+Air;Particulate matter under 10 micrometers in aerodynamic diameter (PM10);pm10;micrograms per cubic meter;
+Air;Particulate matter under 2.5 micrometers in aerodynamic diameter (PM2.5);pm25;micrograms per cubic meter;
+Air;Ozone (O3);O3;parts per billion;
+Air;Sulfur dioxide;ln_so2;parts per billion;log-transformed
+Air;Nitrogen dioxide (NO2);ln_nox;parts per million;log-transformed
+Air;Carbon monoxide (CO);ln_co;parts per million;log-transformed
+Air;Ethylene dibromide;a_edb;tons emitted per year;
+Air;Formaldehyde;a_formaldehyde;tons emitted per year;
+Air;1-1-2-2-tetrachloroethane;a_teca_ln;tons emitted per year;log-transformed
+Air;1-1-2-trichloroethane;a_112tca_ln;tons emitted per year;log-transformed
+Air;1-2-dibromo-3-chloropropane;a_dbcp_ln;tons emitted per year;log-transformed
+Air;1-3-dichloropropene;a_dcl_propene_ln;tons emitted per year;log-transformed
+Air;Acrylic acid;a_acrylic_acid_ln;tons emitted per year;log-transformed
+Air;Benzidine;a_benzidine_ln;tons emitted per year;log-transformed
+Air;Benzyl chloride;a_benzyl_cl_ln;tons emitted per year;log-transformed
+Air;Beryllium compounds;a_be_ln;tons emitted per year;log-transformed
+Air;bis-2-ethylhexyl phthalate;a_dehp_ln;tons emitted per year;log-transformed
+Air;Carbon tetrachloride;a_ccl4_ln;tons emitted per year;log-transformed
+Air;Carbonyl sulfide;a_cyls_ln;tons emitted per year;log-transformed
+Air;Chlorine;a_cl_ln;tons emitted per year;log-transformed
+Air;Chlorobenzene;a_c6h5cl_ln;tons emitted per year;log-transformed
+Air;Chloroform;a_chloroform_ln;tons emitted per year;log-transformed
+Air;Chloroprene;a_chloroprene_ln;tons emitted per year;log-transformed
+Air;Chromium compounds;a_cr_ln;tons emitted per year;log-transformed
+Air;Cobalt compounds;a_co_ln;tons emitted per year;log-transformed
+Air;Cyanide compounds;a_cn_ln;tons emitted per year;log-transformed
+Air;Dibutylphthalate;a_dbp_ln;tons emitted per year;log-transformed
+Air;Ethyl chloride;a_etcl_ln;tons emitted per year;log-transformed
+Air;Ethylbenzene;a_ebenzine_ln;tons emitted per year;log-transformed
+Air;Ethylene dichloride;a_edc_ln;tons emitted per year;log-transformed
+Air;Glycol ethers;a_glycol_ethers_ln;tons emitted per year;log-transformed
+Air;Hydrazine;a_n2h2_ln;tons emitted per year;log-transformed
+Air;Hydrochloric acid;a_hcl_ln;tons emitted per year;log-transformed
+Air;Isophorone;a_isophorone_ln;tons emitted per year;log-transformed
+Air;Manganese compounds;a_mn_ln;tons emitted per year;log-transformed
+Air;Methyl bromide;a_mebr_ln;tons emitted per year;log-transformed
+Air;Methylene chloride;a_mecl2_ln;tons emitted per year;log-transformed
+Air;Phosphine;a_ph3_ln;tons emitted per year;log-transformed
+Air;Polychlorinated biphenyls;a_pcbs_ln;tons emitted per year;log-transformed
+Air;Propylene dichloride;a_procl2_ln;tons emitted per year;log-transformed
+Air;Quinoline;a_quinolin_ln;tons emitted per year;log-transformed
+Air;Trichloroethylene;a_c2hcl3_ln;tons emitted per year;log-transformed
+Air;Vinyl chloride;a_vycl_ln;tons emitted per year;log-transformed
+Built;Rate of vice-related businesses per county;al_pwn_gm_env_rate_ln;proportion;log-transformed
+Built;Rate of civic-related business per county;civic_env_rate_ln;proportion;log-transformed
+Built;Rate of education-related business per county;ed_env_rate_ln;proportion;log-transformed
+Built;Rate of healthcare-related businesses per county;hc_env_rate_ln;proportion;log-transformed
+Built;Rate of negative food resources per county;neg_food_rate_ln;proportion;log-transformed
+Built;Rate of positive food resources per county;pos_food_rate_ln;proportion;log-transformed
+Built;Rate of recreation-related businesses per county;rec_env_rate_ln;proportion;log-transformed
+Built;Rate of social service agencies per county;ss_env_rate_ln;proportion;log-transformed
+Built;Rate of fatal car crashes per county;ln_fatalities;proportion;log-transformed
+Built;Rate of low-rent + section-eight units in county;total_units_ln;proportion;log-transformed
+Built;Proportion of all roads that are secondary roads;SecondaryRoadProportion;proportion;
+Built;Time it takes from home to go to work;CommuteTime;minutes;
+Built;Percent of county residents who report using public transportation;ln_PubTrans;percentage;log-transformed
+Built;Walkability score ;sum_NWIBG;ordinal;
+Built;Percent of county land area classified as natural land cover and open space developed land cover;NINDEX_open;Percentage;
+Land;Number of farms;Farms_per_acre_ln;number ;log-transformed
+Land;Irrigated acres, acres irrigated per county acres ;Pct_irrigated_acres_ln;percent ;log-transformed
+Land;Chemicals used to control Nematodes, acres applied per county acres ;Pct_nematode_acres_ln;percent ;log-transformed
+Land;Manure, acres applied per county acres ;Pct_manure_acres_ln;percent ;log-transformed
+Land;Chemicals used to control Diseases in crops and orchards, acres applied per county acres ;Pct_disease_acres_ln;percent ;log-transformed
+Land;Chemicals used to control growth, thin fruit, or defoliate, acres applied per county acres ;Pct_defoliate_acres_ln;percent ;log-transformed
+Land;Harvested acres, acres harvested per county acres ;Pct_harvested_acres_ln;percent ;log-transformed
+Land;Animal Units, animal units per county acres ;Pct_au_ln;percent ;log-transformed
+Land;Fungicides applied;fungicide_ln;pounds;log-transformed
+Land;Herbicides applied;herbicide_ln;pounds;log-transformed
+Land;Insecticide applied;insecticide_ln;pounds ;log-transformed
+Land;Primarily coal mines, mines per county population;std_coal_prim_pop_ln;proportion;log-transformed
+Land;Primarily metal mines, mines per county population;std_metal_prim_pop_ln;proportion;log-transformed
+Land;Primarily nonmetal mines, mines per county population;std_nonmetal_prim_pop_ln;proportion;log-transformed
+Land;Primarily sand and gravel mines, mines per county population;std_sandandgravel_prim_pop_ln;proportion;log-transformed
+Land;Primarily stone mines, mines per county population;std_stone_prim_pop_ln;proportion;log-transformed
+Land;Radon zone;Radon;ordinal value;
+Land;Log-transformed rate of all facilities per county;Facilities_Rate_ln;proportion;log-transformed
+Sociodemographic;'Bachelor''s degree or higher, percent of persons age 25 years+';Pct_BS;percent;
+Sociodemographic;Percent of persons who are unemployed;Pct_Unemp_total;percent;
+Sociodemographic;Percent of families in poverty;Pct_Fam_Pov;percent;
+Sociodemographic;Percent vacant units;Pct_Vacant_Housing;percent;
+Sociodemographic;Median household value;Med_HH_Value;dollars;
+Sociodemographic;Median household income;ln_HH_Inc;dollars;log-transformed
+Sociodemographic;Occupants per room;ln_Occs_Room;count;log-transformed
+Sociodemographic;Percent renter-occupied units;Pct_RenterOcc;percent;
+Sociodemographic;Violent crime rate (count of violent crimes per county / county population);ln_ViolAv;percent;log-transformed
+Sociodemographic;Percent county employed in creative class;num_CreatClass;percent;
+Sociodemographic;Percent county voting Democrat in 2008;DEMO2008;percent;
+Sociodemographic;Measure of income inequality;GINI_est;proportion;
+Water;Percent of Population on Self Supply;Per_TotPopSS;percent;
+Water;Percent of Public Supply Population which is on Surface Water;Per_PSWithSW;percent;
+Water;% of stream length impaired in county;D303_Percent_ln;percent;log-transformed
+Water;All NPDES permits per 1000 km of stream;ALLNPDESperKM_ln;permits per 1000km stream length;log-transformed
+Water;Calcium (Ca) precipitation weighted mean ;CaAve_ln;mg/L;log-transformed
+Water;Potassium (K) precipitation weighted mean ;Kave_ln;mg/L;log-transformed
+Water;Nitrate (NO3) precipitation weighted mean ;NO3Ave;mg/L;
+Water;Chloride (Cl) precipitation weighted mean ;ClAve_ln;mg/L;log-transformed
+Water;Sulfate (SO4) precipitation weighted mean;SO4Ave_ln;mg/L;log-transformed
+Water;Total Mercury deposition ;HgAve;ng/M2;
+Water;% of county drought – extreme (D3-D4);AvgOfD3_ave;percent;
+Water;Arsenic ;W_As_ln;mg/L;log-transformed
+Water;Barium ;W_Ba_ln;mg/L;log-transformed
+Water;Cadmium ;W_Cd_ln;mg/L;log-transformed
+Water;Chromium (total) ;W_Cr_ln;mg/L;log-transformed
+Water;Cyanide ;W_CN_ln;mg/L;log-transformed
+Water;Fluoride ;W_FL_ln;mg/L;log-transformed
+Water;Mercury (inorganic) ;W_HG_ln;mg/L;log-transformed
+Water;Nitrate (as N) ;W_NO3_ln;mg/L;log-transformed
+Water;Nitrite (as N) ;W_NO2_ln;mg/L;log-transformed
+Water;Selenium ;W_SE_ln;mg/L;log-transformed
+Water;Antimony ;W_SB_ln;mg/L;log-transformed
+Water;Endrin ;W_ENDRIN_ln;ug/L;log-transformed
+Water;Methoxychlor ;W_METHOXYCHLOR_ln;ug/L;log-transformed
+Water;Dalapon ;W_DALAPON_ln;ug/L;log-transformed
+Water;Di(2-ethylhexyl)adipate (DEHA) ;W_DEHA_ln;ug/L;log-transformed
+Water;Simazine ;W_SIMAZINE_ln;ug/L;log-transformed
+Water;Di(2-ethylhexyl) phthalate (DEHP) ;W_DEHP_ln;ug/L;log-transformed
+Water;Picloram ;W_PICLORAM_ln;ug/L;log-transformed
+Water;Dinoseb ;W_DINOSEB_ln;ug/L;log-transformed
+Water;Atrazine ;W_ATRAZINE_ln;ug/L;log-transformed
+Water;2,4-D (2,4-Dichlorophenoxyacetic acid) ;W_24D_ln;ug/L;log-transformed
+Water;Benzo[a]pyrene  ;W_BENZOAP_ln;ug/L;log-transformed
+Water;Pentachlorophenol  ;W_PCP_ln;ug/L;log-transformed
+Water;Polychlorinated biphenyls (PCBs)  ;W_PCB_ln;ug/L;log-transformed
+Water;1,2-Dibromo-3-chloropropane (DBCP) ;W_DBCP_ln;ug/L;log-transformed
+Water;Ethylene dibromide (EDB) ;W_EDB_ln;ug/L;log-transformed
+Water;Xylenes (Total) ;W_XYLENES_ln;ug/L;log-transformed
+Water;Chlordane ;W_CHLORDANE_ln;ug/L;log-transformed
+Water;Dichloromethane (Methylene chloride) ;W_DCM_ln;ug/L;log-transformed
+Water;1,4-Dichlorobenzene (p-Dichlorobenzene) ;W_PDCB_ln;ug/L;log-transformed
+Water;1,1,1-Trichloroethane ;W_111TRICHLORANE_ln;ug/L;log-transformed
+Water;Trichloroethylene ;W_TRICHLORENE_ln;ug/L;log-transformed
+Water;Tetrachloroethylene ;W_C2CL4_ln;ug/L;log-transformed
+Water;Monochlorobenzene (Chlorobenzene) ;W_BENZENE_ln;ug/L;log-transformed
+Water;Toluene ;W_TOLUENE_ln;ug/L;log-transformed
+Water;Ethylbenzene ;W_ETHYLBENZ_ln;ug/L;log-transformed
+Water;Styrene ;W_STRYENE_ln;ug/L;log-transformed
+Water;Alpha Particles (Gross Alpha, excl.Radon&U) ;W_ALPHA;PCl/L;
+Water;cis-1,2-Dichloroethylene ;W_DCE_ln;ug/L;log-transformed
+Water;Total Coliform Proportion (average number of violations*(Population served/County Population));Coliform_Proportion_ln;proportion;log-transformed
