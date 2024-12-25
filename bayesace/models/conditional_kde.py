@@ -112,7 +112,7 @@ class ConditionalKDE(ConditionalDE):
     def get_class_labels(self):
         return list(self.class_distribution.keys()).copy()
 
-    def sample(self, n_samples, seed=None):
+    def sample(self, n_samples, ordered=True, seed=None):
         np.random.seed(seed)
         samples = []
         samples_class_label = []
