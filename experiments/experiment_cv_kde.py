@@ -118,10 +118,7 @@ def to_numpy_shared(df):
 
 # Worker function that accesses shared memory
 def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n_folds, i_fold, model_type="NVP",
-           batch_size=64, steps=500, lr=None, weight_decay=None,
-           count_bins=None, hidden_units=None,
-           layers=None,
-           n_flows=None, perms_instantiation=None, directory_path="./"):
+           nn_params: dict=None, directory_path="./"):
     torch.set_num_threads(1)
     train_index, test_index = get_kfold_indices(n_instances, n_folds, i_fold)
     # Reconstruct the DataFrame using the shared memory array
@@ -137,29 +134,24 @@ def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n
     df_train = df_shared.iloc[train_index].reset_index(drop=True)
     df_test = df_shared.iloc[test_index].reset_index(drop=True)
     # Proceed with training
-    return train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size, steps=steps, lr=lr,
-                                    weight_decay=weight_decay,
-                                    count_bins=count_bins, hidden_units=hidden_units, layers=layers, n_flows=n_flows,
-                                    perms_instantiation=perms_instantiation, directory_path=directory_path)
+    return train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params, directory_path=directory_path)
 
 
-def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64, steps=500, lr=None, weight_decay=None,
-                             count_bins=None, hidden_units=None, layers=None, n_flows=None, perms_instantiation=None,
-                             directory_path="./"):
+def train_nf_and_get_results(df_train, df_test, model_type="NVP", nn_params: dict=None, directory_path="./"):
     d = df_train.shape[1] - 1
+
+    # We make a copy, since the hidden units that we specify are RELATIVE to the inputs
+    nn_params_copy = nn_params.copy()
+    nn_params_copy["hidden_units"] = d * nn_params["hidden_units"]
     t0 = time.time()
     model = None
     if model_type == "NVP":
         model = ConditionalNVP(graphics=False)
-        model.train(df_train, lr=lr, weight_decay=weight_decay, split_dim=d // 2,
-                    hidden_units=hidden_units * d, layers=layers,
-                    n_flows=n_flows, steps=steps, batch_size=batch_size, perms_instantiation=perms_instantiation,
-                    model_pth_name=directory_path + "model-" + str(os.getpid()) + ".pkl")
+        model.train(df_train, split_dim=d // 2, model_pth_name=directory_path + "model-" + str(os.getpid()) + ".pkl",
+                    **nn_params_copy)
     elif model_type == "Spline":
         model = ConditionalSpline()
-        model.train(df_train, lr=lr, weight_decay=weight_decay, count_bins=count_bins,
-                    hidden_units=hidden_units * d, layers=layers,
-                    steps=steps, batch_size=batch_size)
+        model.train(df_train, **nn_params_copy)
     it_time = time.time() - t0
     logl_data = model.logl(df_test)
     logl = logl_data.mean()
@@ -171,21 +163,7 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", batch_size=64,
             "Time": np.mean(it_time)}
 
 
-def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=64, steps=500, lr=None,
-                      weight_decay=None,
-                      count_bins=None, hidden_units=None,
-                      layers=None,
-                      n_flows=None, perms_instantiation=None, parallelize=False, working_dir="./") -> list | None:
-    param_dict = None
-    if model_type == "NVP":
-        param_dict = {"lr": lr, "weight_decay": weight_decay, "hidden_u": hidden_units,
-                      "layers": layers, "n_flows": n_flows}
-        if perms_instantiation is None:
-            perms_instantiation = [torch.randperm(d) for _ in range(n_flows)]
-    elif model_type == "Spline":
-        param_dict = {"lr": lr, "weight_decay": weight_decay, "count_bins": count_bins, "hidden_u": hidden_units,
-                      "layers": layers}
-
+def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", parallelize=False, working_dir="./", nn_params: dict=None) -> list | None :
     cv_iter_results = []
     if not parallelize:
         try:
@@ -193,17 +171,12 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
                 df_train = dataset.iloc[train_index].reset_index(drop=True)
                 df_test = dataset.iloc[test_index].reset_index(drop=True)
                 cv_iter_results.append(
-                    train_nf_and_get_results(df_train, df_test, model_type=model_type, batch_size=batch_size,
-                                             steps=steps, lr=lr,
-                                             weight_decay=weight_decay,
-                                             count_bins=count_bins, hidden_units=hidden_units, layers=layers,
-                                             n_flows=n_flows,
-                                             perms_instantiation=perms_instantiation, directory_path=working_dir))
+                    train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params, directory_path=working_dir))
         except NanLogProb as e:
             cv_iter_results = None
             to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
                         "Consider smoothing data, decreasing the value of the lr or the complexity of the "
-                        "network.") + str(param_dict)
+                        "network.") + str(nn_params)
             warnings.warn(to_print, RuntimeWarning)
             print()
     elif parallelize:
@@ -216,16 +189,14 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
             # Use starmap with the shared memory array and other needed parameters
             cv_iter_results = pool.starmap(worker,
                                            [(shm.name, shared_array.shape, shared_array.dtype, column_names,
-                                             ordinal_mapping, dataset.shape[0], k, i_fold, model_type, batch_size,
-                                             steps, lr,
-                                             weight_decay, count_bins, hidden_units, layers, n_flows,
-                                             perms_instantiation, working_dir)
+                                             ordinal_mapping, dataset.shape[0], k, i_fold, model_type, nn_params,
+                                             working_dir)
                                             for i_fold in range(k)])
         except NanLogProb as e:
             cv_iter_results = None
             to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
                         "Consider smoothing data, decreasing the value of the lr or the complexity of the "
-                        "network.") + str(param_dict)
+                        "network.") + str(nn_params)
             warnings.warn(to_print, RuntimeWarning)
             print()
 
@@ -240,8 +211,12 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
     for cv_iter_result in cv_iter_results:
         for key in cv_results.keys():
             cv_results[key].append(cv_iter_result[key])
+    nn_params_print = nn_params.copy()
+    # Drop the working directory and permutations
+    nn_params_print.pop("perms_instantiation", None)
+    nn_params_print.pop("working_dir", None)
 
-    print(str(param_dict), "normalizing flow learned")
+    print(str(nn_params_print), "normalizing flow learned")
     cv_results_summary = {"Logl_mean": np.mean(cv_results["Logl"]), "Logl_std": np.std(cv_results["Logl"]),
                           "LoglStd_mean": np.mean(cv_results["LoglStd"]), "LoglStd_std": np.std(cv_results["LoglStd"]),
                           "Brier_mean": np.mean(cv_results["Brier"]), "Brier_std": np.std(cv_results["Brier"]),
@@ -249,17 +224,25 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", batch_size=6
                           "Time_mean": np.mean(cv_results["Time"]), "Time_std": np.std(cv_results["Time"])}
     print(cv_results_summary)
     print()
-    return [cv_results_summary[i] for i in cv_results_summary.keys()] + [param_dict]
+    return [cv_results_summary[i] for i in cv_results_summary.keys()] + [nn_params]
 
 
-def get_best_normalizing_flow(dataset, fold_indices, n_iter=50, batch_size=64, steps=500, model_type="NVP",
+def get_best_normalizing_flow(dataset, fold_indices, n_iter=50, nn_params_fixed=None, model_type="NVP",
                               parallelize=False,
                               param_space=None, working_dir="./"):
     # Bayesian optimization
 
     # List to store the random permutations
-    if param_space is None:
-        raise ValueError("The parameter param_space must be defined")
+    if param_space is None and model_type == "NVP":
+        param_space = [
+            Real(1e-4, 5e-3, name='lr'),
+            Real(1e-4, 1e-2, name='weight_decay'),
+            Integer(2, 5, name='hidden_units'),
+            Integer(1, 3, name='layers'),
+            Integer(1, 8, name='n_flows')
+        ]
+    elif param_space is None :
+        raise ValueError("param_space must be defined for the model type")
     perms_list = []
 
     # Define the objective function
@@ -271,11 +254,16 @@ def get_best_normalizing_flow(dataset, fold_indices, n_iter=50, batch_size=64, s
         if model_type == "NVP":
             perms_instantiation = [torch.randperm(d) for _ in range(params["n_flows"])]
             perms_list.append(perms_instantiation)
-        result_cv = cross_validate_nf(dataset, fold_indices, model_type=model_type, batch_size=batch_size, steps=steps,
-                                      perms_instantiation=perms_instantiation, parallelize=parallelize,
-                                      working_dir=working_dir, **params)
+            params["perms_instantiation"] = perms_instantiation
+        # Apend the params and fixed params
+        if nn_params_fixed is not None:
+            params.update(nn_params_fixed)
+        # Cross validate
+        result_cv = cross_validate_nf(dataset, fold_indices, model_type=model_type, parallelize=parallelize,
+                                      working_dir=working_dir, nn_params=params)
         if result_cv is None or result_cv[0] < -3e11:
-            # If the logl is too low, return a high value for the objective function. This allows to not overpenalize regions of the space
+            # If the logl is too low, return a high value for the objective function. This allows to not overpenalize
+            # regions of the space
             return 3e11
         return -result_cv[0]  # Assuming we want to maximize loglikelihood
 
@@ -293,26 +281,29 @@ def get_best_normalizing_flow(dataset, fold_indices, n_iter=50, batch_size=64, s
 
     # Get the best parameters
     best_params = result.x
-    gt_params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
+    best_params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
     # gt_params_str = str(gt_params)
     print("Best parameters: ", best_params)
-    print("Gt params:", gt_params)
+
+    # Add to the best parameters the fixed parameters and the best permutation
+    if nn_params_fixed is not None:
+        best_params.update(nn_params_fixed)
+    best_params["perms_instantiation"] = best_perm
 
     # Cross validate again to get the rest of the metrics
-    metrics = cross_validate_nf(dataset, fold_indices, batch_size=batch_size, steps=steps,
-                                perms_instantiation=best_perm, working_dir=working_dir, **gt_params)
-    params = {param_space[i].name: best_params[i] for i in range(len(param_space))}
-    params["hidden_units"] = d * gt_params["hidden_units"]
+    metrics = cross_validate_nf(dataset, fold_indices, nn_params=best_params, working_dir=working_dir)
 
     # Train once again to return the object
     model = None
     if model_type == "NVP":
         model = ConditionalNVP(graphics=False)
-        params["split_dim"] = d // 2
+        best_params["split_dim"] = d // 2
     elif model_type == "Splines":
         model = ConditionalSpline()
-    model.train(dataset, **params, steps=steps, batch_size=batch_size, perms_instantiation=best_perm,
-                model_pth_name=working_dir + "best_model.pkl")
+
+    # Prior to training, we DERELATIVIZE the hidden units
+    best_params["hidden_units"] = d * best_params["hidden_units"]
+    model.train(dataset, **best_params, model_pth_name=working_dir + "best_model.pkl")
     return model, metrics, result
 
 
@@ -455,8 +446,6 @@ if __name__ == "__main__":
     n_iter = args.n_iter
     parallelize = args.parallelize
 
-    global batch_size
-
     directory_path = args.dir_name + str(dataset_id) + "/"
     if not os.path.exists(directory_path):
         # If the directory does not exist, create it
@@ -479,7 +468,6 @@ if __name__ == "__main__":
                                   minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
 
         d = len(dataset.columns) - 1
-        split_dim = d // 2
         n_instances = dataset.shape[0]
         batch_size = int((n_instances / n_batches) * 0.8 + 1)
 
@@ -540,9 +528,7 @@ if __name__ == "__main__":
         # New fold indices
         fold_indices = kfold_indices(resampled_dataset, k)
 
-        # If we use NVP, we need to add the split_dim parameter
         d = resampled_dataset.shape[1] - 1
-        split_dim = d // 2
         n_instances = resampled_dataset.shape[0]
         batch_size = int((n_instances / n_batches) + 1)
         if args.type == "NVP" and args.part == 'sd':
@@ -574,11 +560,12 @@ if __name__ == "__main__":
         bn = hill_climbing(data=resampled_dataset, bn_type="CLG")
         pickle.dump(bn, open(directory_path + "clg_" + str(dataset_id) + ".pkl", "wb"))
 
-        # Validate normalizing flow with different params
+        # Validate normalizing flow with different params. Specify also the fixed params
+        nn_params_fixed = {"batch_size": batch_size, "steps": steps, "working_dir": directory_path}
+
         nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type,
-                                                              n_iter=n_iter, batch_size=batch_size, steps=steps,
-                                                              parallelize=parallelize, param_space=param_space,
-                                                              working_dir=directory_path)
+                                                              n_iter=n_iter, nn_params_fixed=nn_params_fixed,
+                                                              parallelize=parallelize, param_space=param_space)
         results_df["NF"] = metrics
 
         pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
