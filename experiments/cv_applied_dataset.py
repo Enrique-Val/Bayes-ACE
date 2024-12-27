@@ -7,11 +7,12 @@ import numpy as np
 import pandas as pd
 import ucimlrepo
 from matplotlib import pyplot as plt
+from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 from skopt.space import Real, Integer
 
 from bayesace import hill_climbing
-from experiments.experiment_cv_nf import get_best_normalizing_flow, get_kfold_indices, kfold_indices, cross_validate_bn
+from experiments.experiment_cv_kde import get_best_normalizing_flow, cross_validate_bn
 
 TAIWANESE_BANKRUPCY_PREDICTION = 572
 STUDENT_PERFORMANCE = 320
@@ -118,7 +119,7 @@ if __name__ == "__main__":
     # Add small noise to the data N(0, 0.01)
     data[data.columns[:-1]] += np.random.normal(0, 0.1, data[data.columns[:-1]].shape)
 
-    fold_indices = kfold_indices(data, k=3)
+    kf = KFold(n_splits=3, shuffle=True, random_state=0)
 
 
     # Validate Gaussian network
@@ -135,7 +136,7 @@ if __name__ == "__main__":
     bn = hill_climbing(data=data, bn_type="CLG")
 
     # Train a normalizing flow
-    model, metrics, result = get_best_normalizing_flow(data, fold_indices, param_space=param_space, batch_size=128, n_iter=10, parallelize=False, steps=100, working_dir=args.results_dir)
+    model, metrics, result = get_best_normalizing_flow(data, kf, param_space=param_space, batch_size=128, n_iter=10, parallelize=False, steps=100, working_dir=args.results_dir)
     results_df["NF"] = metrics
 
     print(results_df)

@@ -4,6 +4,7 @@ from itertools import product
 from multiprocessing import shared_memory
 
 import torch
+from sklearn.model_selection import KFold
 from skopt import gp_minimize
 from skopt.plots import plot_convergence, plot_evaluations
 from skopt.space import Real, Integer
@@ -24,26 +25,6 @@ from bayesace.utils import *
 import multiprocessing as mp
 
 import time
-
-
-def kfold_indices(data, k):
-    fold_size = len(data) // k
-    indices = np.arange(len(data))
-    folds = []
-    for i in range(k):
-        test_indices = indices[i * fold_size: (i + 1) * fold_size]
-        train_indices = np.concatenate([indices[:i * fold_size], indices[(i + 1) * fold_size:]])
-        folds.append((train_indices, test_indices))
-    return folds
-
-
-def get_kfold_indices(n_instances, n_folds, i):
-    fold_size = n_instances // n_folds
-    indices = np.arange(n_instances)
-    test_indices = indices[i * fold_size: (i + 1) * fold_size]
-    train_indices = np.concatenate([indices[:i * fold_size], indices[(i + 1) * fold_size:]])
-    return train_indices, test_indices
-
 
 # Define the number of folds (K)
 k = 10
@@ -72,10 +53,10 @@ param_space = [
 ]
 
 
-def cross_validate_bn(dataset, fold_indices=None):
+def cross_validate_bn(dataset, kf):
     # Validate Gaussian network
     bn_results = []
-    for i, (train_index, test_index) in enumerate(fold_indices):
+    for i, (train_index, test_index) in enumerate(kf.split(dataset)):
         bn_results_i = []
         df_train = dataset.iloc[train_index].reset_index(drop=True)
         df_test = dataset.iloc[test_index].reset_index(drop=True)
@@ -117,10 +98,10 @@ def to_numpy_shared(df):
 
 
 # Worker function that accesses shared memory
-def worker(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n_folds, i_fold, model_type="NVP",
+def worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold, model_type="NVP",
            nn_params: dict=None, directory_path="./"):
     torch.set_num_threads(1)
-    train_index, test_index = get_kfold_indices(n_instances, n_folds, i_fold)
+    train_index, test_index = i_fold
     # Reconstruct the DataFrame using the shared memory array
     # Access shared memory by name
     existing_shm = shared_memory.SharedMemory(name=shm_name)
@@ -163,11 +144,11 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", nn_params: dic
             "Time": np.mean(it_time)}
 
 
-def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", parallelize=False, working_dir="./", nn_params: dict=None) -> list | None :
+def cross_validate_nf(dataset, kf, model_type="NVP", parallelize=False, working_dir="./", nn_params: dict=None) -> list | None :
     cv_iter_results = []
     if not parallelize:
         try:
-            for train_index, test_index in fold_indices:
+            for train_index, test_index in kf.split(dataset):
                 df_train = dataset.iloc[train_index].reset_index(drop=True)
                 df_test = dataset.iloc[test_index].reset_index(drop=True)
                 cv_iter_results.append(
@@ -181,17 +162,15 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", parallelize=
             print()
     elif parallelize:
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
-        df_shape = dataset.shape
         column_names = dataset.columns.tolist()
         pool = mp.Pool(min(mp.cpu_count() - 1, k))
-        fold_tasks = [(train_index, test_index) for train_index, test_index in fold_indices]
         try:
             # Use starmap with the shared memory array and other needed parameters
             cv_iter_results = pool.starmap(worker,
                                            [(shm.name, shared_array.shape, shared_array.dtype, column_names,
-                                             ordinal_mapping, dataset.shape[0], k, i_fold, model_type, nn_params,
+                                             ordinal_mapping, i_fold, model_type, nn_params,
                                              working_dir)
-                                            for i_fold in range(k)])
+                                            for i_fold in kf.split(dataset)])
         except NanLogProb as e:
             cv_iter_results = None
             to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
@@ -227,7 +206,7 @@ def cross_validate_nf(dataset, fold_indices=None, model_type="NVP", parallelize=
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [nn_params]
 
 
-def get_best_normalizing_flow(dataset, fold_indices, n_iter=50, nn_params_fixed=None, model_type="NVP",
+def get_best_normalizing_flow(dataset, kf, n_iter=50, nn_params_fixed=None, model_type="NVP",
                               parallelize=False,
                               param_space=None, working_dir="./"):
     # Bayesian optimization
@@ -259,7 +238,7 @@ def get_best_normalizing_flow(dataset, fold_indices, n_iter=50, nn_params_fixed=
         if nn_params_fixed is not None:
             params.update(nn_params_fixed)
         # Cross validate
-        result_cv = cross_validate_nf(dataset, fold_indices, model_type=model_type, parallelize=parallelize,
+        result_cv = cross_validate_nf(dataset, kf, model_type=model_type, parallelize=parallelize,
                                       working_dir=working_dir, nn_params=params)
         if result_cv is None or result_cv[0] < -3e11:
             # If the logl is too low, return a high value for the objective function. This allows to not overpenalize
@@ -291,7 +270,7 @@ def get_best_normalizing_flow(dataset, fold_indices, n_iter=50, nn_params_fixed=
     best_params["perms_instantiation"] = best_perm
 
     # Cross validate again to get the rest of the metrics
-    metrics = cross_validate_nf(dataset, fold_indices, nn_params=best_params, working_dir=working_dir)
+    metrics = cross_validate_nf(dataset, kf, nn_params=best_params, working_dir=working_dir)
 
     # Train once again to return the object
     model = None
@@ -322,10 +301,10 @@ def train_ckde_and_get_results(df_train, df_test, bandwidth=1.0, kernel="gaussia
             "Time": np.mean(it_time)}
 
 
-def worker_ckde(shm_name, shape, dtype, column_names, ordinal_mapping, n_instances, n_folds, i_fold, bandwidth=1.0,
+def worker_ckde(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold, bandwidth=1.0,
                 kernel="gaussian"):
     torch.set_num_threads(1)
-    train_index, test_index = get_kfold_indices(n_instances, n_folds, i_fold)
+    train_index, test_index = i_fold
     # Reconstruct the DataFrame using the shared memory array
     # Access shared memory by name
     existing_shm = shared_memory.SharedMemory(name=shm_name)
@@ -342,24 +321,22 @@ def worker_ckde(shm_name, shape, dtype, column_names, ordinal_mapping, n_instanc
     return train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel)
 
 
-def cross_validate_ckde(dataset, fold_indices=None, bandwidth=1.0, kernel="gaussian", parallelize=False) -> list | None:
+def cross_validate_ckde(dataset, kf, bandwidth=1.0, kernel="gaussian", parallelize=False) -> list | None:
     cv_iter_results = []
     if not parallelize:
-        for train_index, test_index in fold_indices:
+        for train_index, test_index in kf.split(dataset):
             df_train = dataset.iloc[train_index].reset_index(drop=True)
             df_test = dataset.iloc[test_index].reset_index(drop=True)
             cv_iter_results.append(
                 train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel))
     elif parallelize:
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
-        df_shape = dataset.shape
         column_names = dataset.columns.tolist()
         pool = mp.Pool(min(mp.cpu_count() - 1, k))
-        fold_tasks = [(train_index, test_index) for train_index, test_index in fold_indices]
         cv_iter_results = pool.starmap(worker_ckde,
                                        [(shm.name, shared_array.shape, shared_array.dtype, column_names,
-                                         ordinal_mapping, dataset.shape[0], k, i_fold, bandwidth, kernel)
-                                        for i_fold in range(k)])
+                                         ordinal_mapping, i_fold, bandwidth, kernel)
+                                        for i_fold in kf.split(dataset)])
         pool.close()
         pool.join()
 
@@ -381,7 +358,7 @@ def cross_validate_ckde(dataset, fold_indices=None, bandwidth=1.0, kernel="gauss
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [{"bandwidth": bandwidth, "kernel": kernel}]
 
 
-def grid_search_ckde(dataset, fold_indices, param_space, previous_best=None):
+def grid_search_ckde(dataset, kf, param_space, previous_best=None):
     best_bandwidth = None
     best_kernel = None
     best_logl = -np.inf
@@ -390,7 +367,7 @@ def grid_search_ckde(dataset, fold_indices, param_space, previous_best=None):
         best_bandwidth = previous_best["bandwidth"]
         best_kernel = previous_best["kernel"]
     for bandwidth, kernel in product(param_space["bandwidth"], param_space["kernel"]):
-        metrics = cross_validate_ckde(dataset, fold_indices, bandwidth=bandwidth, kernel=kernel)
+        metrics = cross_validate_ckde(dataset, kf, bandwidth=bandwidth, kernel=kernel)
         # Get the mean_logl
         mean_logl = metrics[0]
         if mean_logl > best_logl:
@@ -400,26 +377,26 @@ def grid_search_ckde(dataset, fold_indices, param_space, previous_best=None):
     return best_logl, best_bandwidth, best_kernel
 
 
-def get_best_ckde(dataset, fold_indices, param_space=None):
+def get_best_ckde(dataset, kf, param_space=None):
     # Param space is a grid of parameters. Instead of Bayesian optimization, we will use a grid search
     if param_space is None:
         param_space_gauss = {"bandwidth": np.logspace(-1, 0, num=10),
                              "kernel": ["gaussian"]}
         param_space_linear = {"bandwidth": np.logspace(0, 1, num=10),
                               "kernel": ["epanechnikov", "linear"]}
-        best_logl, best_bandwidth, best_kernel = grid_search_ckde(dataset, fold_indices,
+        best_logl, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf,
                                                                   param_space_gauss)
-        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, fold_indices,
+        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf,
                                                           param_space_linear,
                                                           previous_best={
                                                               "logl": best_logl,
                                                               "bandwidth": best_bandwidth,
                                                               "kernel": best_kernel})
     else:
-        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, fold_indices, param_space)
+        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf, param_space)
 
     # Cross validate again to get the rest of the metrics
-    metrics = cross_validate_ckde(dataset, fold_indices, bandwidth=best_bandwidth, kernel=best_kernel)
+    metrics = cross_validate_ckde(dataset, kf, bandwidth=best_bandwidth, kernel=best_kernel)
 
     # Train once again to return the object
     model = ConditionalKDE(bandwidth=best_bandwidth, kernel=best_kernel)
@@ -459,6 +436,9 @@ if __name__ == "__main__":
     # Set the metrics to evaluate
     result_metrics = ["Logl", "LoglStd", "Brier", "AUC", "Time"]
 
+    # Create a k-fold object
+    kf = KFold(n_splits=k, shuffle=True, random_state=0)
+
     if args.part == 'rd' or args.part == 'full':
         # Load the dataset and preprocess it
         dataset = get_data(dataset_id, standardize=True)
@@ -474,9 +454,6 @@ if __name__ == "__main__":
         if args.type == "NVP":
             param_space.pop(2)
 
-        # Get the fold indices
-        fold_indices = kfold_indices(dataset, k)
-
         # Storage of results
         cartesian_product = list(product(result_metrics, ["_mean", "_std"]))
         # Flattening the list of tuples into a single list
@@ -486,7 +463,7 @@ if __name__ == "__main__":
         results_df.index.name = str(dataset_id)
 
         # Validate Gaussian network for preliminary comparisons
-        bn_results = cross_validate_bn(dataset, fold_indices)
+        bn_results = cross_validate_bn(dataset, kf)
         results_df["CLG_RD"] = bn_results
 
         # Print results
@@ -496,7 +473,7 @@ if __name__ == "__main__":
         print()
 
         # First, learn a KDE serving as grouns truth flow and sample new synthetic data
-        gt_model, metrics, result = get_best_ckde(dataset, fold_indices)
+        gt_model, metrics, result = get_best_ckde(dataset, kf)
         results_df["GT_RD"] = metrics
 
         pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
@@ -525,9 +502,6 @@ if __name__ == "__main__":
             resampled_dataset = resampled_dataset[
                 resampled_dataset[i] > (resampled_dataset[i].mean() - resampled_dataset[i].std() * 3)]
 
-        # New fold indices
-        fold_indices = kfold_indices(resampled_dataset, k)
-
         d = resampled_dataset.shape[1] - 1
         n_instances = resampled_dataset.shape[0]
         batch_size = int((n_instances / n_batches) + 1)
@@ -547,7 +521,7 @@ if __name__ == "__main__":
         results_df["GT_SD"] = resampled_dataset_metrics
 
         # Validate Gaussian network
-        bn_results = cross_validate_bn(resampled_dataset, fold_indices)
+        bn_results = cross_validate_bn(resampled_dataset, kf)
         results_df["CLG"] = bn_results
 
         # Print results
@@ -563,7 +537,7 @@ if __name__ == "__main__":
         # Validate normalizing flow with different params. Specify also the fixed params
         nn_params_fixed = {"batch_size": batch_size, "steps": steps, "working_dir": directory_path}
 
-        nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, fold_indices, model_type=args.type,
+        nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, kf, model_type=args.type,
                                                               n_iter=n_iter, nn_params_fixed=nn_params_fixed,
                                                               parallelize=parallelize, param_space=param_space)
         results_df["NF"] = metrics
