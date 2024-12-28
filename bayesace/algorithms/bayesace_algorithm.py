@@ -28,7 +28,7 @@ def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estim
 class BestPathFinder(Problem):
     def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=20,
                  log_likelihood_threshold=-np.inf,
-                 accuracy_threshold=0.05, sampling_range=(-3, 3), parallelize=False, multi_objective=False, **kwargs):
+                 posterior_probability_threshold=0.05, sampling_range=(-3, 3), parallelize=False, multi_objective=False, **kwargs):
         n_features = (len(instance.columns) - 1)
         xl = None
         xu = None
@@ -58,7 +58,7 @@ class BestPathFinder(Problem):
         assert self.density_estimator.fitted()
         self.chunks = chunks
         self.log_likelihood_threshold = log_likelihood_threshold
-        self.accuracy_threshold = accuracy_threshold
+        self.posterior_probability_threshold = posterior_probability_threshold
         self.parallelize = parallelize
         self.multi_objective = multi_objective
 
@@ -91,7 +91,7 @@ class BestPathFinder(Problem):
         else:
             out["F"] = np.column_stack(f1)
 
-        g1 = neg_posterior_prob + self.accuracy_threshold  # -likelihood(x_cfx, learned)+0.0000001
+        g1 = neg_posterior_prob + self.posterior_probability_threshold  # -likelihood(x_cfx, learned)+0.0000001
         g2 = neg_log_likel + self.log_likelihood_threshold
         out["G"] = np.column_stack([g1, g2])
 
@@ -131,7 +131,7 @@ class BayesACE(ACE):
             logl = log_likelihood(candidate_initial, self.density_estimator)
             post_prob = posterior_probability(candidate_initial, target_label, self.density_estimator)
 
-            mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)
+            mask = (logl > self.log_likelihood_threshold) & (post_prob > self.posterior_probability_threshold)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
             candidate_initial = candidate_initial.drop("class", axis=1)
             if candidate_initial.shape[0] > 0:
@@ -184,12 +184,12 @@ class BayesACE(ACE):
                  opt_algorithm: Type[GeneticAlgorithm] = NSGA2,
                  opt_algorithm_params: dict = None,
                  generations: int = 1000,
-                 log_likelihood_threshold=-np.inf, accuracy_threshold=0.50, penalty=1, sampling_range=None,
+                 log_likelihood_threshold=-np.inf, posterior_probability_threshold=0.50, penalty=1, sampling_range=None,
                  initialization="guided",
                  seed=0,
                  verbose=False, parallelize=False, multi_objective=False):
         super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
-                         accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
+                         posterior_probability_threshold=posterior_probability_threshold, penalty=penalty, seed=seed, verbose=verbose,
                          parallelize=parallelize)
         if opt_algorithm_params is None:
             opt_algorithm_params = {"pop_size": 100}
@@ -220,7 +220,7 @@ class BayesACE(ACE):
                                  target_label=target_label, n_vertex=self.n_vertex,
                                  penalty=self.penalty, chunks=self.chunks,
                                  log_likelihood_threshold=self.log_likelihood_threshold,
-                                 accuracy_threshold=self.accuracy_threshold, sampling_range=self.sampling_range, multi_objective=self.multi_objective)
+                                 posterior_probability_threshold=self.posterior_probability_threshold, sampling_range=self.sampling_range, multi_objective=self.multi_objective)
         # Create an algorithm of type self.opt_algorithm with the params self.opt_algorithm_params
         algorithm = self.opt_algorithm(sampling=initial_sample, **self.opt_algorithm_params)
 

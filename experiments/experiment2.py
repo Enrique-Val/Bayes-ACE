@@ -65,7 +65,7 @@ if __name__ == "__main__":
     n_vertices = [0,1]
     penalty = 1
     likelihood_dev_list = [-1, -0.5, 0, 0.5]
-    accuracy_threshold_list = [-1, -0.5, 0, 0.5]
+    post_prob_dev_list = [-1, -0.5, 0, 0.5]
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     alg = FACE(density_estimator=gt_estimator, features=df_train.columns[:-1], chunks=chunks,
                dataset=df_train.drop("class", axis=1),
                distance_threshold=eps, graph_type="integral", f_tilde=None, seed=0, verbose=verbose,
-               log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
+               log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0
     algorithms.append(alg)
     density_estimator_paths.append(gt_estimator_path)
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
                dataset=df_train.drop("class", axis=1),
                distance_threshold=eps, graph_type="kde", f_tilde=None, seed=0, verbose=verbose,
-               log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
+               log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0
     algorithms.append(alg)
     density_estimator_paths.append(nf_path)
@@ -178,7 +178,7 @@ if __name__ == "__main__":
             t0 = time.time()
             alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
                            n_vertex=n_vertex,
-                           accuracy_threshold=0.00, log_likelihood_threshold=0.00,
+                           posterior_probability_threshold=0.00, log_likelihood_threshold=0.00,
                            chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                            initialization="guided",
                            seed=0, verbose=verbose, opt_algorithm=NSGA2,
@@ -207,8 +207,8 @@ if __name__ == "__main__":
     if not os.path.exists(results_dir + 'paths/'):
         os.makedirs(results_dir + 'paths/')
 
-    for likelihood_dev,accuracy_threshold in zip(likelihood_dev_list, accuracy_threshold_list):
-        print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", accuracy_threshold)
+    for likelihood_dev,post_prob_dev in zip(likelihood_dev_list, post_prob_dev_list):
+        print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", post_prob_dev)
         # Result storage
         results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
         # Name the index column with the dataset id
@@ -217,7 +217,7 @@ if __name__ == "__main__":
         # Set the proper likelihood  and accuracy thresholds
         for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
             algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
-            algorithm.accuracy_threshold = min(mae_gt + std_mae_gt * accuracy_threshold, 0.99)
+            algorithm.posterior_probability_threshold = min(mae_gt + std_mae_gt * post_prob_dev, 0.99)
 
         for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
             print("Algorithm:", algorithm_str)
@@ -296,7 +296,7 @@ if __name__ == "__main__":
                     os.makedirs(results_dir + i + '/')
                 results_dfs[i].to_csv(
                     results_dir + i + '/likelihood' + str(likelihood_dev) + '_pp' + str(
-                        accuracy_threshold) + '.csv')
+                        post_prob_dev) + '.csv')
         else :
             for i in metrics:
                 print(i)

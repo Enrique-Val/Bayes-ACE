@@ -5,6 +5,7 @@ import multiprocessing as mp
 import pickle
 
 import argparse
+import time
 
 import numpy as np
 import torch
@@ -41,7 +42,7 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
         t0 = time.time()
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
                        n_vertex=n_vertex,
-                       accuracy_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
+                       posterior_probability_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
                        chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                        initialization="guided", seed=0, verbose=True, opt_algorithm=NSGA2,
                        opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),

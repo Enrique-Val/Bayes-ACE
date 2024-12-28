@@ -7,6 +7,8 @@ import pickle
 import argparse
 
 import time
+
+import pandas as pd
 import torch
 from pymoo.algorithms.moo.nsga2 import NSGA2, binary_tournament
 from pymoo.operators.crossover.sbx import SBX
@@ -21,31 +23,26 @@ from experiments.utils import setup_experiment, get_constraints, check_enough_in
 
 
 # Worker function for parallelization
-def worker(instance, density_estimator_path, gt_estimator_path, penalty, n_vertices, likelihood_threshold,
-           accuracy_threshold, chunks, sampling_range, eta_c, eta_m, selection_type):
+def worker(instance: pd.DataFrame, density_estimator_path: str, gt_estimator_path: str, penalty: int,
+           n_vertices: int, ace_params: dict):
     torch.set_num_threads(1)
     density_estimator = pickle.load(open(density_estimator_path, 'rb'))
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
-    return get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices,
-                               likelihood_threshold, accuracy_threshold, chunks, sampling_range,
-                               eta_c, eta_m, selection_type)
+    return get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices, ace_params)
 
 
-def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices, likelihood_threshold,
-                        accuracy_threshold, chunks,
-                        sampling_range, eta_c, eta_m, selection_type):
+def get_counterfactuals(instance: pd.DataFrame, density_estimator: ConditionalDE, gt_estimator: ConditionalDE,
+                        penalty: int,
+                        n_vertices: int, ace_params: dict):
     distances = np.zeros(n_vertices)
     times = np.zeros(n_vertices)
     for n_vertex in range(n_vertices):
         target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
         t0 = time.time()
+        print("Vertices:", n_vertex)
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
-                       n_vertex=n_vertex+1,
-                       accuracy_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
-                       chunks=chunks, penalty=penalty, sampling_range=sampling_range,
-                       initialization="guided", seed=0, verbose=False, opt_algorithm=NSGA2,
-                       opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
-                                             "mutation": PM(eta=eta_m), "selection": selection_type},
+                       n_vertex=n_vertex + 1,
+                       **ace_params,
                        generations=1000, parallelize=False)
         result = alg.run(instance, target_label=target_label)
         tf = time.time() - t0
@@ -96,10 +93,10 @@ if __name__ == "__main__":
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator)
-    likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
+    log_likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
     post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt, 0.99)
     # Check if there are instances with this threshold in the training set
-    check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_prob_threshold)
+    check_enough_instances(df_train, gt_estimator, log_likelihood_threshold, post_prob_threshold)
 
     density_estimator_path = nf_path
     density_estimator = normalizing_flow
@@ -116,9 +113,15 @@ if __name__ == "__main__":
                               index=range(n_counterfactuals * len(penalties) * n_vertices))
 
     for params in param_combinations:
-        eta_c = params['eta_crossover']
-        eta_m = params['eta_mutation']
-        selection_type = TournamentSelection(func_comp=binary_tournament) if params['selection_type'] == "tourn" else RandomSelection()
+        print("Running with parameters: " + str(params))
+        # Create dictionary of ace parameters
+        ace_params = {"posterior_probability_threshold": post_prob_threshold,
+                      "log_likelihood_threshold": log_likelihood_threshold, "chunks": chunks,
+                      "sampling_range": sampling_range, "opt_algorithm_params": {
+                "pop_size": 100,
+                "crossover": SBX(eta=params["eta_crossover"]),
+                "mutation": PM(eta=params["eta_mutation"]),
+                "selection": TournamentSelection() if params["selection_type"] == "tourn" else RandomSelection()}}
         distances = []
         for penalty in penalties:
             print("Running with parameters: " + str(params) + "      Penalty " + str(penalty))
@@ -128,8 +131,7 @@ if __name__ == "__main__":
                 pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
                 results = pool.starmap(worker,
                                        [(df_counterfactuals.iloc[[i]], gt_estimator_path, gt_estimator_path,
-                                         penalty, n_vertices, likelihood_threshold, post_prob_threshold,
-                                         chunks, sampling_range, eta_c, eta_m, selection_type) for i in
+                                         penalty, n_vertices, ace_params) for i in
                                         range(n_counterfactuals)])
                 pool.close()
                 pool.join()
@@ -140,11 +142,7 @@ if __name__ == "__main__":
                 for i in range(n_counterfactuals):
                     instance = df_counterfactuals.iloc[[i]]
                     distances_mat[i], _ = get_counterfactuals(instance, density_estimator, gt_estimator,
-                                                              penalty,
-                                                              n_vertices, likelihood_threshold,
-                                                              post_prob_threshold,
-                                                              chunks, sampling_range, eta_c, eta_m,
-                                                              selection_type)
+                                                              penalty, n_vertices, ace_params)
             distances_pen = distances_mat.flatten()
             distances.append(distances_pen)
         distances = np.concatenate(distances)

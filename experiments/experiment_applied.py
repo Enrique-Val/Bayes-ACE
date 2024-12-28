@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
     algorithms = []
     alg = BayesACE(bn, data_train.columns[:-1], chunks=chunks, log_likelihood_threshold=logl_thresh, n_vertex=0,
-                   accuracy_threshold=pp_thresh, penalty=1, seed=0, verbose=True, parallelize=False,
+                   posterior_probability_threshold=pp_thresh, penalty=1, seed=0, verbose=True, parallelize=False,
                    opt_algorithm=NSGA2, opt_algorithm_params={"pop_size": 100}, sampling_range=sampling_range,
                    generations=100, multi_objective=False)
     algorithms.append(alg)

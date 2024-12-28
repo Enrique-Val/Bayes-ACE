@@ -25,7 +25,7 @@ def check_graph(bayesian_network, dataset : pd.DataFrame, graph_type, distance_t
 
     face = FACE(bayesian_network, dataset.columns[:-1], 3, dataset.drop("class", axis = 1), distance_threshold,
                 graph_type,
-                f_tilde=func, log_likelihood_threshold=log_likelihood_threshold, accuracy_threshold=acc_thresh)
+                f_tilde=func, log_likelihood_threshold=log_likelihood_threshold, posterior_probability_threshold=acc_thresh)
     cfx_path = round2(face.run(dataset.iloc[[0]]).path.values)
 
     edges = face.graph.edges(data = True)

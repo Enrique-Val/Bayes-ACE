@@ -7,7 +7,7 @@ from bayesace.algorithms.algorithm import Algorithm, ACEResult
 
 class WachterCounterfactual(Algorithm):
     def __init__(self, density_estimator, features, dataset:pd.DataFrame,
-                 target_proximity_weight=0.0, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50):
+                 target_proximity_weight=0.0, log_likelihood_threshold=-np.inf, posterior_probability_threshold=0.50):
         """
         Initialize with the density estimator, features, dataset, and weight for proximity in the loss.
 
@@ -19,7 +19,7 @@ class WachterCounterfactual(Algorithm):
         super().__init__(density_estimator, features)
         self.target_proximity_weight = target_proximity_weight
         self.log_likelihood_threshold = log_likelihood_threshold
-        self.accuracy_threshold = accuracy_threshold
+        self.posterior_probability_threshold = posterior_probability_threshold
 
         # Ensure that the dataset features match the expected features and their order
         columns_without_class = [col for col in dataset.columns if col != "class"]
@@ -98,11 +98,11 @@ class WachterCounterfactual(Algorithm):
         post_prob = posterior_probability(pd.DataFrame(candidate_cfs,columns=self.features), target_label, self.density_estimator)
 
         # Filter for instances whose likelihood and posterior probability is above the threshold
-        mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)
+        mask = (logl > self.log_likelihood_threshold) & (post_prob > self.posterior_probability_threshold)
         candidate_cfs = candidate_cfs[mask]
 
         if candidate_cfs.size == 0:
-            print("No instances in the dataset match the likelihood and accuracy thresholds.")
+            print("No instances in the dataset match the likelihood and posterior probability thresholds.")
             return ACEResult(counterfactual=None, path=instance.drop("class",axis=1), distance=np.nan)
 
         # Compute the proximity loss in a vectorized way

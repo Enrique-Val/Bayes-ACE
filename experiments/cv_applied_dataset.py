@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from skopt.space import Real, Integer
 
 from bayesace import hill_climbing
-from experiments.experiment_cv_kde import get_best_normalizing_flow, cross_validate_bn
+from experiments.experiment_cv import get_best_normalizing_flow, cross_validate_bn
 
 TAIWANESE_BANKRUPCY_PREDICTION = 572
 STUDENT_PERFORMANCE = 320

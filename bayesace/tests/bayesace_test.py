@@ -35,7 +35,7 @@ def check_bayesace(bayesian_network, dataset: pd.DataFrame, penalty, n_vertex, l
     np.random.seed(0)
     bayesace = BayesACE(density_estimator=bayesian_network, features=df.columns[:-1], n_vertex=n_vertex, chunks=2,
                         penalty=penalty,
-                        pop_size=50, log_likelihood_threshold=log_likelihood_threshold, accuracy_threshold=acc_thresh,
+                        pop_size=50, log_likelihood_threshold=log_likelihood_threshold, posterior_probability_threshold=acc_thresh,
                         generations=5, verbose=False)
     res = bayesace.run(dataset.iloc[[0]], parallelize=True)
 

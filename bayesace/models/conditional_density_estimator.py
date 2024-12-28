@@ -35,7 +35,7 @@ class ConditionalDE(ABC):
         pass
 
     @abstractmethod
-    def sample(self, n_samples: int, seed=None):
+    def sample(self, n_samples: int, ordered=True, seed=None):
         """
         Abstract method for generating samples.
         """

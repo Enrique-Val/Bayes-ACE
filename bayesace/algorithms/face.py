@@ -124,11 +124,11 @@ def find_closest_paths(graph, source_node, target_nodes, parallelize=False):
 class FACE(ACE):
     def __init__(self, density_estimator, features, chunks, dataset: pd.DataFrame, distance_threshold,
                  graph_type,
-                 f_tilde=None, seed=0, verbose=False, log_likelihood_threshold=-np.inf, accuracy_threshold=0.50,
+                 f_tilde=None, seed=0, verbose=False, log_likelihood_threshold=-np.inf, posterior_probability_threshold=0.50,
                  penalty=1, k=1, parallelize=True):
         assert (list(dataset.columns) == features).all()
         super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
-                         accuracy_threshold=accuracy_threshold, penalty=penalty, seed=seed, verbose=verbose,
+                         posterior_probability_threshold=posterior_probability_threshold, penalty=penalty, seed=seed, verbose=verbose,
                          parallelize=parallelize)
         self.dataset = dataset
         self.epsilon = distance_threshold
@@ -197,7 +197,7 @@ class FACE(ACE):
         # Replace with the user-input node
         source_node = len(self.dataset.index)
 
-        # Mark target nodes based on the accuracy and likelihood threshold
+        # Mark target nodes based on the posterior probability and likelihood threshold
 
         # Get likelihood and probability of the class
         logl = log_likelihood(pd.DataFrame(self.dataset, columns=self.features), self.density_estimator)
@@ -205,14 +205,14 @@ class FACE(ACE):
         #print(logl)
         post_prob = posterior_probability(pd.DataFrame(self.dataset, columns=self.features), target_label,
                                           self.density_estimator)
-        #print(self.accuracy_threshold)
+        #print(self.posterior_probability_threshold)
         #print(post_prob)
 
         # Filter for instances whose likelihood and posterior probability is above the threshold
-        mask = (logl > self.log_likelihood_threshold) & (post_prob > self.accuracy_threshold)# & (self.dataset["class"] == target_label)
+        mask = (logl > self.log_likelihood_threshold) & (post_prob > self.posterior_probability_threshold)# & (self.dataset["class"] == target_label)
         target_nodes = self.dataset.index[mask]
 
-        #target_nodes = self.dataset.index[self.y_pred[target_label] > self.accuracy_threshold]
+        #target_nodes = self.dataset.index[self.y_pred[target_label] > self.posterior_probability_threshold]
 
         if len(target_nodes) > 0:
             true_array = log_likelihood(self.dataset.iloc[target_nodes], self.density_estimator) > self.log_likelihood_threshold

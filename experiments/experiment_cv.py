@@ -7,7 +7,7 @@ import torch
 from sklearn.model_selection import KFold
 from skopt import gp_minimize
 from skopt.plots import plot_convergence, plot_evaluations
-from skopt.space import Real, Integer
+from skopt.space import Real, Integer, Dimension
 from skopt.utils import use_named_args
 
 from bayesace.models.conditional_normalizing_flow import NanLogProb
@@ -53,7 +53,7 @@ param_space = [
 ]
 
 
-def cross_validate_bn(dataset, kf):
+def cross_validate_bn(dataset: pd.DataFrame, kf: KFold):
     # Validate Gaussian network
     bn_results = []
     for i, (train_index, test_index) in enumerate(kf.split(dataset)):
@@ -84,8 +84,12 @@ def cross_validate_bn(dataset, kf):
     return bn_results
 
 
+#########################
+# PARALLELIZATION FUNCS #
+#########################
+
 # Convert the dataset to a NumPy array for shared memory usage
-def to_numpy_shared(df):
+def to_numpy_shared(df: pd.DataFrame) -> tuple[shared_memory.SharedMemory, np.ndarray, dict]:
     unique_values = df["class"].unique()
     ordinal_mapping = {value: idx for idx, value in enumerate(unique_values)}
     # Convert DataFrame to NumPy array
@@ -97,10 +101,8 @@ def to_numpy_shared(df):
     return shm, shared_array, ordinal_mapping
 
 
-# Worker function that accesses shared memory
-def worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold, model_type="NVP",
-           nn_params: dict=None, directory_path="./"):
-    torch.set_num_threads(1)
+def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
+                i_fold: tuple) -> tuple[pd.DataFrame, pd.DataFrame]:
     train_index, test_index = i_fold
     # Reconstruct the DataFrame using the shared memory array
     # Access shared memory by name
@@ -114,11 +116,32 @@ def worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold, model_
     # Create train and test DataFrames
     df_train = df_shared.iloc[train_index].reset_index(drop=True)
     df_test = df_shared.iloc[test_index].reset_index(drop=True)
+    return df_train, df_test
+
+
+# Worker function that accesses shared memory
+def worker_nf(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
+              i_fold: tuple, model_type="NVP", nn_params: dict = None, directory_path="./"):
+    torch.set_num_threads(1)
+    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold)
+    return train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params,
+                                    directory_path=directory_path)
+
+
+def worker_ckde(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
+                i_fold: tuple, bandwidth=1.0, kernel="gaussian"):
+    torch.set_num_threads(1)
+    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold)
     # Proceed with training
-    return train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params, directory_path=directory_path)
+    return train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel)
 
 
-def train_nf_and_get_results(df_train, df_test, model_type="NVP", nn_params: dict=None, directory_path="./"):
+################
+# CV FUNCTIONS #
+################
+
+def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, model_type="NVP", nn_params: dict = None,
+                             directory_path="./"):
     d = df_train.shape[1] - 1
 
     # We make a copy, since the hidden units that we specify are RELATIVE to the inputs
@@ -144,7 +167,8 @@ def train_nf_and_get_results(df_train, df_test, model_type="NVP", nn_params: dic
             "Time": np.mean(it_time)}
 
 
-def cross_validate_nf(dataset, kf, model_type="NVP", parallelize=False, working_dir="./", nn_params: dict=None) -> list | None :
+def cross_validate_nf(dataset: pd.DataFrame, kf: KFold, model_type="NVP", parallelize=False, working_dir="./",
+                      nn_params: dict = None) -> list | None:
     cv_iter_results = []
     if not parallelize:
         try:
@@ -152,7 +176,8 @@ def cross_validate_nf(dataset, kf, model_type="NVP", parallelize=False, working_
                 df_train = dataset.iloc[train_index].reset_index(drop=True)
                 df_test = dataset.iloc[test_index].reset_index(drop=True)
                 cv_iter_results.append(
-                    train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params, directory_path=working_dir))
+                    train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params,
+                                             directory_path=working_dir))
         except NanLogProb as e:
             cv_iter_results = None
             to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
@@ -166,7 +191,7 @@ def cross_validate_nf(dataset, kf, model_type="NVP", parallelize=False, working_
         pool = mp.Pool(min(mp.cpu_count() - 1, k))
         try:
             # Use starmap with the shared memory array and other needed parameters
-            cv_iter_results = pool.starmap(worker,
+            cv_iter_results = pool.starmap(worker_nf,
                                            [(shm.name, shared_array.shape, shared_array.dtype, column_names,
                                              ordinal_mapping, i_fold, model_type, nn_params,
                                              working_dir)
@@ -206,9 +231,10 @@ def cross_validate_nf(dataset, kf, model_type="NVP", parallelize=False, working_
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [nn_params]
 
 
-def get_best_normalizing_flow(dataset, kf, n_iter=50, nn_params_fixed=None, model_type="NVP",
-                              parallelize=False,
-                              param_space=None, working_dir="./"):
+def get_best_normalizing_flow(dataset: pd.DataFrame, kf: KFold, n_iter: int = 50, nn_params_fixed: dict = None,
+                              model_type="NVP",
+                              parallelize: bool = False,
+                              param_space: list[Dimension] = None, working_dir="./"):
     # Bayesian optimization
 
     # List to store the random permutations
@@ -220,7 +246,7 @@ def get_best_normalizing_flow(dataset, kf, n_iter=50, nn_params_fixed=None, mode
             Integer(1, 3, name='layers'),
             Integer(1, 8, name='n_flows')
         ]
-    elif param_space is None :
+    elif param_space is None:
         raise ValueError("param_space must be defined for the model type")
     perms_list = []
 
@@ -286,7 +312,8 @@ def get_best_normalizing_flow(dataset, kf, n_iter=50, nn_params_fixed=None, mode
     return model, metrics, result
 
 
-def train_ckde_and_get_results(df_train, df_test, bandwidth=1.0, kernel="gaussian"):
+def train_ckde_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, bandwidth: float = 1.0,
+                               kernel="gaussian"):
     t0 = time.time()
     model = ConditionalKDE(bandwidth=bandwidth, kernel=kernel)
     model.train(df_train.head(10000))
@@ -301,27 +328,8 @@ def train_ckde_and_get_results(df_train, df_test, bandwidth=1.0, kernel="gaussia
             "Time": np.mean(it_time)}
 
 
-def worker_ckde(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold, bandwidth=1.0,
-                kernel="gaussian"):
-    torch.set_num_threads(1)
-    train_index, test_index = i_fold
-    # Reconstruct the DataFrame using the shared memory array
-    # Access shared memory by name
-    existing_shm = shared_memory.SharedMemory(name=shm_name)
-    shared_array = np.ndarray(shape, dtype=dtype, buffer=existing_shm.buf)
-    # Create a DataFrame from the shared memory array
-    df_shared = pd.DataFrame(shared_array, columns=column_names)
-    # Recodify the str of the class using the ordinal mapping
-    df_shared["class"] = df_shared["class"].apply(
-        lambda x: list(ordinal_mapping.keys())[list(ordinal_mapping.values()).index(x)])
-    # Create train and test DataFrames
-    df_train = df_shared.iloc[train_index].reset_index(drop=True)
-    df_test = df_shared.iloc[test_index].reset_index(drop=True)
-    # Proceed with training
-    return train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel)
-
-
-def cross_validate_ckde(dataset, kf, bandwidth=1.0, kernel="gaussian", parallelize=False) -> list | None:
+def cross_validate_ckde(dataset: pd.DataFrame, kf: KFold, bandwidth: float = 1.0, kernel="gaussian",
+                        parallelize: bool = False) -> list | None:
     cv_iter_results = []
     if not parallelize:
         for train_index, test_index in kf.split(dataset):
@@ -358,7 +366,7 @@ def cross_validate_ckde(dataset, kf, bandwidth=1.0, kernel="gaussian", paralleli
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [{"bandwidth": bandwidth, "kernel": kernel}]
 
 
-def grid_search_ckde(dataset, kf, param_space, previous_best=None):
+def grid_search_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict, previous_best=None):
     best_bandwidth = None
     best_kernel = None
     best_logl = -np.inf
@@ -377,7 +385,7 @@ def grid_search_ckde(dataset, kf, param_space, previous_best=None):
     return best_logl, best_bandwidth, best_kernel
 
 
-def get_best_ckde(dataset, kf, param_space=None):
+def get_best_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict = None):
     # Param space is a grid of parameters. Instead of Bayesian optimization, we will use a grid search
     if param_space is None:
         param_space_gauss = {"bandwidth": np.logspace(-1, 0, num=10),
