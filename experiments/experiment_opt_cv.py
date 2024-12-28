@@ -121,7 +121,7 @@ if __name__ == "__main__":
                 "pop_size": 100,
                 "crossover": SBX(eta=params["eta_crossover"]),
                 "mutation": PM(eta=params["eta_mutation"]),
-                "selection": TournamentSelection() if params["selection_type"] == "tourn" else RandomSelection()}}
+                "selection": TournamentSelection(func_comp=binary_tournament) if params["selection_type"] == "tourn" else RandomSelection()}}
         distances = []
         for penalty in penalties:
             print("Running with parameters: " + str(params) + "      Penalty " + str(penalty))
