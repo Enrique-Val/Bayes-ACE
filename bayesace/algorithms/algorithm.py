@@ -41,14 +41,14 @@ class Algorithm(ABC):
 
 
 class ACE(Algorithm):
-    def __init__(self, density_estimator, features, chunks, log_likelihood_threshold=-np.inf, accuracy_threshold=0.5,
-                 penalty=1,
+    def __init__(self, density_estimator, features, chunks, log_likelihood_threshold=-np.inf,
+                 posterior_probability_threshold=0.5,penalty=1,
                  seed=0, verbose=True, parallelize=False):
         super().__init__(density_estimator, features)
         self.penalty = penalty
         self.chunks = chunks
         self.log_likelihood_threshold = log_likelihood_threshold
-        self.accuracy_threshold = accuracy_threshold
+        self.posterior_probability_threshold = posterior_probability_threshold
         self.seed = seed
         random.seed(self.seed)
         self.verbose = verbose
