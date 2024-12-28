@@ -1,15 +1,18 @@
+import argparse
+import time
+
 import numpy as np
 import pandas as pd
-from pybnesian import LinearGaussianCPD
-from scipy.stats import kstest
-from sklearn.model_selection import train_test_split
-from bayesace.models.conditional_kde import ConditionalKDE
-from bayesace.models.conditional_nvp import ConditionalNVP
+from sklearn.model_selection import train_test_split, KFold
+from skopt.space import Real, Integer
+
 from sklearn.preprocessing import StandardScaler
 
 from bayesace import hill_climbing, predict_class, brier_score, auc
+from experiments.experiment_cv import get_best_normalizing_flow
 
-def read_eqi_dataset(to_del = None) :
+
+def read_eqi_dataset(to_del=None):
     if to_del is None:
         # Hard coded columns to remove. They are ordinal and have a very low number of unique values:
         to_del = ["Radon", "W_ETHYLBENZ_ln", "W_HG_ln"]
@@ -63,7 +66,8 @@ def read_eqi_dataset(to_del = None) :
 
     return data, data_metadata, var_types, features, eqis
 
-def get_bn_restrictions(features, eqis, var_types) :
+
+def get_bn_restrictions(features, eqis, var_types):
     # Create whitelist. Force arcs from class to all EQIs
     whitelist = []
     for i in eqis:
@@ -101,61 +105,95 @@ def get_bn_restrictions(features, eqis, var_types) :
                     blacklist.append((eqi, feature))
     return whitelist, blacklist
 
+
+def cross_validate_restricted_bn(dataset, max_indegree=0, blacklist=None, whitelist=None, hc_seed=None,
+                                 kfold_object=None):
+    if blacklist is None:
+        blacklist = []
+    if whitelist is None:
+        whitelist = []
+    if kfold_object is None:
+        kfold_object = KFold(n_splits=10)
+    fold_indices = list(kfold_object.split(dataset))
+    # Validate Gaussian network
+    bn_results = []
+    # Metrics to use and metric storage
+    metric = ["Logl", "LoglStd", "Brier", "AUC", "Time"]
+    bn_results = pd.DataFrame(columns=metric, index=range(len(fold_indices)))
+
+    for i, (train_index, test_index) in enumerate(fold_indices):
+        df_train = dataset.iloc[train_index].reset_index(drop=True)
+        scaler = StandardScaler()
+        df_train[df_train.columns[:-1]] = scaler.fit_transform(df_train[df_train.columns[:-1]])
+        df_val = dataset.iloc[test_index].reset_index(drop=True)
+        df_val[df_val.columns[:-1]] = scaler.transform(df_val[df_val.columns[:-1]])
+        t0 = time.time()
+        network = hill_climbing(df_train, seed=hc_seed, bn_type="CLG", max_indegree=max_indegree,
+                                arc_whitelist=whitelist,
+                                arc_blacklist=blacklist, initial_structure="empty")
+        time_i = time.time() - t0
+        tmp = network.logl(df_val)
+        bn_results.loc[i, "Logl"] = tmp.mean()
+        bn_results.loc[i, "LoglStd"] = tmp.std()
+        predictions = predict_class(df_val.drop("class", axis=1), network)
+        brier_i = brier_score(df_val["class"].values, predictions)
+        bn_results.loc[i, "Brier"] = brier_i
+        auc_i = auc(df_val["class"].values, predictions)
+        bn_results.loc[i, "AUC"] = auc_i
+        bn_results.loc[i, "Time"] = time_i
+
+    bn_results_mean = bn_results.mean(axis=0)
+    bn_results_std = bn_results.std(axis=0)
+    # Intercale in a dictionary
+    results = {}
+    for i in metric:
+        results[i + "_mean"] = bn_results_mean[i]
+        results[i + "_std"] = bn_results_std[i]
+    results["params"] = {"max_indegree": max_indegree, "score": "BIC"}
+    return results
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Arguments")
+    parser.add_argument('--n_iter', nargs='?', default=50, type=int)
+    parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_eqi/", type=str)
+    args = parser.parse_args()
 
     data, data_metadata, var_types, features, eqis = read_eqi_dataset()
     whitelist, blacklist = get_bn_restrictions(features, eqis, var_types)
 
     data_train, data_test = train_test_split(data, test_size=0.2, random_state=0)
     scaler = StandardScaler()
-    data_train[features+eqis] = scaler.fit_transform(data_train[features+eqis])
+    data_train_scaled = data_train.copy()
+    data_train_scaled[features + eqis] = scaler.fit_transform(data_train[features + eqis])
 
-    bn = hill_climbing(data_train, seed=0, bn_type="CLG", max_indegree=3, arc_whitelist=whitelist,
-                          arc_blacklist=blacklist, initial_structure="empty")
+    bn_restricted = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=3, arc_whitelist=whitelist,
+                                  arc_blacklist=blacklist, initial_structure="empty")
+    # Create a fold object
+    kf = KFold(n_splits=10, shuffle=True, random_state=0)
 
-    # Print the learned network
-    print(bn.arcs())
+    # Print the validation metrics
+    metrics_restricted = cross_validate_restricted_bn(data_train, max_indegree=3, blacklist=blacklist,
+                                                      whitelist=whitelist,
+                                                      hc_seed=0,
+                                                      kfold_object=kf)
 
-    for i in bn.nodes():
-        print(bn.cpd(i))
+    bn = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", initial_structure="empty")
 
-    # Print the Brier score
-    data_test_scaled = scaler.transform(data_test[features+eqis])
-    data_test_scaled = pd.DataFrame(data_test_scaled, columns=features+eqis, index=data_test.index)
-    data_test_scaled["class"] = data_test["class"]
-    predictions = predict_class(data_test_scaled.drop("class", axis=1), bn)
-    brier = brier_score(data_test["class"].values, predictions)
-    print("Brier score:", brier)
+    metrics_unrestricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=[], whitelist=[],
+                                                        hc_seed=0, kfold_object=kf)
 
-    # Print the AUC
-    auc_i = auc(data_test["class"].values, predictions)
-    print("AUC:", auc_i)
-
-    # Print logl mean (only for samples over 1% cuantile)
-    logl = bn.logl(data_test_scaled)
-    print("Logl mean:", logl.mean())
-
-    '''# Train a CKDE
-    ckde = ConditionalKDE(bandwidth=0.5)
-    ckde.train(data)
-    print(ckde.logl(df_test).mean())
-
-    predictions_kde = predict_class(df_test.drop("class", axis=1), ckde)
-    brier_kde = brier_score(df_test["class"].values, predictions_kde)
-    print("Brier score KDE:", brier_kde)'''
-
-
-    '''# Train a nf model, specifically, nvp
-    cnvp = ConditionalNVP()
-    cnvp.train(data, layers=3, hidden_units=140*5, batch_size=256, lr=0.01, n_flows=8, steps=500)
-    print(cnvp.logl(data_test).mean())
-
-    predictions_nvp = predict_class(data_test.drop("class", axis=1), cnvp)
-    brier_nvp = brier_score(data_test["class"].values, predictions_nvp)
-    print("Brier score NVP:", brier_nvp)
-
-    auc_nvp = auc(data_test["class"].values, predictions_nvp)
-    print("AUC NVP:", auc_nvp)'''
-
-
+    # Define the param space for searching for the best normalizing flow
+    param_space = [
+        Real(1e-4, 5e-3, name='lr'),
+        Real(1e-4, 1e-2, name='weight_decay'),
+        Integer(2, 5, name='hidden_units'),
+        Integer(1, 3, name='layers'),
+        Integer(1, 8, name='n_flows')
+    ]
+    best_nf, metrics, result_gp = get_best_normalizing_flow(data_train_scaled, kf=kf, n_iter=args.n_iter,
+                                                            nn_params_fixed={"steps": 500, "batch_size": 256},
+                                                            model_type="NVP",
+                                                            parallelize=args.parallelize, working_dir=args.dir_name)
 
