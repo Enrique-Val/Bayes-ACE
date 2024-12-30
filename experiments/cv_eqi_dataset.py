@@ -1,4 +1,6 @@
 import argparse
+import os
+import pickle
 import time
 
 import numpy as np
@@ -158,7 +160,32 @@ if __name__ == "__main__":
     parser.add_argument('--n_iter', nargs='?', default=50, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_eqi/", type=str)
+    parser.add_argument('--dummy', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
+
+    # Create dir if it does not exist
+    if not os.path.exists(args.dir_name):
+        os.makedirs(args.dir_name)
+
+    # Hard coded params
+    param_space = [
+        Real(1e-4, 5e-3, name='lr'),
+        Real(1e-4, 1e-2, name='weight_decay'),
+        Integer(2, 5, name='hidden_units'),
+        Integer(1, 3, name='layers'),
+        Integer(1, 8, name='n_flows')
+    ]
+    nn_params_fixed = {"steps": 500, "batch_size": 256}
+    n_folds = 10
+    max_indegree = 3
+
+    DUMMY = args.dummy
+    if DUMMY:
+        args.n_iter = 10
+        args.parallelize = False
+        nn_params_fixed = {"steps": 2, "batch_size": 2000}
+        n_folds = 2
+        max_indegree = 1
 
     data, data_metadata, var_types, features, eqis = read_eqi_dataset()
     whitelist, blacklist = get_bn_restrictions(features, eqis, var_types)
@@ -168,32 +195,60 @@ if __name__ == "__main__":
     data_train_scaled = data_train.copy()
     data_train_scaled[features + eqis] = scaler.fit_transform(data_train[features + eqis])
 
-    bn_restricted = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=3, arc_whitelist=whitelist,
+    bn_restricted = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=max_indegree, arc_whitelist=whitelist,
                                   arc_blacklist=blacklist, initial_structure="empty")
     # Create a fold object
-    kf = KFold(n_splits=10, shuffle=True, random_state=0)
+    kf = KFold(n_splits=n_folds, shuffle=True, random_state=0)
 
     # Print the validation metrics
-    metrics_restricted = cross_validate_restricted_bn(data_train, max_indegree=3, blacklist=blacklist,
+    metrics_restricted = cross_validate_restricted_bn(data_train, max_indegree=max_indegree, blacklist=blacklist,
                                                       whitelist=whitelist,
                                                       hc_seed=0,
                                                       kfold_object=kf)
 
-    bn = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", initial_structure="empty")
+    print("Restricted BN learned")
 
-    metrics_unrestricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=[], whitelist=[],
-                                                        hc_seed=0, kfold_object=kf)
+    if not DUMMY:
+        bn = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", initial_structure="empty")
+        metrics_unrestricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=[], whitelist=[],
+                                                            hc_seed=0, kfold_object=kf)
+        print("Unrestricted BN learned")
 
-    # Define the param space for searching for the best normalizing flow
-    param_space = [
-        Real(1e-4, 5e-3, name='lr'),
-        Real(1e-4, 1e-2, name='weight_decay'),
-        Integer(2, 5, name='hidden_units'),
-        Integer(1, 3, name='layers'),
-        Integer(1, 8, name='n_flows')
-    ]
     best_nf, metrics, result_gp = get_best_normalizing_flow(data_train_scaled, kf=kf, n_iter=args.n_iter,
-                                                            nn_params_fixed={"steps": 500, "batch_size": 256},
+                                                            nn_params_fixed=nn_params_fixed,
                                                             model_type="NVP",
                                                             parallelize=args.parallelize, working_dir=args.dir_name)
+
+    # Pop some params to not print/store them
+    metrics[-1].pop("perms_instantiation")
+    metrics[-1].pop("split_dim")
+
+    # Create df for results. Same index as metrics keys
+    results_df = pd.DataFrame(index=list(metrics_restricted.keys()))
+    results_df["Restricted"] = metrics_restricted.values()
+    if not DUMMY:
+        results_df["Unrestricted"] = metrics_unrestricted.values()
+    results_df["NF"] = metrics
+
+    if not DUMMY:
+        # Store the results_df, training data, test_data and fold object in a folder
+        results_dir = args.dir_name + "data_processed/"
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir)
+        results_df.to_csv(results_dir + "results.csv")
+        data_train.to_csv(results_dir + "data_train.csv")
+        data_test.to_csv(results_dir + "data_test.csv")
+        pickle.dump(kf, open(results_dir + "kf.pkl", 'wb'))
+
+        # Store the models
+        model_dir = args.dir_name + "models/"
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+        pickle.dump(bn, open(model_dir + "bn_unrestricted.pkl", 'wb'))
+        pickle.dump(bn_restricted, open(model_dir + "bn_restricted.pkl", 'wb'))
+        pickle.dump(best_nf, open(model_dir + "nf.pkl", 'wb'))
+
+    else :
+        # Just print the results_df
+        print(results_df.to_string())
 
