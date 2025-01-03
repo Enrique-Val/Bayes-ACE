@@ -3,6 +3,7 @@ import os
 import pickle
 import time
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split, KFold
@@ -157,10 +158,11 @@ def cross_validate_restricted_bn(dataset, max_indegree=0, blacklist=None, whitel
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument('--n_iter', nargs='?', default=50, type=int)
+    parser.add_argument('--n_iter', nargs='?', default=100, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_eqi/", type=str)
     parser.add_argument('--dummy', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--graphical', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
 
     # Create dir if it does not exist
@@ -169,11 +171,12 @@ if __name__ == "__main__":
 
     # Hard coded params
     param_space = [
-        Real(1e-4, 5e-3, name='lr'),
+        Real(1e-4, 1e-3, name='lr'),
         Real(1e-4, 1e-2, name='weight_decay'),
         Integer(2, 5, name='hidden_units'),
         Integer(1, 3, name='layers'),
-        Integer(1, 8, name='n_flows')
+        Integer(1, 5, name='n_flows'),
+        Real(0.005, 0.5, name='sam_noise', prior='log-uniform')
     ]
     nn_params_fixed = {"steps": 500, "batch_size": 256}
     n_folds = 10
@@ -194,6 +197,15 @@ if __name__ == "__main__":
     scaler = StandardScaler()
     data_train_scaled = data_train.copy()
     data_train_scaled[features + eqis] = scaler.fit_transform(data_train[features + eqis])
+
+    if args.graphical:
+        # Print a histogram of every variable. Do it in many 4x4 axis to not saturate the calls
+        for features_16 in range(0, len(data_train.columns), 16):
+            fig, axs = plt.subplots(4, 4, figsize=(20, 20))
+            for i, feature in enumerate(data_train.columns[features_16:features_16 + 16]):
+                axs[i // 4, i % 4].hist(data_train[feature], bins=20)
+                axs[i // 4, i % 4].set_title(feature)
+            plt.show()
 
     bn_restricted = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=max_indegree, arc_whitelist=whitelist,
                                   arc_blacklist=blacklist, initial_structure="empty")
@@ -217,7 +229,8 @@ if __name__ == "__main__":
     best_nf, metrics, result_gp = get_best_normalizing_flow(data_train_scaled, kf=kf, n_iter=args.n_iter,
                                                             nn_params_fixed=nn_params_fixed,
                                                             model_type="NVP",
-                                                            parallelize=args.parallelize, working_dir=args.dir_name)
+                                                            parallelize=args.parallelize, working_dir=args.dir_name,
+                                                            param_space=param_space)
 
     # Pop some params to not print/store them
     metrics[-1].pop("perms_instantiation")

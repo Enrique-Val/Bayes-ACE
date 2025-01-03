@@ -128,7 +128,7 @@ class ConditionalNVP(ConditionalNF):
 
     def train(self, dataset, batch_size=1028, steps=1000, lr=1e-3, weight_decay=0, split_dim=1, hidden_units=150,
               layers=1,
-              n_flows=1, perms_instantiation=None,patience=15, model_pth_name="model.pth", **kwargs):
+              n_flows=1, sam_noise=0, perms_instantiation=None,patience=15, model_pth_name="model.pth", **kwargs):
         super().train(dataset)
         self.input_dim = len(dataset.columns)-1
         self.split_dim = split_dim
@@ -188,6 +188,9 @@ class ConditionalNVP(ConditionalNF):
                     batch = batch[0]
                     y_batch = torch.reshape(batch[:, -1], shape=(-1, 1))
                     x_batch = batch[:, :-1]
+                    # Sum a certain Gaussian noise to the batch
+                    if sam_noise > 0:
+                        x_batch += torch.randn_like(x_batch) * sam_noise
                     if self.device == "cuda":
                         y_batch, x_batch = y_batch.cuda(), x_batch.cuda()
                     loss = -self.dist_x_given_class.log_prob(x_batch, y_batch).sum()
