@@ -7,33 +7,28 @@ import pickle
 import argparse
 import time
 
-import numpy as np
 import torch
-from pymoo.algorithms.moo.nsga2 import NSGA2, binary_tournament
-from pymoo.operators.crossover.sbx import SBX
-from pymoo.operators.mutation.pm import PM
-from pymoo.operators.selection.rnd import RandomSelection
-from pymoo.operators.selection.tournament import TournamentSelection
+from pymoo.algorithms.moo.nsga2 import NSGA2
 
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
-from experiments.utils import setup_experiment, get_constraints, check_enough_instances
+from experiments.utils import setup_experiment, get_constraints, check_enough_instances, get_best_opt_params
 
 
 # Worker function for parallelization
 def worker(instance, density_estimator_path, gt_estimator_path, penalty, n_vertices, likelihood_threshold,
-           accuracy_threshold, chunks, sampling_range, eta_c, eta_m, selection_type):
+           accuracy_threshold, chunks, sampling_range, opt_algorithm_params):
     torch.set_num_threads(1)
     density_estimator = pickle.load(open(density_estimator_path, 'rb'))
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
     return get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices,
                                likelihood_threshold, accuracy_threshold, chunks, sampling_range,
-                               eta_c, eta_m, selection_type)
+                               opt_algorithm_params)
 
 
 def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices, likelihood_threshold,
                         accuracy_threshold, chunks,
-                        sampling_range, eta_c, eta_m, selection_type) :
+                        sampling_range, opt_algorithm_params):
     distances = np.zeros(n_vertices)
     real_distances = np.zeros(n_vertices)
     times = np.zeros(n_vertices)
@@ -42,11 +37,11 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
         t0 = time.time()
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
                        n_vertex=n_vertex,
-                       posterior_probability_threshold=accuracy_threshold, log_likelihood_threshold=likelihood_threshold,
+                       posterior_probability_threshold=accuracy_threshold,
+                       log_likelihood_threshold=likelihood_threshold,
                        chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                        initialization="guided", seed=0, verbose=True, opt_algorithm=NSGA2,
-                       opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
-                                             "mutation": PM(eta=eta_m), "selection": selection_type},
+                       opt_algorithm_params=opt_algorithm_params,
                        generations=1000, parallelize=False)
         result = alg.run(instance, target_label=target_label)
         tf = time.time() - t0
@@ -61,7 +56,8 @@ def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_ve
                 density_estimator=gt_estimator, penalty=penalty)
             if pll == np.inf:
                 warnings.warn("Path length over ground truth is infinite for instance " + str(instance.index[0]) + ", "
-                              + str(n_vertex) + " vertices, penalty of " + str(penalty) + "and estimator " + str(type(density_estimator)))
+                              + str(n_vertex) + " vertices, penalty of " + str(penalty) + "and estimator " + str(
+                    type(density_estimator)))
             distances[n_vertex] = result.distance
             real_distances[n_vertex] = pll
             times[n_vertex] = tf
@@ -101,47 +97,43 @@ if __name__ == "__main__":
         results_cv_dir, dataset_id, n_counterfactuals)
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator)
     likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
-    post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt,0.99)
+    post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt, 0.99)
     # Check if there are instances with this threshold in the training set
     check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_prob_threshold)
-    # Load the best parameters for the NSGA
-    best_params = pd.read_csv(results_opt_cv_dir + "best_params.csv", index_col=0)
-    try :
-        eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
-        eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
-        selection_type = best_params.loc[dataset_id, "selection_type"]
-    except KeyError:
-        eta_c = int(best_params.loc["default", "eta_crossover"])
-        eta_m = int(best_params.loc["default", "eta_mutation"])
-        selection_type = best_params.loc["default", "selection_type"]
-    selection_type = TournamentSelection(func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
 
-    for density_estimator_path, density_estimator in zip([clg_network_path,nf_path],[clg_network, normalizing_flow]):
+    for density_estimator_path, density_estimator, model_str in zip([clg_network_path, nf_path], [clg_network, normalizing_flow], ["clg", "nf"]):
+        opt_algorithm_params = get_best_opt_params(model=model_str, dataset_id=dataset_id,
+                                                   dir=results_opt_cv_dir)
+        opt_algorithm_params["population_size"] = 100
         for penalty in penalties:
             # Result storage
             distances_mat = np.zeros((n_counterfactuals, n_vertices))
             real_distances_mat = np.zeros((n_counterfactuals, n_vertices))
             times_mat = np.zeros((n_counterfactuals, n_vertices))
             if parallelize:
-                pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
-                results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
-                                                penalty, n_vertices, likelihood_threshold, post_prob_threshold,
-                                                chunks, sampling_range, eta_c, eta_m, selection_type) for i in
-                                                range(n_counterfactuals)])
+                pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
+                results = pool.starmap(worker,
+                                       [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
+                                         penalty, n_vertices, likelihood_threshold, post_prob_threshold,
+                                         chunks, sampling_range, opt_algorithm_params) for i in
+                                        range(n_counterfactuals)])
                 pool.close()
                 pool.join()
 
                 for i in range(n_counterfactuals):
                     distances_mat[i], real_distances_mat[i], times_mat[i] = results[i]
-            else :
+            else:
                 for i in range(n_counterfactuals)[:1]:
                     instance = df_counterfactuals.iloc[[i]]
-                    distances_mat[i], real_distances_mat[i], times_mat[i] = get_counterfactuals(instance, density_estimator, gt_estimator,
-                                                                         penalty,
-                                                                         n_vertices, likelihood_threshold,
-                                                                         post_prob_threshold,
-                                                                         chunks, sampling_range, eta_c, eta_m,
-                                                                         selection_type)
+                    distances_mat[i], real_distances_mat[i], times_mat[i] = get_counterfactuals(instance,
+                                                                                                density_estimator,
+                                                                                                gt_estimator,
+                                                                                                penalty,
+                                                                                                n_vertices,
+                                                                                                likelihood_threshold,
+                                                                                                post_prob_threshold,
+                                                                                                chunks, sampling_range,
+                                                                                                opt_algorithm_params)
 
             print("Distances mat")
             print(distances_mat)
@@ -149,20 +141,21 @@ if __name__ == "__main__":
             print(times_mat)
             print()
 
-            model_str = "NF" if density_estimator == normalizing_flow else "CLG"
-
             # Check if the target directory exists, if not create it
             if not os.path.exists(results_dir + model_str + '/'):
                 os.makedirs(results_dir + model_str + '/')
 
             to_ret = pd.DataFrame(data=distances_mat, columns=range(n_vertices))
-            to_ret.to_csv(results_dir + model_str + '/distances_data' + str(dataset_id) +'_model' + model_str + '_penalty' + str(
-                penalty) + '.csv')
+            to_ret.to_csv(
+                results_dir + model_str + '/distances_data' + str(dataset_id) + '_model' + model_str + '_penalty' + str(
+                    penalty) + '.csv')
 
             to_ret = pd.DataFrame(data=real_distances_mat, columns=range(n_vertices))
             to_ret.to_csv(
-                results_dir + model_str + '/real_distances_data' + str(dataset_id) + '_model' + model_str + '_penalty' + str(penalty) + '.csv')
+                results_dir + model_str + '/real_distances_data' + str(
+                    dataset_id) + '_model' + model_str + '_penalty' + str(penalty) + '.csv')
 
             to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices))
             to_ret.to_csv(
-                results_dir + model_str + '/time_data' + str(dataset_id) + '_model' + model_str + '_penalty' + str(penalty) + '.csv')
+                results_dir + model_str + '/time_data' + str(dataset_id) + '_model' + model_str + '_penalty' + str(
+                    penalty) + '.csv')

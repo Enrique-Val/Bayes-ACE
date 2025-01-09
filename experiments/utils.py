@@ -2,9 +2,13 @@ import os.path
 import pickle
 import time
 
-import pandas as pd
 import numpy as np
 import torch
+from pymoo.algorithms.moo.nsga2 import binary_tournament
+from pymoo.operators.crossover.sbx import SBX
+from pymoo.operators.mutation.pm import PM
+from pymoo.operators.selection.rnd import RandomSelection
+from pymoo.operators.selection.tournament import TournamentSelection
 
 from bayesace import get_other_class, path, path_likelihood_length, hill_climbing, log_likelihood, \
     posterior_probability, total_l0_path
@@ -80,7 +84,7 @@ def check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_pr
 
 
 def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator, penalty, chunks, l0_epsilon=0.1):
-    print("Instance",instance.index[0])
+    print("Instance", instance.index[0])
     target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
     t0 = time.time()
     result = algorithm.run(instance, target_label=target_label)
@@ -96,7 +100,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         cfx_array = np.empty(shape=(len(result), len(instance.columns) - 1))
         path_lengths_gt = np.zeros(shape=len(result))
         path_l0 = np.zeros(shape=len(result))
-        for i,_ in enumerate(result):
+        for i, _ in enumerate(result):
             path_to_compute = path(result[i].path.values, chunks=chunks)
             path_length_gt = path_likelihood_length(
                 pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
@@ -120,14 +124,14 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
             density_estimator=gt_estimator, penalty=penalty)
         cfx_df = pd.DataFrame([result.counterfactual.values], columns=instance.columns[:-1])
         real_logl = log_likelihood(cfx_df, gt_estimator)
-        real_pp = posterior_probability(cfx_df, target_label , gt_estimator)
+        real_pp = posterior_probability(cfx_df, target_label, gt_estimator)
         path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns="class").values.flatten())
         path_l0 = total_l0_path(result.path.values, l0_epsilon)
         print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)
         return path_length_gt, path_l0, path_l2, tf, result.counterfactual.values, real_logl, real_pp
 
 
-def friedman_posthoc(data, correct = "bergmann") -> dict[str, pd.DataFrame | pd.Series]:
+def friedman_posthoc(data, correct="bergmann") -> dict[str, pd.DataFrame | pd.Series]:
     '''
     Perform the Friedman test and the Bermann-Hommel post-hoc test using the scmamp package in R
 
@@ -173,6 +177,24 @@ def friedman_posthoc(data, correct = "bergmann") -> dict[str, pd.DataFrame | pd.
     bh_posthoc["summary"] = summary
     bh_posthoc["summary_ranks"] = data.rank("columns").mean(axis=0)
     bh_posthoc["p_values"] = pd.DataFrame(bh_posthoc_scmamp[1], index=data.columns, columns=data.columns).fillna(1.0)
-    bh_posthoc["p_adjusted"] = (pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns)).fillna(1.0)+0.0001
+    bh_posthoc["p_adjusted"] = (pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns)).fillna(
+        1.0) + 0.0001
 
     return bh_posthoc
+
+
+def get_best_opt_params(model: str, dataset_id: int, dir: str):
+    assert model in ["nf", "clg", "gt"], "Model must be one of 'nf', 'clg' or 'gt'"
+    file_in_dir = os.path.join(dir, "best_params_" + model + ".csv")
+    best_params = pd.read_csv(file_in_dir, index_col=0)
+    try:
+        eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
+        eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
+        selection_type = best_params.loc[dataset_id, "selection_type"]
+    except KeyError:
+        eta_c = int(best_params.loc["default", "eta_crossover"])
+        eta_m = int(best_params.loc["default", "eta_mutation"])
+        selection_type = best_params.loc["default", "selection_type"]
+    selection_type = TournamentSelection(
+        func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
+    return {"crossover": SBX(eta=eta_c, prob=0.9), "mutation": PM(eta=eta_m), "selection": selection_type}

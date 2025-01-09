@@ -22,7 +22,7 @@ from bayesace.algorithms.face import FACE
 
 import time
 
-from experiments.utils import get_constraints, setup_experiment, get_counterfactual_from_algorithm
+from experiments.utils import get_constraints, setup_experiment, get_counterfactual_from_algorithm, get_best_opt_params
 import multiprocessing as mp
 
 
@@ -71,19 +71,6 @@ if __name__ == "__main__":
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator)
     df_train = df_train.head(1000)
 
-    # Load the best parameters for the NSGA
-    best_params = pd.read_csv(results_opt_cv_dir + "best_params.csv", index_col=0)
-    try:
-        eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
-        eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
-        selection_type = best_params.loc[dataset_id, "selection_type"]
-    except KeyError:
-        eta_c = int(best_params.loc["default", "eta_crossover"])
-        eta_m = int(best_params.loc["default", "eta_mutation"])
-        selection_type = best_params.loc["default", "selection_type"]
-    selection_type = TournamentSelection(
-        func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
-
     # Names of the models
     models = [normalizing_flow, clg_network]
     models_str = ["nf", "clg"]
@@ -125,7 +112,8 @@ if __name__ == "__main__":
         construction_time_df.loc["face_eps"+"_eps"+str(eps), "construction_time"] = tf
 
     # I need as many BayesACE (both with normalizing flow and CLG) as vertices
-    for algorithm_str,model in zip(["nf", "clg"], [normalizing_flow, clg_network]):
+    for model_str,model in zip(["nf", "clg"], [normalizing_flow, clg_network]):
+        opt_algorithm_params = get_best_opt_params(model = model_str, dataset_id=dataset_id, dir=results_opt_cv_dir)
         for n_vertex in n_vertices:
             for penalty in penalties :
                 t0 = time.time()
@@ -135,13 +123,12 @@ if __name__ == "__main__":
                                chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                                initialization="guided",
                                seed=0, verbose=verbose, opt_algorithm=NSGA2,
-                               opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
-                                             "mutation": PM(eta=eta_m), "selection": selection_type},
+                               opt_algorithm_params=opt_algorithm_params,
                                generations=1000,
                                parallelize=parallelize)
                 tf = time.time()-t0
                 algorithms.append(alg)
-                construction_time_df.loc["bayesace_" + algorithm_str + "_v" + str(n_vertex)+"_pen"+ str(), "construction_time"] = tf
+                construction_time_df.loc["bayesace_" + model_str + "_v" + str(n_vertex)+"_pen"+ str(), "construction_time"] = tf
     # Set parallelism to False for each algorithm
     for alg in algorithms:
         alg.parallelize = False
@@ -163,8 +150,8 @@ if __name__ == "__main__":
             results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
             for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
                 # Set the proper likelihood  and accuracy thresholds
-                algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
-                algorithm.posterior_probability_threshold = posterior_probability_threshold
+                algorithm.set_log_likelihood_threshold(mu_gt + likelihood_dev * std_gt)
+                algorithm.set_posterior_probability_threshold(posterior_probability_threshold)
                 for i in range(n_counterfactuals):
                     instance = df_counterfactuals.iloc[[i]]
                     if parallelize:

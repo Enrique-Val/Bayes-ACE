@@ -68,8 +68,8 @@ if __name__ == "__main__":
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     likelihood_threshold_sigma = -0.5
     post_prob_threshold_sigma = -0.5
-    n_vertices = 3
-    penalties = [1, 10, 20]
+    n_vertices = 2
+    penalties = [1, 5]
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
@@ -77,11 +77,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
+    parser.add_argument('--model', nargs='?', default='nf', type=str, options=['nf', 'clg', 'gt'])
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
     parser.add_argument('--results_dir', nargs='?', default='./results/exp_opt_cv/', type=str)
     args = parser.parse_args()
 
+    model_str: str = args.model
     dataset_id = args.dataset_id
     parallelize = args.parallelize
 
@@ -98,8 +100,15 @@ if __name__ == "__main__":
     # Check if there are instances with this threshold in the training set
     check_enough_instances(df_train, gt_estimator, log_likelihood_threshold, post_prob_threshold)
 
-    density_estimator_path = nf_path
-    density_estimator = normalizing_flow
+    if model_str == 'nf':
+        density_estimator_path = nf_path
+        density_estimator = normalizing_flow
+    elif model_str == 'clg':
+        density_estimator_path = clg_network_path
+        density_estimator = clg_network
+    elif model_str == 'gt':
+        density_estimator_path = gt_estimator_path
+        density_estimator = gt_estimator
 
     param_grid = {
         'eta_crossover': [10, 15, 20],  # Example range for crossover eta
@@ -113,7 +122,7 @@ if __name__ == "__main__":
                               index=range(n_counterfactuals * len(penalties) * n_vertices))
 
     for params in param_combinations:
-        print("Running with parameters: " + str(params))
+        print("Running with parameters: " + str(params) + " in model " + model)
         # Create dictionary of ace parameters
         ace_params = {"posterior_probability_threshold": post_prob_threshold,
                       "log_likelihood_threshold": log_likelihood_threshold, "chunks": chunks,
@@ -150,4 +159,4 @@ if __name__ == "__main__":
 
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
-    results_df.to_csv(os.path.join(results_dir, 'results_data' + str(dataset_id) + '.csv'))
+    results_df.to_csv(os.path.join(results_dir, 'results_data' + str(dataset_id) + '_' + model_str + '.csv'))

@@ -1,22 +1,12 @@
 import random
 import os
-import sys
 
 import pickle
 from itertools import product
-
-import numpy as np
-import pandas as pd
-
 import argparse
 
 import torch
-from pymoo.algorithms.moo.nsga2 import NSGA2, binary_tournament
-from pymoo.operators.crossover.sbx import SBX
-from pymoo.operators.mutation.pm import PM
-from pymoo.operators.selection.rnd import RandomSelection
-from pymoo.operators.selection.tournament import TournamentSelection
-
+from pymoo.algorithms.moo.nsga2 import NSGA2
 from bayesace.algorithms.wachter import WachterCounterfactual
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
@@ -26,8 +16,7 @@ import time
 
 import multiprocessing as mp
 
-from experiments.utils import setup_experiment, get_constraints, get_counterfactual_from_algorithm
-
+from experiments.utils import setup_experiment, get_constraints, get_counterfactual_from_algorithm, get_best_opt_params
 
 # Constant string
 FACE_BASELINE = "face_baseline"
@@ -71,7 +60,7 @@ if __name__ == "__main__":
     # Number of counterfactuals
     n_counterfactuals = 20
     eps = np.inf
-    n_train_size = 2000
+    n_train_size = 1000
     n_generations = 1000
 
     # Activate for multiple objectives
@@ -81,8 +70,8 @@ if __name__ == "__main__":
     if dummy:
         chunks = 5
         n_counterfactuals = 2
-        likelihood_dev_list = likelihood_dev_list[:1]
-        accuracy_threshold_list = accuracy_threshold_list[:1]
+        likelihood_dev_list = likelihood_dev_list[-1:]
+        accuracy_threshold_list = post_prob_dev_list[-1:]
         n_train_size = 10
         n_vertices = n_vertices[:1]
         n_generations = 10
@@ -101,19 +90,6 @@ if __name__ == "__main__":
         results_cv_dir, dataset_id, n_counterfactuals)
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator)
     df_train = df_train.head(n_train_size)
-
-    # Load the best parameters for the NSGA
-    best_params = pd.read_csv(results_opt_cv_dir + "best_params.csv", index_col=0)
-    try:
-        eta_c = int(best_params.loc[dataset_id, "eta_crossover"])
-        eta_m = int(best_params.loc[dataset_id, "eta_mutation"])
-        selection_type = best_params.loc[dataset_id, "selection_type"]
-    except KeyError:
-        eta_c = int(best_params.loc["default", "eta_crossover"])
-        eta_m = int(best_params.loc["default", "eta_mutation"])
-        selection_type = best_params.loc["default", "selection_type"]
-    selection_type = TournamentSelection(
-        func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
 
     # Names of the models
     models = [normalizing_flow, clg_network]
@@ -166,14 +142,17 @@ if __name__ == "__main__":
 
     t0 = time.time()
     alg = WachterCounterfactual(density_estimator=gt_estimator, features=df_train.columns[:-1],
-               log_likelihood_threshold=0.00, accuracy_threshold=0.00, dataset=df_train)
+                                log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, dataset=df_train)
     tf = time.time() - t0
     algorithms.append(alg)
     density_estimator_paths.append(gt_estimator_path)
     construction_time_df.loc[WACHTER, "construction_time"] = tf
 
     # Create as many BayesACE (both with normalizing flow and CLG) as vertices
-    for algorithm_str, model, model_path in zip(models_str, [normalizing_flow, clg_network, gt_estimator], [nf_path, clg_network_path, gt_estimator_path]):
+    for model_str, model, model_path in zip(models_str, [normalizing_flow, clg_network, gt_estimator],
+                                            [nf_path, clg_network_path, gt_estimator_path]):
+        opt_algorithm_params = get_best_opt_params(model=model_str, dataset_id=dataset_id, dir=results_opt_cv_dir)
+        opt_algorithm_params["pop_size"] = 100
         for n_vertex in n_vertices:
             t0 = time.time()
             alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
@@ -182,15 +161,14 @@ if __name__ == "__main__":
                            chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                            initialization="guided",
                            seed=0, verbose=verbose, opt_algorithm=NSGA2,
-                           opt_algorithm_params={"pop_size": 100, "crossover": SBX(eta=eta_c, prob=0.9),
-                                             "mutation": PM(eta=eta_m), "selection": selection_type},
+                           opt_algorithm_params=opt_algorithm_params,
                            generations=n_generations,
                            parallelize=parallelize,
                            multi_objective=multi_objective)
             tf = time.time() - t0
             algorithms.append(alg)
             density_estimator_paths.append(model_path)
-            construction_time_df.loc[BAYESACE + "_" + algorithm_str + "_v" + str(n_vertex), "construction_time"] = tf
+            construction_time_df.loc[BAYESACE + "_" + model_str + "_v" + str(n_vertex), "construction_time"] = tf
     # Set parallelism to False for each algorithm
     for alg in algorithms:
         alg.parallelize = False
@@ -198,16 +176,17 @@ if __name__ == "__main__":
     # Store the construction time. The dataset need to be identified.
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
-    if not dummy :
+    if not dummy:
         construction_time_df.to_csv(results_dir + 'construction_time_data' + str(dataset_id) + '.csv')
 
-    metrics = ["distance", "path_l0", "distance_l2", "counterfactual", "time", "time_w_construct", "distance_to_face_baseline", "real_logl", "real_pp"]
+    metrics = ["distance", "path_l0", "distance_l2", "counterfactual", "time", "time_w_construct",
+               "distance_to_face_baseline", "real_logl", "real_pp"]
 
     # Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
         os.makedirs(results_dir + 'paths/')
 
-    for likelihood_dev,post_prob_dev in zip(likelihood_dev_list, post_prob_dev_list):
+    for likelihood_dev, post_prob_dev in zip(likelihood_dev_list, post_prob_dev_list):
         print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", post_prob_dev)
         # Result storage
         results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
@@ -215,31 +194,33 @@ if __name__ == "__main__":
         for i in metrics:
             results_dfs[i].index.name = dataset_id
         # Set the proper likelihood  and accuracy thresholds
-        for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
-            algorithm.log_likelihood_threshold = mu_gt + likelihood_dev * std_gt
-            algorithm.posterior_probability_threshold = min(mae_gt + std_mae_gt * post_prob_dev, 0.99)
-
-        for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list, density_estimator_paths):
+        for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list,
+                                                                    density_estimator_paths):
+            algorithm.set_log_likelihood_threshold(mu_gt + likelihood_dev * std_gt)
+            algorithm.set_posterior_probability_threshold(min(mae_gt + std_mae_gt * post_prob_dev, 0.99))
+        for algorithm, algorithm_str, density_estimator_path in zip(algorithms, algorithm_str_list,
+                                                                    density_estimator_paths):
             print("Algorithm:", algorithm_str)
-            if parallelize :
+            if parallelize:
                 # Pickle the algorithm to avoid I/O in every worker. The file will later be deleted
                 de = algorithm.density_estimator
                 algorithm.density_estimator = None
                 tmp_file_str = results_dir + 'algorithm_' + algorithm_str + '.pkl'
                 pickle.dump(algorithm, open(tmp_file_str, 'wb'))
-                pool = mp.Pool(min(mp.cpu_count()-1, n_counterfactuals))
-                results = pool.starmap(worker, [(df_counterfactuals.iloc[[i]], tmp_file_str, density_estimator_path, gt_estimator_path,
-                                                penalty, chunks) for i in range(n_counterfactuals)])
+                pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
+                results = pool.starmap(worker, [
+                    (df_counterfactuals.iloc[[i]], tmp_file_str, density_estimator_path, gt_estimator_path,
+                     penalty, chunks) for i in range(n_counterfactuals)])
                 pool.close()
                 pool.join()
                 os.remove(tmp_file_str)
                 algorithm.density_estimator = de
-            else :
+            else:
                 results = []
                 for i in range(n_counterfactuals):
                     instance = df_counterfactuals.iloc[[i]]
                     results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
-                                                                            chunks))
+                                                                     chunks))
             for i in range(n_counterfactuals):
                 path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
                 # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
@@ -273,7 +254,8 @@ if __name__ == "__main__":
                 results_dfs["distance_l2"].loc[i, algorithm_str] = path_l2
                 results_dfs["counterfactual"].loc[i, algorithm_str] = counterfactual
                 results_dfs["time"].loc[i, algorithm_str] = tf
-                results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[algorithm_str, "construction_time"]
+                results_dfs["time_w_construct"].loc[i, algorithm_str] = tf + construction_time_df.loc[
+                    algorithm_str, "construction_time"]
                 results_dfs["real_logl"].loc[i, algorithm_str] = real_logl
                 results_dfs["real_pp"].loc[i, algorithm_str] = real_pp
 
@@ -281,15 +263,18 @@ if __name__ == "__main__":
         # FACE and the ones found by the other algorithms
         for i in range(n_counterfactuals):
             for algorithm_str in algorithm_str_list:
-                if not results_dfs["counterfactual"].loc[i, FACE_BASELINE] is None and not results_dfs["counterfactual"].loc[i, algorithm_str] is None:
+                if not results_dfs["counterfactual"].loc[i, FACE_BASELINE] is None and not \
+                results_dfs["counterfactual"].loc[i, algorithm_str] is None:
                     results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.linalg.norm(
-                        results_dfs["counterfactual"].loc[i, FACE_BASELINE] - results_dfs["counterfactual"].loc[i, algorithm_str])
-                elif results_dfs["counterfactual"].loc[i, FACE_BASELINE] is None and not results_dfs["counterfactual"].loc[i, algorithm_str] is None :
+                        results_dfs["counterfactual"].loc[i, FACE_BASELINE] - results_dfs["counterfactual"].loc[
+                            i, algorithm_str])
+                elif results_dfs["counterfactual"].loc[i, FACE_BASELINE] is None and not \
+                results_dfs["counterfactual"].loc[i, algorithm_str] is None:
                     results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = 0
-                else :
+                else:
                     results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.inf
 
-        if not dummy :
+        if not dummy:
             # Save the results
             for i in metrics:
                 if not os.path.exists(results_dir + i + '/'):
@@ -297,7 +282,7 @@ if __name__ == "__main__":
                 results_dfs[i].to_csv(
                     results_dir + i + '/likelihood' + str(likelihood_dev) + '_pp' + str(
                         post_prob_dev) + '.csv')
-        else :
+        else:
             for i in metrics:
                 print(i)
                 print(results_dfs[i].to_string())

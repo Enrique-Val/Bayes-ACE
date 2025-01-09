@@ -58,3 +58,15 @@ class ACE(Algorithm):
     def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
         assert (instance["class"].values[0] != target_label)
         return ACEResult(None, pd.DataFrame(), np.nan)
+
+    def set_log_likelihood_threshold(self, log_likelihood_threshold):
+        old_log_likelihood_threshold = self.log_likelihood_threshold
+        self.log_likelihood_threshold = log_likelihood_threshold
+        return old_log_likelihood_threshold
+
+    def set_posterior_probability_threshold(self, posterior_probability_threshold):
+        old_posterior_probability_threshold = self.posterior_probability_threshold
+        self.posterior_probability_threshold = posterior_probability_threshold
+        return old_posterior_probability_threshold
+
+
