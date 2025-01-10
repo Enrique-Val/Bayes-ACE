@@ -27,8 +27,8 @@ def read_eqi_dataset(to_del=None):
 
     # Discretize EQI_2Jan2018_VC and code it as str and pd.Categorical
     # Discretize in quantiles: 0-0.05, 0.05-0.2, 0.2-0.4, 0.4-0.6, 0.6-0.8, 0.8-0.0.95, 0.95-1
-    # data["EQI_2Jan2018_VC"] = pd.qcut(data["EQI_2Jan2018_VC"], q=[0, 0.05, 0.2, 0.4, 0.6, 0.8, 0.95, 1], labels=False)
-    data_eqi["EQI_2Jan2018_VC"] = pd.qcut(data_eqi["EQI_2Jan2018_VC"], q=5, labels=False)
+    data_eqi["EQI_2Jan2018_VC"] = pd.qcut(data_eqi["EQI_2Jan2018_VC"], q=[0, 0.05, 0.2, 0.4, 0.6, 0.8, 0.95, 1], labels=False)
+    #data_eqi["EQI_2Jan2018_VC"] = pd.qcut(data_eqi["EQI_2Jan2018_VC"], q=5, labels=False)
     data_eqi["EQI_2Jan2018_VC"] = data_eqi["EQI_2Jan2018_VC"].astype(str).astype('category')
 
     # Rename as class
@@ -172,10 +172,10 @@ if __name__ == "__main__":
     # Hard coded params of the second round
     param_space = [
         Real(5e-5, 5e-4, name='lr'),
-        Real(1e-3, 1, name='weight_decay'),
+        Real(1e-4, 1, name='weight_decay'),
         Integer(2, 5, name='hidden_units'),
         Integer(1, 5, name='layers'),
-        Integer(1, 5, name='n_flows'),
+        Integer(1, 8, name='n_flows'),
         Real(0.1, 0.5, name='sam_noise', prior='log-uniform')
     ]
     '''# Hard coded params of the first round
@@ -208,28 +208,43 @@ if __name__ == "__main__":
     data_train_scaled[features + eqis] = scaler.fit_transform(data_train[features + eqis])
 
     if args.graphical:
+        color_palette = {"0": "red", "1": "blue", "2": "green", "3": "orange", "4": "purple",
+                         "5": "olive", "6": "cyan"}
+
         # Print a histogram of every variable. Do it in many 4x4 axis to not saturate the calls
+        # Print each class with a different color (variable class)
         for features_16 in range(0, len(data_train.columns), 16):
             fig, axs = plt.subplots(4, 4, figsize=(20, 20))
             for i, feature in enumerate(data_train.columns[features_16:features_16 + 16]):
-                axs[i // 4, i % 4].hist(data_train[feature], bins=20)
+                for class_i in data_train["class"].unique():
+                    axs[i // 4, i % 4].hist(data_train[data_train["class"] == class_i][feature], bins=30,
+                                            color=color_palette[class_i], alpha=0.5)
                 axs[i // 4, i % 4].set_title(feature)
             plt.show()
 
-    bn_restricted = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=max_indegree, arc_whitelist=whitelist,
-                                  arc_blacklist=blacklist, initial_structure="empty")
     # Create a fold object
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=0)
 
-    # Print the validation metrics
-    metrics_restricted = cross_validate_restricted_bn(data_train, max_indegree=max_indegree, blacklist=blacklist,
+    # Learn the restricted BN with only max_indegree parents per node
+    bn_restricted_lim_arcs = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=max_indegree, arc_whitelist=whitelist,
+                                  arc_blacklist=blacklist, initial_structure="empty")
+    metrics_restricted_lim_arcs = cross_validate_restricted_bn(data_train, max_indegree=max_indegree, blacklist=blacklist,
                                                       whitelist=whitelist,
                                                       hc_seed=0,
                                                       kfold_object=kf)
-
-    print("Restricted BN learned")
+    print("Restricted BN learned with limited arcs learned")
 
     if not DUMMY:
+        # Learn the restricted BN with only max_indegree parents per node
+        bn_restricted = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=0,
+                                               arc_whitelist=whitelist,
+                                               arc_blacklist=blacklist, initial_structure="empty")
+        metrics_restricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=blacklist,
+                                                          whitelist=whitelist,
+                                                          hc_seed=0,
+                                                          kfold_object=kf)
+        print("Restricted BN learned")
+
         bn = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", initial_structure="empty")
         metrics_unrestricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=[], whitelist=[],
                                                             hc_seed=0, kfold_object=kf)
@@ -246,9 +261,10 @@ if __name__ == "__main__":
     metrics[-1].pop("split_dim")
 
     # Create df for results. Same index as metrics keys
-    results_df = pd.DataFrame(index=list(metrics_restricted.keys()))
-    results_df["Restricted"] = metrics_restricted.values()
+    results_df = pd.DataFrame(index=list(metrics_restricted_lim_arcs.keys()))
+    results_df["Restricted (limited arcs)"] = metrics_restricted_lim_arcs.values()
     if not DUMMY:
+        results_df["Restricted"] = metrics_restricted.values()
         results_df["Unrestricted"] = metrics_unrestricted.values()
     results_df["NF"] = metrics
 
@@ -267,6 +283,7 @@ if __name__ == "__main__":
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
         pickle.dump(bn, open(model_dir + "bn_unrestricted.pkl", 'wb'))
+        pickle.dump(bn_restricted_lim_arcs, open(model_dir + "bn_restricted_lim_arcs.pkl", 'wb'))
         pickle.dump(bn_restricted, open(model_dir + "bn_restricted.pkl", 'wb'))
         pickle.dump(best_nf, open(model_dir + "nf.pkl", 'wb'))
 

@@ -68,8 +68,8 @@ if __name__ == "__main__":
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     likelihood_threshold_sigma = -0.5
     post_prob_threshold_sigma = -0.5
-    n_vertices = 2
-    penalties = [1, 5]
+    n_vertices = 1
+    penalties = [1]
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
@@ -77,22 +77,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
-    parser.add_argument('--model', nargs='?', default='nf', type=str, choices=['nf', 'clg', 'gt'])
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
-    parser.add_argument('--results_dir', nargs='?', default='./results/exp_opt_cv/', type=str)
+    parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_eqi/", type=str)
     args = parser.parse_args()
 
     model_str: str = args.model
     dataset_id = args.dataset_id
     parallelize = args.parallelize
-
-    DUMMY = False
-    if DUMMY:
-        chunks = 2
-        n_counterfactuals = 2
-        penalties = [1]
-        n_vertices = 1
 
     random.seed(0)
 
@@ -164,7 +155,6 @@ if __name__ == "__main__":
         distances = np.concatenate(distances)
         results_df[str(params)] = distances
 
-    if not DUMMY :
-        if not os.path.exists(results_dir):
-            os.makedirs(results_dir)
-        results_df.to_csv(os.path.join(results_dir, 'results_data' + str(dataset_id) + '_' + model_str + '.csv'))
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+    results_df.to_csv(os.path.join(results_dir, 'results_data' + str(dataset_id) + '_' + model_str + '.csv'))

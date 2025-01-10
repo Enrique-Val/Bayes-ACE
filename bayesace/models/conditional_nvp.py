@@ -229,6 +229,7 @@ class ConditionalNVP(ConditionalNF):
 
             except NanLogProb as e:
                 if err_scale < 0.2:
+                    os.remove(model_pth_name)
                     raise e
                 if len(val_losses) == 0:
                     self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
