@@ -267,6 +267,7 @@ class ConditionalNVP(ConditionalNF):
                 print(f"Epoch {epoch + 1}/{steps} - Loss: {losses[-1]} - Val Loss: {val_losses[-1]}")
                 print("Lr:", optimizer.param_groups[0]['lr'])
         if self.graphics:
+            import matplotlib.pyplot as plt
             plt.plot(losses, label='Training Loss')
             plt.plot(val_losses, label='Validation Loss')
             plt.legend()

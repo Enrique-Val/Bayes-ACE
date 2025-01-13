@@ -313,9 +313,12 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kf: KFold, n_iter: int = 50
 
 
 def train_ckde_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, bandwidth: float = 1.0,
-                               kernel="gaussian"):
+                               kernel="gaussian", outliers: float = np.inf):
     t0 = time.time()
     model = ConditionalKDE(bandwidth=bandwidth, kernel=kernel)
+    means_train = df_train.mean()
+    stds_train = df_train.std()
+    df_train = df_train[np.abs((df_train - means_train) / stds_train) < outliers]
     model.train(df_train.head(10000))
     it_time = time.time() - t0
     logl_data = model.logl(df_test)
@@ -329,21 +332,21 @@ def train_ckde_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, ba
 
 
 def cross_validate_ckde(dataset: pd.DataFrame, kf: KFold, bandwidth: float = 1.0, kernel="gaussian",
-                        parallelize: bool = False) -> list | None:
+                        outliers: float = np.inf, parallelize: bool = False) -> list | None:
     cv_iter_results = []
     if not parallelize:
         for train_index, test_index in kf.split(dataset):
             df_train = dataset.iloc[train_index].reset_index(drop=True)
             df_test = dataset.iloc[test_index].reset_index(drop=True)
             cv_iter_results.append(
-                train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel))
+                train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel, outliers=outliers))
     elif parallelize:
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
         column_names = dataset.columns.tolist()
         pool = mp.Pool(min(mp.cpu_count() - 1, k))
         cv_iter_results = pool.starmap(worker_ckde,
                                        [(shm.name, shared_array.shape, shared_array.dtype, column_names,
-                                         ordinal_mapping, i_fold, bandwidth, kernel)
+                                         ordinal_mapping, i_fold, bandwidth, kernel, outliers)
                                         for i_fold in kf.split(dataset)])
         pool.close()
         pool.join()
@@ -504,11 +507,10 @@ if __name__ == "__main__":
 
         # Prior to any validation, eliminate outliers from the resampled dataset
         # Specifically, instances whose feature value are outside 3 std
+        means = resampled_dataset.mean()
+        stds = resampled_dataset.std()
         for i in resampled_dataset.columns[:-1]:
-            resampled_dataset = resampled_dataset[
-                resampled_dataset[i] < (resampled_dataset[i].mean() + resampled_dataset[i].std() * 3)]
-            resampled_dataset = resampled_dataset[
-                resampled_dataset[i] > (resampled_dataset[i].mean() - resampled_dataset[i].std() * 3)]
+            resampled_dataset = resampled_dataset[np.abs((resampled_dataset[i] - means[i])/stds[i]) < 3]
 
         d = resampled_dataset.shape[1] - 1
         n_instances = resampled_dataset.shape[0]
