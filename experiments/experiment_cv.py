@@ -35,30 +35,19 @@ n_batches = 20
 default_opt_iter = 100
 
 # Define how the preprocessing will be done
-JIT_COEF = 0
-ELIM_OUTL = True
-min_unique_vals = 50
-max_unique_vals_to_jit = 0.05
+ELIM_OUTL = np.inf
+min_unique_vals = 20
 max_cum_values = 3
-minimum_spike_jitter = 0.0
 
-# Define the parameter value range IF using Bayesian optimization
-param_space = [
-    Real(1e-4, 5e-3, name='lr'),
-    Real(1e-4, 1e-2, name='weight_decay'),
-    Integer(2, 16, name='count_bins'),
-    Integer(2, 10, name='hidden_units'),
-    Integer(1, 5, name='layers'),
-    Integer(1, 10, name='n_flows')
-]
-
-
-def cross_validate_bn(dataset: pd.DataFrame, kf: KFold):
+def cross_validate_bn(dataset: pd.DataFrame, kf: KFold, outliers:float = np.inf):
     # Validate Gaussian network
     bn_results = []
     for i, (train_index, test_index) in enumerate(kf.split(dataset)):
         bn_results_i = []
         df_train = dataset.iloc[train_index].reset_index(drop=True)
+        means_train = df_train[df_train.columns[:-1]].mean()
+        stds_train = df_train[df_train.columns[:-1]].std()
+        df_train = df_train[(np.abs((df_train[df_train.columns[:-1]] - means_train) / stds_train) < outliers).all(axis=1)]
         df_test = dataset.iloc[test_index].reset_index(drop=True)
         t0 = time.time()
         network = hill_climbing(data=df_train, bn_type="CLG")
@@ -147,6 +136,13 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
     # We make a copy, since the hidden units that we specify are RELATIVE to the inputs
     nn_params_copy = nn_params.copy()
     nn_params_copy["hidden_units"] = d * nn_params["hidden_units"]
+    outliers = nn_params_copy.pop("outliers", np.inf)
+
+    # Remove outliers in training
+    means_train = df_train[df_train.columns[:-1]].mean()
+    stds_train = df_train[df_train.columns[:-1]].std()
+    df_train = df_train[(np.abs((df_train[df_train.columns[:-1]] - means_train) / stds_train) < outliers).all(axis=1)]
+
     t0 = time.time()
     model = None
     if model_type == "NVP":
@@ -316,10 +312,10 @@ def train_ckde_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, ba
                                kernel="gaussian", outliers: float = np.inf):
     t0 = time.time()
     model = ConditionalKDE(bandwidth=bandwidth, kernel=kernel)
-    means_train = df_train.mean()
-    stds_train = df_train.std()
-    df_train = df_train[np.abs((df_train - means_train) / stds_train) < outliers]
-    model.train(df_train.head(10000))
+    means_train = df_train[df_train.columns[:-1]].mean()
+    stds_train = df_train[df_train.columns[:-1]].std()
+    df_train = df_train[(np.abs((df_train[df_train.columns[:-1]] - means_train) / stds_train) < outliers).all(axis=1)]
+    model.train(df_train.head(15000))
     it_time = time.time() - t0
     logl_data = model.logl(df_test)
     logl = logl_data.mean()
@@ -387,7 +383,6 @@ def grid_search_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict, previo
             best_kernel = kernel
     return best_logl, best_bandwidth, best_kernel
 
-
 def get_best_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict = None):
     # Param space is a grid of parameters. Instead of Bayesian optimization, we will use a grid search
     if param_space is None:
@@ -397,12 +392,12 @@ def get_best_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict = None):
                               "kernel": ["epanechnikov", "linear"]}
         best_logl, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf,
                                                                   param_space_gauss)
-        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf,
+        '''_, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf,
                                                           param_space_linear,
                                                           previous_best={
                                                               "logl": best_logl,
                                                               "bandwidth": best_bandwidth,
-                                                              "kernel": best_kernel})
+                                                              "kernel": best_kernel})'''
     else:
         _, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf, param_space)
 
@@ -434,6 +429,17 @@ if __name__ == "__main__":
     n_iter = args.n_iter
     parallelize = args.parallelize
 
+    # Hard code parameter space
+    param_space = [
+        Real(1e-4, 5e-3, name='lr'),
+        Real(1e-4, 1e-2, name='weight_decay'),
+        Integer(2, 16, name='count_bins'),
+        Integer(2, 10, name='hidden_units'),
+        Integer(1, 5, name='layers'),
+        Integer(1, 10, name='n_flows'),
+        Real(0.01, 0.3, name='sam_noise', prior='log-uniform')
+    ]
+
     directory_path = args.dir_name + str(dataset_id) + "/"
     if not os.path.exists(directory_path):
         # If the directory does not exist, create it
@@ -453,11 +459,9 @@ if __name__ == "__main__":
     if args.part == 'rd' or args.part == 'full':
         # Load the dataset and preprocess it
         dataset = get_data(dataset_id, standardize=True)
-        dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL, jit_coef=JIT_COEF,
-                                  min_unique_vals=min_unique_vals,
-                                  max_unique_vals_to_jit=max_unique_vals_to_jit * len(dataset), max_instances=50000,
-                                  minimum_spike_jitter=minimum_spike_jitter, max_cum_values=max_cum_values)
-
+        dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL,
+                              min_unique_vals=min_unique_vals,
+                              max_instances=50000, max_cum_values=max_cum_values)
         d = len(dataset.columns) - 1
         n_instances = dataset.shape[0]
         batch_size = int((n_instances / n_batches) * 0.8 + 1)
@@ -504,13 +508,6 @@ if __name__ == "__main__":
             results_df = results_df.drop("CLG", axis=1)
             results_df = results_df.drop("GT_SD", axis=1)
             results_df = results_df.drop("NF", axis=1)
-
-        # Prior to any validation, eliminate outliers from the resampled dataset
-        # Specifically, instances whose feature value are outside 3 std
-        means = resampled_dataset.mean()
-        stds = resampled_dataset.std()
-        for i in resampled_dataset.columns[:-1]:
-            resampled_dataset = resampled_dataset[np.abs((resampled_dataset[i] - means[i])/stds[i]) < 3]
 
         d = resampled_dataset.shape[1] - 1
         n_instances = resampled_dataset.shape[0]

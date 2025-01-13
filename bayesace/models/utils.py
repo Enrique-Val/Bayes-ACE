@@ -5,7 +5,6 @@ import multiprocessing as mp
 
 from sklearn.preprocessing import StandardScaler
 
-
 class PybnesianParallelizationError(Exception):
     pass
 
@@ -33,9 +32,8 @@ def check_copy(bn):
     return bn.fitted()
 
 
-def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outliers=False, standardize=True,
-                    min_unique_vals=50, max_unique_vals_to_jit=350, max_cum_values=3, max_instances=100000,
-                    minimum_spike_jitter = 0):
+def preprocess_data(data: pd.DataFrame | np.ndarray,  eliminate_outliers=np.inf, standardize=True,
+                    min_unique_vals=20, max_cum_values=3, max_instances=100000):
     array_flag = False
     if isinstance(data, np.ndarray):
         # The following code but for an array instead of a dataframe:
@@ -49,23 +47,13 @@ def preprocess_data(data: pd.DataFrame | np.ndarray, jit_coef=0, eliminate_outli
     feature_data = data[features]
     feature_data = feature_data.loc[:, feature_data.nunique() >= min_unique_vals]
 
-    feature_data = feature_data.loc[:, feature_data.apply(lambda x: np.sort(np.histogram(x, bins=200)[0])[-max_cum_values:].sum() < len(data)*0.6, axis=0)]
+    feature_data = feature_data.loc[:, feature_data.apply(lambda x: np.sort(np.histogram(x, bins=100)[0])[-max_cum_values:].sum() < len(data)*0.95, axis=0)]
     data = pd.concat([feature_data, data[target_column]], axis=1)
-    for i in data.columns[:-1]:
-        if eliminate_outliers:
-            data = data[data[i] < (data[i].mean()+data[i].std() * 3)]
-            data = data[data[i] > (data[i].mean()-data[i].std() * 3)]
-        if data[i].nunique() < max_unique_vals_to_jit:
-            new_jit_coef = (1-(data[i].nunique()-min_unique_vals)/(max_unique_vals_to_jit-min_unique_vals))*jit_coef
-            data[i] = data[i] + np.random.normal(0, new_jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
-        else :
-            # Apply jittering proportional to the spikes in the data
-            h = np.histogram(data[i], bins=200)[0]
-            h = h/h.sum()
-            h = np.abs(h[1:]-h[:-1])
-            new_jit_coef = (h.max() - minimum_spike_jitter)*jit_coef
-            if new_jit_coef>0:
-                data[i] = data[i] + np.random.normal(0, new_jit_coef * 1.06 / (len(data) ** (1 / 5)), data[i].shape)
+
+    means = data[data.columns[:-1]].mean()
+    stds = data[data.columns[:-1]].std()
+    data = data[(np.abs((data[data.columns[:-1]] - means) / stds) < eliminate_outliers).all(axis=1)]
+
     if standardize:
         data[data.columns[:-1]] = StandardScaler().fit_transform(data[data.columns[:-1]].values)
     # Assert that there are no missing values
