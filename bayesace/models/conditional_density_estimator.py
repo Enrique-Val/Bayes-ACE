@@ -46,3 +46,6 @@ class ConditionalDE(ABC):
 
     def fitted(self):
         return self.trained
+
+    def logl(self, df_test):
+        pass

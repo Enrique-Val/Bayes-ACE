@@ -14,7 +14,7 @@ from bayesace.models.conditional_normalizing_flow import NanLogProb
 from bayesace.models.conditional_nvp import ConditionalNVP
 from bayesace.models.conditional_spline import ConditionalSpline
 from bayesace.models.conditional_kde import ConditionalKDE
-from bayesace.models.utils import preprocess_data
+from bayesace.models.utils import preprocess_data, remove_outliers
 from bayesace.dataset.utils import get_data
 
 import pickle
@@ -26,28 +26,14 @@ import multiprocessing as mp
 
 import time
 
-# Define the number of folds (K)
-k = 10
-steps = 500
-n_batches = 20
 
-# Define the number of iterations for Bayesian optimization
-default_opt_iter = 100
-
-# Define how the preprocessing will be done
-ELIM_OUTL = np.inf
-min_unique_vals = 20
-max_cum_values = 3
-
-def cross_validate_bn(dataset: pd.DataFrame, kf: KFold, outliers:float = np.inf):
+def cross_validate_bn(dataset: pd.DataFrame, kfold_object: KFold, outliers: float = np.inf):
     # Validate Gaussian network
     bn_results = []
-    for i, (train_index, test_index) in enumerate(kf.split(dataset)):
+    for i, (train_index, test_index) in enumerate(kfold_object.split(dataset)):
         bn_results_i = []
         df_train = dataset.iloc[train_index].reset_index(drop=True)
-        means_train = df_train[df_train.columns[:-1]].mean()
-        stds_train = df_train[df_train.columns[:-1]].std()
-        df_train = df_train[(np.abs((df_train[df_train.columns[:-1]] - means_train) / stds_train) < outliers).all(axis=1)]
+        df_train = remove_outliers(df_train, outliers)
         df_test = dataset.iloc[test_index].reset_index(drop=True)
         t0 = time.time()
         network = hill_climbing(data=df_train, bn_type="CLG")
@@ -66,7 +52,6 @@ def cross_validate_bn(dataset: pd.DataFrame, kf: KFold, outliers:float = np.inf)
         bn_results.append(bn_results_i)
 
     bn_results = np.array(bn_results)
-    bn_results_mean = np.mean(bn_results, axis=0)
     bn_results = list(np.vstack((np.mean(bn_results, axis=0), np.std(bn_results, axis=0))).ravel('F'))
     bn_results.append("BIC")
 
@@ -139,9 +124,7 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
     outliers = nn_params_copy.pop("outliers", np.inf)
 
     # Remove outliers in training
-    means_train = df_train[df_train.columns[:-1]].mean()
-    stds_train = df_train[df_train.columns[:-1]].std()
-    df_train = df_train[(np.abs((df_train[df_train.columns[:-1]] - means_train) / stds_train) < outliers).all(axis=1)]
+    df_train = remove_outliers(df_train, outliers)
 
     t0 = time.time()
     model = None
@@ -153,22 +136,27 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
         model = ConditionalSpline()
         model.train(df_train, **nn_params_copy)
     it_time = time.time() - t0
+    metrics = get_metrics(model, df_test)
+    metrics["Time"] = it_time
+    return metrics
+
+
+def get_metrics(model: ConditionalDE, df_test: pd.DataFrame):
     logl_data = model.logl(df_test)
     logl = logl_data.mean()
     logl_std = logl_data.std()
     predictions = predict_class(df_test.drop("class", axis=1), model)
     brier = brier_score(df_test["class"].values, predictions)
     auc_res = auc(df_test["class"].values, predictions)
-    return {"Logl": np.mean(logl), "LoglStd": np.mean(logl_std), "Brier": np.mean(brier), "AUC": np.mean(auc_res),
-            "Time": np.mean(it_time)}
+    return {"Logl": logl, "LoglStd": logl_std, "Brier": brier, "AUC": auc_res}
 
 
-def cross_validate_nf(dataset: pd.DataFrame, kf: KFold, model_type="NVP", parallelize=False, working_dir="./",
+def cross_validate_nf(dataset: pd.DataFrame, kfold_object: KFold, model_type="NVP", parallelize=False, working_dir="./",
                       nn_params: dict = None) -> list | None:
     cv_iter_results = []
     if not parallelize:
         try:
-            for train_index, test_index in kf.split(dataset):
+            for train_index, test_index in kfold_object.split(dataset):
                 df_train = dataset.iloc[train_index].reset_index(drop=True)
                 df_test = dataset.iloc[test_index].reset_index(drop=True)
                 cv_iter_results.append(
@@ -191,7 +179,7 @@ def cross_validate_nf(dataset: pd.DataFrame, kf: KFold, model_type="NVP", parall
                                            [(shm.name, shared_array.shape, shared_array.dtype, column_names,
                                              ordinal_mapping, i_fold, model_type, nn_params,
                                              working_dir)
-                                            for i_fold in kf.split(dataset)])
+                                            for i_fold in kfold_object.split(dataset)])
         except NanLogProb as e:
             cv_iter_results = None
             to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
@@ -227,7 +215,7 @@ def cross_validate_nf(dataset: pd.DataFrame, kf: KFold, model_type="NVP", parall
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [nn_params]
 
 
-def get_best_normalizing_flow(dataset: pd.DataFrame, kf: KFold, n_iter: int = 50, nn_params_fixed: dict = None,
+def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter: int = 100, nn_params_fixed: dict = None,
                               model_type="NVP",
                               parallelize: bool = False,
                               param_space: list[Dimension] = None, working_dir="./"):
@@ -260,7 +248,7 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kf: KFold, n_iter: int = 50
         if nn_params_fixed is not None:
             params.update(nn_params_fixed)
         # Cross validate
-        result_cv = cross_validate_nf(dataset, kf, model_type=model_type, parallelize=parallelize,
+        result_cv = cross_validate_nf(dataset, kfold_object, model_type=model_type, parallelize=parallelize,
                                       working_dir=working_dir, nn_params=params)
         if result_cv is None or result_cv[0] < -3e11:
             # If the logl is too low, return a high value for the objective function. This allows to not overpenalize
@@ -292,7 +280,7 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kf: KFold, n_iter: int = 50
     best_params["perms_instantiation"] = best_perm
 
     # Cross validate again to get the rest of the metrics
-    metrics = cross_validate_nf(dataset, kf, nn_params=best_params, working_dir=working_dir)
+    metrics = cross_validate_nf(dataset, kfold_object, nn_params=best_params, working_dir=working_dir)
 
     # Train once again to return the object
     model = None
@@ -310,28 +298,22 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kf: KFold, n_iter: int = 50
 
 def train_ckde_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, bandwidth: float = 1.0,
                                kernel="gaussian", outliers: float = np.inf):
+    # Remove outliers in training
+    df_train = remove_outliers(df_train, outliers)
     t0 = time.time()
     model = ConditionalKDE(bandwidth=bandwidth, kernel=kernel)
-    means_train = df_train[df_train.columns[:-1]].mean()
-    stds_train = df_train[df_train.columns[:-1]].std()
-    df_train = df_train[(np.abs((df_train[df_train.columns[:-1]] - means_train) / stds_train) < outliers).all(axis=1)]
     model.train(df_train.head(15000))
     it_time = time.time() - t0
-    logl_data = model.logl(df_test)
-    logl = logl_data.mean()
-    logl_std = logl_data.std()
-    predictions = predict_class(df_test.drop("class", axis=1), model)
-    brier = brier_score(df_test["class"].values, predictions)
-    auc_res = auc(df_test["class"].values, predictions)
-    return {"Logl": np.mean(logl), "LoglStd": np.mean(logl_std), "Brier": np.mean(brier), "AUC": np.mean(auc_res),
-            "Time": np.mean(it_time)}
+    metrics = get_metrics(model, df_test)
+    metrics["Time"] = it_time
+    return metrics
 
 
-def cross_validate_ckde(dataset: pd.DataFrame, kf: KFold, bandwidth: float = 1.0, kernel="gaussian",
+def cross_validate_ckde(dataset: pd.DataFrame, kfold_object: KFold, bandwidth: float = 1.0, kernel="gaussian",
                         outliers: float = np.inf, parallelize: bool = False) -> list | None:
     cv_iter_results = []
     if not parallelize:
-        for train_index, test_index in kf.split(dataset):
+        for train_index, test_index in kfold_object.split(dataset):
             df_train = dataset.iloc[train_index].reset_index(drop=True)
             df_test = dataset.iloc[test_index].reset_index(drop=True)
             cv_iter_results.append(
@@ -343,7 +325,7 @@ def cross_validate_ckde(dataset: pd.DataFrame, kf: KFold, bandwidth: float = 1.0
         cv_iter_results = pool.starmap(worker_ckde,
                                        [(shm.name, shared_array.shape, shared_array.dtype, column_names,
                                          ordinal_mapping, i_fold, bandwidth, kernel, outliers)
-                                        for i_fold in kf.split(dataset)])
+                                        for i_fold in kfold_object.split(dataset)])
         pool.close()
         pool.join()
 
@@ -365,7 +347,7 @@ def cross_validate_ckde(dataset: pd.DataFrame, kf: KFold, bandwidth: float = 1.0
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [{"bandwidth": bandwidth, "kernel": kernel}]
 
 
-def grid_search_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict, previous_best=None):
+def grid_search_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict, previous_best=None):
     best_bandwidth = None
     best_kernel = None
     best_logl = -np.inf
@@ -374,7 +356,7 @@ def grid_search_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict, previo
         best_bandwidth = previous_best["bandwidth"]
         best_kernel = previous_best["kernel"]
     for bandwidth, kernel in product(param_space["bandwidth"], param_space["kernel"]):
-        metrics = cross_validate_ckde(dataset, kf, bandwidth=bandwidth, kernel=kernel)
+        metrics = cross_validate_ckde(dataset, kfold_object, bandwidth=bandwidth, kernel=kernel)
         # Get the mean_logl
         mean_logl = metrics[0]
         if mean_logl > best_logl:
@@ -383,14 +365,15 @@ def grid_search_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict, previo
             best_kernel = kernel
     return best_logl, best_bandwidth, best_kernel
 
-def get_best_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict = None):
+
+def get_best_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict = None):
     # Param space is a grid of parameters. Instead of Bayesian optimization, we will use a grid search
     if param_space is None:
         param_space_gauss = {"bandwidth": np.logspace(-1, 0, num=10),
                              "kernel": ["gaussian"]}
         param_space_linear = {"bandwidth": np.logspace(0, 1, num=10),
                               "kernel": ["epanechnikov", "linear"]}
-        best_logl, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf,
+        best_logl, best_bandwidth, best_kernel = grid_search_ckde(dataset, kfold_object,
                                                                   param_space_gauss)
         '''_, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf,
                                                           param_space_linear,
@@ -399,10 +382,10 @@ def get_best_ckde(dataset: pd.DataFrame, kf: KFold, param_space: dict = None):
                                                               "bandwidth": best_bandwidth,
                                                               "kernel": best_kernel})'''
     else:
-        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf, param_space)
+        _, best_bandwidth, best_kernel = grid_search_ckde(dataset, kfold_object, param_space)
 
     # Cross validate again to get the rest of the metrics
-    metrics = cross_validate_ckde(dataset, kf, bandwidth=best_bandwidth, kernel=best_kernel)
+    metrics = cross_validate_ckde(dataset, kfold_object, bandwidth=best_bandwidth, kernel=best_kernel)
 
     # Train once again to return the object
     model = ConditionalKDE(bandwidth=best_bandwidth, kernel=best_kernel)
@@ -418,19 +401,29 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_id", nargs='?', default=44127, type=int)
     parser.add_argument('--graphics', action=argparse.BooleanOptionalAction)
     parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
-    parser.add_argument('--n_iter', nargs='?', default=default_opt_iter, type=int)
+    parser.add_argument('--n_iter', nargs='?', default=100, type=int)
     parser.add_argument('--part', choices=['full', 'rd', 'sd'], default='full')
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_2_kde/", type=str)
     args = parser.parse_args()
 
+    # Hard code some parameters
+    # Define the number of folds (K)
+    k = 10
+    # Define the number of steps and batches
+    steps = 500
+    n_batches = 30
+
+    # Define how the preprocessing will be done
+    ELIM_OUTL = np.inf
+    min_unique_vals = 20
+    max_cum_values = 3
+
     dataset_id = args.dataset_id
     GRAPHIC = args.graphics
-    n_iter = args.n_iter
-    parallelize = args.parallelize
 
     # Hard code parameter space
-    param_space = [
+    param_space_nf = [
         Real(1e-4, 5e-3, name='lr'),
         Real(1e-4, 1e-2, name='weight_decay'),
         Integer(2, 16, name='count_bins'),
@@ -458,16 +451,16 @@ if __name__ == "__main__":
 
     if args.part == 'rd' or args.part == 'full':
         # Load the dataset and preprocess it
-        dataset = get_data(dataset_id, standardize=True)
-        dataset = preprocess_data(dataset, standardize=True, eliminate_outliers=ELIM_OUTL,
-                              min_unique_vals=min_unique_vals,
-                              max_instances=50000, max_cum_values=max_cum_values)
-        d = len(dataset.columns) - 1
-        n_instances = dataset.shape[0]
+        dataset_oml = get_data(dataset_id, standardize=True)
+        dataset_oml = preprocess_data(dataset_oml, standardize=True, eliminate_outliers=ELIM_OUTL,
+                                      min_unique_vals=min_unique_vals,
+                                      max_instances=50000, max_cum_values=max_cum_values)
+        d = len(dataset_oml.columns) - 1
+        n_instances = dataset_oml.shape[0]
         batch_size = int((n_instances / n_batches) * 0.8 + 1)
 
         if args.type == "NVP":
-            param_space.pop(2)
+            param_space_nf.pop(2)
 
         # Storage of results
         cartesian_product = list(product(result_metrics, ["_mean", "_std"]))
@@ -478,7 +471,7 @@ if __name__ == "__main__":
         results_df.index.name = str(dataset_id)
 
         # Validate Gaussian network for preliminary comparisons
-        bn_results = cross_validate_bn(dataset, kf)
+        bn_results = cross_validate_bn(dataset_oml, kf)
         results_df["CLG_RD"] = bn_results
 
         # Print results
@@ -487,12 +480,12 @@ if __name__ == "__main__":
         print(str(dict_print))
         print()
 
-        # First, learn a KDE serving as grouns truth flow and sample new synthetic data
-        gt_model, metrics, result = get_best_ckde(dataset, kf)
-        results_df["GT_RD"] = metrics
+        # First, learn a KDE serving as ground truth flow and sample new synthetic data
+        gt_model, metrics_ckde, result = get_best_ckde(dataset_oml, kf)
+        results_df["GT_RD"] = metrics_ckde
 
         pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
-        resampled_dataset = gt_model.sample(np.min((len(dataset), 50000))).to_pandas()
+        resampled_dataset = gt_model.sample(np.min((len(dataset_oml), 50000))).to_pandas()
         resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
 
         if args.part == 'rd':
@@ -513,7 +506,7 @@ if __name__ == "__main__":
         n_instances = resampled_dataset.shape[0]
         batch_size = int((n_instances / n_batches) + 1)
         if args.type == "NVP" and args.part == 'sd':
-            param_space.pop(2)
+            param_space_nf.pop(2)
 
         # Check the metrics of the model given the resampled data
         resampled_dataset_metrics = np.zeros(len(results_df) - 1)
@@ -544,10 +537,11 @@ if __name__ == "__main__":
         # Validate normalizing flow with different params. Specify also the fixed params
         nn_params_fixed = {"batch_size": batch_size, "steps": steps, "working_dir": directory_path}
 
-        nf_model, metrics, result = get_best_normalizing_flow(resampled_dataset, kf, model_type=args.type,
-                                                              n_iter=n_iter, nn_params_fixed=nn_params_fixed,
-                                                              parallelize=parallelize, param_space=param_space)
-        results_df["NF"] = metrics
+        nf_model, metrics_nf, result = get_best_normalizing_flow(resampled_dataset, kf, model_type=args.type,
+                                                                 n_iter=args.n_iter, nn_params_fixed=nn_params_fixed,
+                                                                 parallelize=args.parallelize,
+                                                                 param_space=param_space_nf)
+        results_df["NF"] = metrics_nf
 
         pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
 

@@ -5,6 +5,7 @@ import multiprocessing as mp
 
 from sklearn.preprocessing import StandardScaler
 
+
 class PybnesianParallelizationError(Exception):
     pass
 
@@ -103,3 +104,15 @@ def hill_climbing(data: pd.DataFrame, bn_type: str, score=None, max_indegree=0,
             "\"copy()\"."
             "As such, the network is not parallelized correctly and experiments cannot be launched.")
     return bn
+
+
+def remove_outliers(data: pd.DataFrame, outlier_threshold: float, reset_index: bool=False):
+    # Select columns of numeric data
+    numeric_columns = data.select_dtypes(include=[np.number]).columns
+    # Calculate z-scores
+    z_scores = (data[numeric_columns] - data[numeric_columns].mean()) / data[numeric_columns].std()
+    # Remove rows with z-scores greater than threshold
+    data = data[(z_scores.abs() < outlier_threshold).all(axis=1)]
+    if reset_index:
+        data = data.reset_index(drop=True)
+    return data
