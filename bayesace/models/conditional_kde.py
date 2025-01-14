@@ -17,20 +17,18 @@ class ConditionalKDE(ConditionalDE):
         self.kernel = kernel
         self.kdes = {}  # Maps each class to its KDE
 
-    def train(self, dataset: pd.DataFrame, class_var_name: str = "class"):
+    def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray):
         """
         Train the KDE model.
         Parameters:
         - dataset: pd.DataFrame with the last column as the target/class variable.
         - class_var_name: name of the class column.
         """
-        # New class attributes
-        self.columns = dataset.columns[:-1]
-        self.n_dims = len(self.columns)
+        super().fit(X, y)
 
-        # Separate features and labels
-        X = dataset.drop(columns=class_var_name).values
-        y = dataset[class_var_name].values
+        X = X.values
+        if isinstance(y, pd.Series):
+            y = y.values
 
         # Compute class priors
         unique_classes, counts = np.unique(y, return_counts=True)
@@ -79,10 +77,6 @@ class ConditionalKDE(ConditionalDE):
             data_with_class["class"] = i
             lls += np.exp(self.logl(data_with_class))
         return lls
-
-    def log_likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-        return np.log(self.likelihood(data, class_var_name))
-
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """

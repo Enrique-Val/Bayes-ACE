@@ -10,7 +10,6 @@ import math
 
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
-
 class ConditionalSpline(ConditionalNF):
     def __init__(self, gpu_acceleration=False):
         # Call the parent constructor
@@ -19,10 +18,14 @@ class ConditionalSpline(ConditionalNF):
         # For our NF, we need to work with a conditional distribution
         self.dist_x_given_class: dist.ConditionalTransformedDistribution = None
 
-    def train(self, dataset, batch_size=1028, steps=1000, lr=1e-3, weight_decay=1e-4, count_bins=6, hidden_units=150,
+    def fit(self, X, y, batch_size=1028, steps=1000, lr=1e-3, weight_decay=1e-4, count_bins=6, hidden_units=150,
               layers=1,
               n_flows=1):
-        super().train(dataset)
+        super().fit(X,y)
+        dataset = X.copy()
+        if isinstance(y, pd.Series):
+            y = y.values
+        dataset["class"] = y
         train_loader, val_loader = self.get_loaders(dataset, batch_size)
 
         # Create conditional transformations

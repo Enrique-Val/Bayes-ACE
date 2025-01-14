@@ -115,6 +115,9 @@ class ConditionalNormalizingFlow(nn.Module):
         return dist.TransformedDistribution(self.base_dist, self.generative_flows)
 
 
+    def fit(self, X, y, batch):
+        super().fit(X, None)
+
 class ConditionalNVP(ConditionalNF):
     def __init__(self, gpu_acceleration=False, graphics=True):
         # Call the parent constructor
@@ -126,16 +129,27 @@ class ConditionalNVP(ConditionalNF):
         # Flag to enable graphics
         self.graphics = graphics
 
-    def train(self, dataset, batch_size=1028, steps=1000, lr=1e-3, weight_decay=0, split_dim=1, hidden_units=150,
-              layers=1,
-              n_flows=1, sam_noise=0, perms_instantiation=None,patience=15, model_pth_name="model.pth", **kwargs):
-        super().train(dataset)
-        self.input_dim = len(dataset.columns)-1
+        # All the attributes of the net. None at the beginning
+        self.split_dim = None
+        self.hidden_units = None
+        self.layers = None
+        self.n_flows = None
+        self.steps = None
+        self.perms_instantiation = None
+
+    def fit(self, X, y, batch_size=1028, steps=1000, lr=1e-3, weight_decay=0, split_dim=1, hidden_units=150,
+            layers=1, n_flows=1, sam_noise=0, perms_instantiation=None, patience=15, model_pth_name="model.pth",
+            **kwargs):
+        super().fit(X, y)
         self.split_dim = split_dim
         self.hidden_units = hidden_units
         self.layers = layers
         self.n_flows = n_flows
         self.steps = steps
+        dataset = X.copy()
+        if isinstance(y, pd.Series):
+            y = y.values
+        dataset["class"] = y
         train_loader, val_loader = self.get_loaders(dataset, batch_size)
 
         # If graphical, then import pyplot

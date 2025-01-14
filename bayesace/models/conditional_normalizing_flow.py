@@ -18,14 +18,6 @@ class ConditionalNF(ConditionalDE):
         self.trained = False
         self.verbose = verbose
 
-    def train(self, dataset, class_var_name: str = "class"):
-        self.columns = dataset.columns[:-1]
-        self.n_dims = len(self.columns)
-
-        # Estimate the class distribution with frequentist methods
-        class_labels = np.unique(dataset["class"].values)
-        self.class_distribution = {label: len(dataset[dataset["class"] == label]) / len(dataset) for label in class_labels}
-
     def get_loaders(self, dataset, batch_size, proportion=0.8):
         dataset = dataset.copy()
         # Transform dataset to numpy and cast class from string to numerical
@@ -85,8 +77,6 @@ class ConditionalNF(ConditionalDE):
             lls = lls + np.e ** self.logl_array(data, np.repeat(i,data.shape[0]))
         return lls
 
-    def log_likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-        return np.log(self.likelihood(data, class_var_name))
     '''
     # If the class variable is passed, remove it
     if class_var_name in data.columns:

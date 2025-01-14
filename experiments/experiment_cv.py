@@ -10,6 +10,7 @@ from skopt.plots import plot_convergence, plot_evaluations
 from skopt.space import Real, Integer, Dimension
 from skopt.utils import use_named_args
 
+from bayesace.models.bayesian_network_classifier import BayesianNetworkClassifier
 from bayesace.models.conditional_normalizing_flow import NanLogProb
 from bayesace.models.conditional_nvp import ConditionalNVP
 from bayesace.models.conditional_spline import ConditionalSpline
@@ -36,7 +37,10 @@ def cross_validate_bn(dataset: pd.DataFrame, kfold_object: KFold, outliers: floa
         df_train = remove_outliers(df_train, outliers)
         df_test = dataset.iloc[test_index].reset_index(drop=True)
         t0 = time.time()
-        network = hill_climbing(data=df_train, bn_type="CLG")
+
+        network = BayesianNetworkClassifier(network_type="CLG")
+        network.fit(df_train[df_train.columns[:-1]], df_train[df_train.columns[-1]], initial_structure="naive",
+                    training_params={"score": "bic", "seed": 0})
         time_i = time.time() - t0
         tmp = network.logl(df_test)
         logl_i = tmp.mean()
@@ -125,16 +129,18 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
 
     # Remove outliers in training
     df_train = remove_outliers(df_train, outliers)
+    X_train = df_train[df_train.columns[:-1]]
+    y_train = df_train[df_train.columns[-1]]
 
     t0 = time.time()
     model = None
     if model_type == "NVP":
         model = ConditionalNVP(graphics=False)
-        model.train(df_train, split_dim=d // 2, model_pth_name=directory_path + "model-" + str(os.getpid()) + ".pkl",
+        model.fit(X_train, y_train, model_pth_name=directory_path + "model_" + str(os.getpid()) + ".pth",
                     **nn_params_copy)
     elif model_type == "Spline":
         model = ConditionalSpline()
-        model.train(df_train, **nn_params_copy)
+        model.fit(X_train, y_train, **nn_params_copy)
     it_time = time.time() - t0
     metrics = get_metrics(model, df_test)
     metrics["Time"] = it_time
@@ -292,7 +298,7 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter
 
     # Prior to training, we DERELATIVIZE the hidden units
     best_params["hidden_units"] = d * best_params["hidden_units"]
-    model.train(dataset, **best_params, model_pth_name=working_dir + "best_model.pkl")
+    model.fit(dataset[dataset.columns[:-1]], dataset[dataset.columns[-1]])
     return model, metrics, result
 
 
@@ -300,9 +306,12 @@ def train_ckde_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, ba
                                kernel="gaussian", outliers: float = np.inf):
     # Remove outliers in training
     df_train = remove_outliers(df_train, outliers)
+    df_train = df_train.head(15000)
+    X_train = df_train[df_train.columns[:-1]]
+    y_train = df_train[df_train.columns[-1]]
     t0 = time.time()
     model = ConditionalKDE(bandwidth=bandwidth, kernel=kernel)
-    model.train(df_train.head(15000))
+    model.fit(X_train, y_train)
     it_time = time.time() - t0
     metrics = get_metrics(model, df_test)
     metrics["Time"] = it_time
@@ -389,7 +398,9 @@ def get_best_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict 
 
     # Train once again to return the object
     model = ConditionalKDE(bandwidth=best_bandwidth, kernel=best_kernel)
-    model.train(dataset)
+    X = dataset[dataset.columns[:-1]]
+    y = dataset[dataset.columns[-1]]
+    model.fit(X, y)
     return model, metrics, best_bandwidth
 
 
@@ -485,7 +496,7 @@ if __name__ == "__main__":
         results_df["GT_RD"] = metrics_ckde
 
         pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
-        resampled_dataset = gt_model.sample(np.min((len(dataset_oml), 50000))).to_pandas()
+        resampled_dataset = gt_model.sample(np.min((len(dataset_oml), 50000)), seed=0).to_pandas()
         resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
 
         if args.part == 'rd':
@@ -531,11 +542,14 @@ if __name__ == "__main__":
         print()
 
         # Train a and pickle the Bayesian network
-        bn = hill_climbing(data=resampled_dataset, bn_type="CLG")
+        bn = BayesianNetworkClassifier(network_type="CLG")
+        X_resampled = resampled_dataset[resampled_dataset.columns[:-1]]
+        y_resampled = resampled_dataset[resampled_dataset.columns[-1]]
+        bn.fit(X_resampled, y_resampled, initial_structure="naive", training_params={"score": "bic", "seed": 0})
         pickle.dump(bn, open(directory_path + "clg_" + str(dataset_id) + ".pkl", "wb"))
 
         # Validate normalizing flow with different params. Specify also the fixed params
-        nn_params_fixed = {"batch_size": batch_size, "steps": steps, "working_dir": directory_path}
+        nn_params_fixed = {"splt_dim": d//2, "batch_size": batch_size, "steps": steps, "working_dir": directory_path}
 
         nf_model, metrics_nf, result = get_best_normalizing_flow(resampled_dataset, kf, model_type=args.type,
                                                                  n_iter=args.n_iter, nn_params_fixed=nn_params_fixed,

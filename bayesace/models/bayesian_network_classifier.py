@@ -34,36 +34,39 @@ def check_copy(bn):
 
 
 class BayesianNetworkClassifier(ConditionalDE):
-    def __init__(self, network_type="CLG", initial_structure="naive", network_params=None):
+    def __init__(self, network_type="CLG"):
         super().__init__()
         self.bayesian_network = None
         self.class_var_name = None
-        self.columns = None
         self.network_type = network_type
-        self.initial_structure = initial_structure
-        if network_params is None:
-            self.network_params = {}
-        else:
-            self.network_params = network_params.copy()
 
-    def train(self, dataset: pd.DataFrame, class_var_name: str = "class"):
-        self.class_var_name = class_var_name
-        self.columns = list(dataset.columns).remove(class_var_name)
+    def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray, initial_structure="naive",
+            training_params=None):
+        super().fit(X, y)
+        if training_params is None:
+            training_params = {}
+        if isinstance(y, pd.Series):
+            self.class_var_name = y.name
+            y = y.values
+        else:
+            self.class_var_name = "class"
+        dataset = X.copy()
+        dataset[self.class_var_name] = y
         bn = None
         if self.network_type == "CLG":
-            bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.CLGNetwork, self.initial_structure),
-                       operators=["arcs"], **self.network_params)
+            bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.CLGNetwork, initial_structure),
+                       operators=["arcs"], **training_params)
             bn = copy_structure(bn)
         elif self.network_type == "SP":
             # est = MMHC()
             # test = pb.MutualInformation(data, True)
             # bn = pb.MMHC().estimate(hypot_test = test, operators = pb.OperatorPool([pb.ChangeNodeTypeSet(),pb.ArcOperatorSet()]), score = pb.CVLikelihood(data), bn_type = pb.SemiparametricBNType(), patience = 20) #, score = "cv-lik"
-            bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.SemiparametricBN, self.initial_structure),
-                       operators=["arcs", "node_type"], **self.network_params)
+            bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.SemiparametricBN, initial_structure),
+                       operators=["arcs", "node_type"], **training_params)
             bn = copy_structure(bn)
         elif self.network_type == "Gaussian":
-            bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.GaussianNetwork, self.initial_structure),
-                       operators=["arcs"], **self.network_params)
+            bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.GaussianNetwork, initial_structure),
+                       operators=["arcs"], **training_params)
             bn = copy_structure(bn)
         else:
             raise PybnesianParallelizationError(
@@ -78,8 +81,7 @@ class BayesianNetworkClassifier(ConditionalDE):
                 "As of version 0.4.3, PyBnesian Bayesian networks have internal and stochastic problems with the method "
                 "\"copy()\"."
                 "As such, the network is not parallelized correctly and experiments cannot be launched.")
-        return bn
-
+        self.bayesian_network = bn
         self.trained = True
 
     def logl(self, data: pd.DataFrame, class_var_name="class"):
@@ -111,14 +113,6 @@ class BayesianNetworkClassifier(ConditionalDE):
                 "Likelihood of some points in the space is higher than 1.")
         return likelihood_val
 
-    def log_likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-        # TODO add this check to other models. Perhaps move this method to ConditionalDE
-        ll = self.likelihood(data, class_var_name)
-        logl = np.empty(shape=len(ll))
-        logl[ll > 0] = np.log(ll[ll > 0])
-        logl[ll <= 0] = -np.inf
-        return logl
-
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """
         Compute posterior probabilities P(Y|X).
@@ -143,7 +137,7 @@ class BayesianNetworkClassifier(ConditionalDE):
         return P_Y_given_x
 
     def get_class_labels(self):
-        return list(self.class_distribution.keys()).copy()
+        return self.bayesian_network.cpd(self.class_var_name).variable_values()
 
     def sample(self, n_samples, ordered=True, seed=None):
         return self.bayesian_network.sample(n_samples, ordered=ordered, seed=seed)
