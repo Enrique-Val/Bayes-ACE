@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from bayesace import median_absolute_deviation, path_likelihood_length, path, log_likelihood, posterior_probability
+from bayesace import median_absolute_deviation, path_likelihood_length, path, log_likelihood
 from bayesace.algorithms.algorithm import Algorithm, ACEResult
 
 
@@ -95,7 +95,8 @@ class WachterCounterfactual(Algorithm):
 
         # Get likelihood and probability of the class
         logl = log_likelihood(pd.DataFrame(candidate_cfs,columns=self.features), self.density_estimator)
-        post_prob = posterior_probability(pd.DataFrame(candidate_cfs,columns=self.features), target_label, self.density_estimator)
+        post_prob = self.density_estimator.posterior_probability(pd.DataFrame(candidate_cfs,columns=self.features),
+                                                                 target_label)
 
         # Filter for instances whose likelihood and posterior probability is above the threshold
         mask = (logl > self.log_likelihood_threshold) & (post_prob > self.posterior_probability_threshold)

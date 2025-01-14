@@ -78,7 +78,7 @@ class ConditionalKDE(ConditionalDE):
             lls += np.exp(self.logl(data_with_class))
         return lls
 
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+    def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
         """
         Compute posterior probabilities P(Y|X).
         Parameters:
@@ -89,7 +89,7 @@ class ConditionalKDE(ConditionalDE):
         # Compute P(X|Y) for each class
         p_x_given_y = np.zeros((X.shape[0], len(self.classes)))
         for i, cls in enumerate(self.classes):
-            if not cls in self.kdes:
+            if cls not in self.kdes:
                 raise ValueError(f"Class {cls} not found in the training data.")
             p_x_given_y[:, i] = np.exp(self.kdes[cls].score_samples(X))
 
@@ -101,6 +101,8 @@ class ConditionalKDE(ConditionalDE):
         # Compute P(Y|X) = P(X|Y)P(Y) / P(X), but only if p_x>0. Else, uniform probability
         p_y_given_x = p_x_given_y * np.array([self.class_distribution[cls] for cls in self.classes])
         p_y_given_x = p_y_given_x / p_x[:, np.newaxis]
+        if output == "pandas":
+            return pd.DataFrame(p_y_given_x, columns=self.classes)
         return p_y_given_x
 
     def get_class_labels(self):

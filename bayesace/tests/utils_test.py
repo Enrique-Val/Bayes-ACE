@@ -8,11 +8,11 @@ def test_likelihood(x_cfx: pd.DataFrame, bn):
 
 
 def test_accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):
-    assert round(posterior_probability(x_cfx.drop("class", axis=1), y_og, bn)[0], 2) == 0.13
+    assert round(bn.posterior_probability(x_cfx.drop("class", axis=1), y_og)[0], 2) == 0.13
 
 
 def test_predict_class(data: pd.DataFrame, bn):
-    assert (predict_class(data, bn).map(np.log).map(round2).values == np.array([[-19.51, -0., -96.85],
+    assert (bn.predict_proba(data.values, output="pandas").map(np.log).map(round2).values == np.array([[-19.51, -0., -96.85],
                                                                                   [-24.03, -131.18, -0.],
                                                                                   [-18.63, -147.13, -0.],
                                                                                   [-20.07, -108.58, -0.],

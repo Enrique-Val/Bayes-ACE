@@ -106,50 +106,6 @@ if (log_likelihood_val > 0).any():
         "Log likelihood of some points in the space is higher than 0.")
 return log_likelihood_val'''
 
-
-# Get the probability P(y|x)
-def posterior_probability(x_cfx: pd.DataFrame, y_og: str | list, density_estimator, class_var_name="class"):
-    # Obtain the labels accesing either the MultiBNAF model or the cpd of the bn
-    class_labels = None
-    if isinstance(density_estimator, ConditionalDE):
-        class_labels = density_estimator.get_class_labels()
-    else:
-        class_cpd = density_estimator.cpd(class_var_name)
-        class_labels = class_cpd.variable_values()
-    x_cfx = x_cfx.copy()
-    if isinstance(y_og, str):
-        x_cfx[class_var_name] = pd.Categorical([y_og] * len(x_cfx.index), categories=class_labels)
-    else:
-        assert len(y_og) == len(x_cfx.index)
-        x_cfx[class_var_name] = pd.Categorical(y_og, categories=class_labels)
-    prob = np.e ** density_estimator.logl(x_cfx)
-    ll = likelihood(x_cfx, density_estimator, mutable=True)
-    to_ret = np.empty(shape=len(x_cfx.index))
-    # If the likelihood is 0, then classification is done with uniform probability
-    to_ret[ll <= 0] = 1 / len(class_labels)
-    to_ret[ll > 0] = prob[ll > 0] / ll[ll > 0]
-    # if not (ll > 0).any():
-    #    warnings("The instance with features "+str(x_cfx.iloc[0])+" and class " + str(y_og))
-    return to_ret
-
-
-def predict_class(data: pd.DataFrame, density_estimator, class_var_name="class"):
-    if class_var_name in data.columns:
-        Warning("The class variable is already in the dataset. It will be removed for the prediction.")
-        data = data.drop(class_var_name, axis=1)
-    if isinstance(density_estimator, ConditionalDE):
-        return pd.DataFrame(density_estimator.predict_proba(data.values), columns=density_estimator.get_class_labels())
-    else:
-        class_values = density_estimator.cpd(class_var_name).variable_values()
-        to_ret = pd.DataFrame(columns=class_values)
-        for i in class_values:
-            to_ret[i] = posterior_probability(data, [i] * len(data.index), density_estimator)
-        # Check that the sum of the probabilities is 1
-        sum_pred = to_ret.sum(axis=1)
-        assert ((np.less.outer(sum_pred, 1 + 0.001) & np.greater_equal.outer(sum_pred, 1 - 0.001)).all())
-        return to_ret
-
-
 def brier_score(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
     encoder = OneHotEncoder(sparse_output=False)
     y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
@@ -302,7 +258,7 @@ def get_decision_boundary_plot(density_estimator, class_var_name="class", limit=
     ])
     resolution = len(np.arange(-limit, limit, step))
     class_labels = None
-    predictions = predict_class(pd.DataFrame(grid, columns=["x", "y"]), density_estimator)
+    predictions = density_estimator.predict_proba(grid, output="pandas")
     prob_list = []
     for label in predictions.columns:
         post = predictions[label].values

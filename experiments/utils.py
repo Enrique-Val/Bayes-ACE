@@ -10,8 +10,8 @@ from pymoo.operators.mutation.pm import PM
 from pymoo.operators.selection.rnd import RandomSelection
 from pymoo.operators.selection.tournament import TournamentSelection
 
-from bayesace import get_other_class, path, path_likelihood_length, hill_climbing, log_likelihood, \
-    posterior_probability, total_l0_path
+from bayesace import get_other_class, path, path_likelihood_length, log_likelihood, \
+    total_l0_path
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
@@ -41,11 +41,7 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 
     # Open the Bayesian network (conditional linear Gaussian)
     clg_network_path = results_cv_dir + 'clg_' + str(dataset_id) + '.pkl'
-    try:
-        clg_network = pickle.load(open(clg_network_path, 'rb'))
-    except:
-        clg_network = hill_climbing(df_train, seed=0, bn_type="CLG")
-        pickle.dump(clg_network, open(clg_network_path, 'wb'))
+    clg_network = pickle.load(open(clg_network_path, 'rb'))
 
     # Open the NF
     nf_path = results_cv_dir + 'nf_' + str(dataset_id) + '.pkl'
@@ -110,7 +106,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
             cfx_array[i] = result[i].counterfactual.values
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
         real_logl = log_likelihood(cfx_df, gt_estimator)
-        real_pp = posterior_probability(cfx_df, target_label, gt_estimator)
+        real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
         path_l2 = np.linalg.norm(cfx_array - instance.drop(columns="class").values.flatten(), axis=1)
         return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp
     # Check if indeed a counterfactual was found
@@ -124,7 +120,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
             density_estimator=gt_estimator, penalty=penalty)
         cfx_df = pd.DataFrame([result.counterfactual.values], columns=instance.columns[:-1])
         real_logl = log_likelihood(cfx_df, gt_estimator)
-        real_pp = posterior_probability(cfx_df, target_label, gt_estimator)
+        real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
         path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns="class").values.flatten())
         path_l0 = total_l0_path(result.path.values, l0_epsilon)
         print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)

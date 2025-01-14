@@ -11,7 +11,8 @@ from skopt.space import Real, Integer
 
 from sklearn.preprocessing import StandardScaler
 
-from bayesace import hill_climbing, predict_class, brier_score, auc
+from bayesace import brier_score, auc
+from bayesace.models.bayesian_network_classifier import BayesianNetworkClassifier
 from experiments.experiment_cv import get_best_normalizing_flow
 
 
@@ -128,17 +129,20 @@ def cross_validate_restricted_bn(dataset, max_indegree=0, blacklist=None, whitel
         df_train = dataset.iloc[train_index].reset_index(drop=True)
         scaler = StandardScaler()
         df_train[df_train.columns[:-1]] = scaler.fit_transform(df_train[df_train.columns[:-1]])
+        X_train = df_train.drop("class", axis=1)
+        y_train = df_train["class"]
         df_val = dataset.iloc[test_index].reset_index(drop=True)
         df_val[df_val.columns[:-1]] = scaler.transform(df_val[df_val.columns[:-1]])
         t0 = time.time()
-        network = hill_climbing(df_train, seed=hc_seed, bn_type="CLG", max_indegree=max_indegree,
-                                arc_whitelist=whitelist,
-                                arc_blacklist=blacklist, initial_structure="empty")
+        network = BayesianNetworkClassifier(network_type="CLG")
+        network.fit(X_train, y_train, initial_structure="empty",
+                    training_params={"max_indegree": max_indegree, "whitelist": whitelist,
+                                     "blacklist": blacklist, "seed": hc_seed})
         time_i = time.time() - t0
         tmp = network.logl(df_val)
         bn_results.loc[i, "Logl"] = tmp.mean()
         bn_results.loc[i, "LoglStd"] = tmp.std()
-        predictions = predict_class(df_val.drop("class", axis=1), network)
+        predictions = network.predict_proba(df_val.drop("class", axis=1).values, output="pandas")
         brier_i = brier_score(df_val["class"].values, predictions)
         bn_results.loc[i, "Brier"] = brier_i
         auc_i = auc(df_val["class"].values, predictions)
@@ -206,6 +210,8 @@ if __name__ == "__main__":
     scaler = StandardScaler()
     data_train_scaled = data_train.copy()
     data_train_scaled[features + eqis] = scaler.fit_transform(data_train[features + eqis])
+    X_train = data_train_scaled.drop("class", axis=1)
+    y_train = data_train_scaled["class"]
 
     if args.graphical:
         color_palette = {"0": "red", "1": "blue", "2": "green", "3": "orange", "4": "purple",
@@ -226,26 +232,32 @@ if __name__ == "__main__":
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=0)
 
     # Learn the restricted BN with only max_indegree parents per node
-    bn_restricted_lim_arcs = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=max_indegree, arc_whitelist=whitelist,
-                                  arc_blacklist=blacklist, initial_structure="empty")
-    metrics_restricted_lim_arcs = cross_validate_restricted_bn(data_train, max_indegree=max_indegree, blacklist=blacklist,
-                                                      whitelist=whitelist,
-                                                      hc_seed=0,
-                                                      kfold_object=kf)
+    bn_restricted_lim_arcs = BayesianNetworkClassifier(network_type="CLG")
+    bn_restricted_lim_arcs.fit(X_train, y_train, initial_structure="empty",
+                training_params={"max_indegree": max_indegree, "whitelist": whitelist,
+                                 "blacklist": blacklist, "seed": 0})
+    metrics_restricted_lim_arcs = cross_validate_restricted_bn(data_train, max_indegree=max_indegree,
+                                                               blacklist=blacklist,
+                                                               whitelist=whitelist,
+                                                               hc_seed=0,
+                                                               kfold_object=kf)
     print("Restricted BN learned with limited arcs learned")
 
     if not DUMMY:
-        # Learn the restricted BN with only max_indegree parents per node
-        bn_restricted = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", max_indegree=0,
-                                               arc_whitelist=whitelist,
-                                               arc_blacklist=blacklist, initial_structure="empty")
+        # Learn the restricted BN
+        bn_restricted = BayesianNetworkClassifier(network_type="CLG")
+        bn_restricted.fit(X_train, y_train, initial_structure="empty",
+                    training_params={"max_indegree": 0, "whitelist": whitelist,
+                                     "blacklist": blacklist, "seed": 0})
         metrics_restricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=blacklist,
                                                           whitelist=whitelist,
                                                           hc_seed=0,
                                                           kfold_object=kf)
         print("Restricted BN learned")
 
-        bn = hill_climbing(data_train_scaled, seed=0, bn_type="CLG", initial_structure="empty")
+        bn = BayesianNetworkClassifier(network_type="CLG")
+        bn.fit(X_train, y_train, initial_structure="empty",
+                    training_params={"seed": 0})
         metrics_unrestricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=[], whitelist=[],
                                                             hc_seed=0, kfold_object=kf)
         print("Unrestricted BN learned")
@@ -290,7 +302,6 @@ if __name__ == "__main__":
         # Store the scaler
         pickle.dump(scaler, open(model_dir + "scaler.pkl", 'wb'))
 
-    else :
+    else:
         # Just print the results_df
         print(results_df.to_string())
-

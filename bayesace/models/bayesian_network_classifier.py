@@ -113,7 +113,7 @@ class BayesianNetworkClassifier(ConditionalDE):
                 "Likelihood of some points in the space is higher than 1.")
         return likelihood_val
 
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+    def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
         """
         Compute posterior probabilities P(Y|X).
         Parameters:
@@ -134,6 +134,8 @@ class BayesianNetworkClassifier(ConditionalDE):
         P_x_given_Y[P_x == 0] = 1 / len(class_values)
         P_x[P_x == 0] = 1
         P_Y_given_x = P_x_given_Y / P_x[:, None]
+        if output == "pandas":
+            return pd.DataFrame(P_Y_given_x, columns=class_values)
         return P_Y_given_x
 
     def get_class_labels(self):

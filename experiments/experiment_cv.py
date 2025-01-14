@@ -46,7 +46,7 @@ def cross_validate_bn(dataset: pd.DataFrame, kfold_object: KFold, outliers: floa
         logl_std_i = tmp.std()
         bn_results_i.append(logl_i)
         bn_results_i.append(logl_std_i)
-        predictions = predict_class(df_test.drop("class", axis=1), network)
+        predictions = network.predict_proba(df_test.drop("class", axis=1).values, output="pandas")
         brier_i = brier_score(df_test["class"].values, predictions)
         bn_results_i.append(brier_i)
         auc_i = auc(df_test["class"].values, predictions)
@@ -150,7 +150,7 @@ def get_metrics(model: ConditionalDE, df_test: pd.DataFrame):
     logl_data = model.logl(df_test)
     logl = logl_data.mean()
     logl_std = logl_data.std()
-    predictions = predict_class(df_test.drop("class", axis=1), model)
+    predictions = model.predict_proba(df_test.drop("class", axis=1).values, output="pandas")
     brier = brier_score(df_test["class"].values, predictions)
     auc_res = auc(df_test["class"].values, predictions)
     return {"Logl": logl, "LoglStd": logl_std, "Brier": brier, "AUC": auc_res}
@@ -297,7 +297,7 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter
 
     # Prior to training, we DERELATIVIZE the hidden units
     best_params["hidden_units"] = d * best_params["hidden_units"]
-    model.fit(dataset[dataset.columns[:-1]], dataset[dataset.columns[-1]])
+    model.fit(dataset[dataset.columns[:-1]], dataset[dataset.columns[-1]], **best_params)
     return model, metrics, result
 
 
@@ -531,7 +531,7 @@ if __name__ == "__main__":
         tmp = gt_model.logl(resampled_dataset)
         resampled_dataset_metrics[0] = tmp.mean()
         resampled_dataset_metrics[2] = tmp.std()
-        predictions = predict_class(resampled_dataset.drop("class", axis=1), gt_model)
+        predictions = gt_model.predict_proba(resampled_dataset.drop("class", axis=1).values, output="pandas")
         resampled_dataset_metrics[4] = brier_score(resampled_dataset["class"].values, predictions)
         resampled_dataset_metrics[6] = auc(resampled_dataset["class"].values, predictions)
         resampled_dataset_metrics = list(resampled_dataset_metrics)

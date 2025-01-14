@@ -88,13 +88,13 @@ class ConditionalNF(ConditionalDE):
         logl = logl + np.log(1+np.e ** (self.logl_array(data, np.repeat(i+1, data.shape[0]))-logl))
     return logl'''
 
-    def predict_proba(self, data: np.ndarray) -> np.ndarray:
+    def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
         # We want to get P(Y|x), which will be computed as P(Y|x) = P(x,Y) / P(x)
-        p_xY = np.zeros((len(self.class_distribution.keys()), data.shape[0]))
-        p_x = np.zeros(data.shape[0])
+        p_xY = np.zeros((len(self.class_distribution.keys()), X.shape[0]))
+        p_x = np.zeros(X.shape[0])
 
         for i, _ in enumerate(self.class_distribution.keys()):
-            p_xY[i] = np.e ** self.logl_array(data, np.array([i] * len(data)))
+            p_xY[i] = np.e ** self.logl_array(X, np.array([i] * len(X)))
             p_x = p_x + p_xY[i]
         zero_l = np.where(p_x == 0)
         p_x[p_x == 0] = 1
@@ -102,5 +102,6 @@ class ConditionalNF(ConditionalDE):
             p_xY[:, i] = 1 / len(self.class_distribution.keys())
 
         p_Y_given_x = p_xY.transpose() / p_x[:, None]
-
+        if output == "pandas":
+            return pd.DataFrame(p_Y_given_x, columns=self.class_distribution.keys())
         return p_Y_given_x

@@ -81,8 +81,8 @@ class BestPathFinder(Problem):
                 f1.append(f1_i)
 
         x_cfx = pd.DataFrame(x[:, -self.n_features:], columns=self.features)
-        neg_posterior_prob = -posterior_probability(pd.DataFrame(x_cfx, columns=self.features), self.target_label,
-                                                    self.density_estimator)
+        neg_posterior_prob = -self.density_estimator.posterior_probability(pd.DataFrame(x_cfx, columns=self.features),
+                                                                           self.target_label)
         neg_log_likel = -log_likelihood(pd.DataFrame(x_cfx, columns=self.features), self.density_estimator)
         if self.multi_objective:
             f2 = neg_posterior_prob
@@ -129,7 +129,7 @@ class BayesACE(ACE):
 
             # Get likelihood and probability of the class
             logl = log_likelihood(candidate_initial, self.density_estimator)
-            post_prob = posterior_probability(candidate_initial, target_label, self.density_estimator)
+            post_prob = self.density_estimator.posterior_probability(candidate_initial, target_label)
 
             mask = (logl > self.log_likelihood_threshold) & (post_prob > self.posterior_probability_threshold)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)

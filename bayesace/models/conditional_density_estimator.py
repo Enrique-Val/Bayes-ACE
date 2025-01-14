@@ -35,11 +35,30 @@ class ConditionalDE(ABC):
         return np.array(self.classes)[predicted_indices]
 
     @abstractmethod
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+    def predict_proba(self, X: np.ndarray, output = "numpy") -> np.ndarray | pd.DataFrame:
         """
         Abstract method for computing posterior probabilities P(Y|X).
         """
         pass
+
+    def posterior_probability(self, x_cfx: pd.DataFrame, y_og: str | list, class_var_name="class"):
+        # Obtain the labels accesing either the MultiBNAF model or the cpd of the bn
+        class_labels = self.get_class_labels()
+        x_cfx = x_cfx.copy()
+        if isinstance(y_og, str):
+            x_cfx[class_var_name] = pd.Categorical([y_og] * len(x_cfx.index), categories=class_labels)
+        else:
+            assert len(y_og) == len(x_cfx.index)
+            x_cfx[class_var_name] = pd.Categorical(y_og, categories=class_labels)
+        prob = np.e ** self.logl(x_cfx)
+        ll = self.likelihood(x_cfx, class_var_name)
+        to_ret = np.empty(shape=len(x_cfx.index))
+        # If the likelihood is 0, then classification is done with uniform probability
+        to_ret[ll <= 0] = 1 / len(class_labels)
+        to_ret[ll > 0] = prob[ll > 0] / ll[ll > 0]
+        # if not (ll > 0).any():
+        #    warnings("The instance with features "+str(x_cfx.iloc[0])+" and class " + str(y_og))
+        return to_ret
 
     @abstractmethod
     def sample(self, n_samples: int, ordered=True, seed=None):
@@ -54,7 +73,7 @@ class ConditionalDE(ABC):
     def fitted(self):
         return self.trained
 
-    def logl(self, data):
+    def logl(self, data) -> np.ndarray:
         pass
 
     def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:

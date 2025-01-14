@@ -160,7 +160,7 @@ class FACE(ACE):
 
         self.graph = build_weighted_graph(dataset, epsilon=self.epsilon, weight_function=self.weight_function,
                                           weight_args = self.weight_args, parallelize=self.parallelize)
-        self.y_pred = predict_class(self.dataset, self.density_estimator)
+        self.y_pred = self.density_estimator.predict_proba(self.dataset.values, output="pandas")
         self.k = k
 
     def add_point_to_graph(self, instance: pd.DataFrame):
@@ -203,8 +203,8 @@ class FACE(ACE):
         logl = log_likelihood(pd.DataFrame(self.dataset, columns=self.features), self.density_estimator)
         #print(self.log_likelihood_threshold)
         #print(logl)
-        post_prob = posterior_probability(pd.DataFrame(self.dataset, columns=self.features), target_label,
-                                          self.density_estimator)
+        post_prob = self.density_estimator.posterior_probability(pd.DataFrame(self.dataset, columns=self.features),
+                                                                 target_label)
         #print(self.posterior_probability_threshold)
         #print(post_prob)
 
