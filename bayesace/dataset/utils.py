@@ -1,9 +1,9 @@
 import os
-import sys
 
 import openml as oml
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+import numpy as np
 
 
 def get_data(dataset_id: int, standardize=True):
@@ -37,4 +37,48 @@ def get_data(dataset_id: int, standardize=True):
         # Scale the rest of the dataset
         feature_columns = [i for i in data.columns if i != "class"]
         data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
+    return data
+
+def preprocess_data(data: pd.DataFrame | np.ndarray,  eliminate_outliers=np.inf, standardize=True,
+                    min_unique_vals=20, max_cum_values=3, max_instances=100000):
+    array_flag = False
+    if isinstance(data, np.ndarray):
+        # The following code but for an array instead of a dataframe:
+        data = pd.DataFrame(data)
+        array_flag = True
+    # Separate the target column (last column) from the features
+    data = data.head(max_instances)
+    target_column = data.columns[-1]
+    features = data.columns[:-1]
+
+    feature_data = data[features]
+    feature_data = feature_data.loc[:, feature_data.nunique() >= min_unique_vals]
+
+    feature_data = feature_data.loc[:, feature_data.apply(lambda x: np.sort(np.histogram(x, bins=100)[0])[-max_cum_values:].sum() < len(data)*0.95, axis=0)]
+    data = pd.concat([feature_data, data[target_column]], axis=1)
+
+    means = data[data.columns[:-1]].mean()
+    stds = data[data.columns[:-1]].std()
+    data = data[(np.abs((data[data.columns[:-1]] - means) / stds) < eliminate_outliers).all(axis=1)]
+
+    if standardize:
+        data[data.columns[:-1]] = StandardScaler().fit_transform(data[data.columns[:-1]].values)
+    # Assert that there are no missing values
+    if data.isnull().values.any():
+        raise ValueError("There are missing values in the post-processed dataset.")
+    if array_flag:
+        return data.values
+    else:
+        return data
+
+
+def remove_outliers(data: pd.DataFrame, outlier_threshold: float, reset_index: bool=False):
+    # Select columns of numeric data
+    numeric_columns = data.select_dtypes(include=[np.number]).columns
+    # Calculate z-scores
+    z_scores = (data[numeric_columns] - data[numeric_columns].mean()) / data[numeric_columns].std()
+    # Remove rows with z-scores greater than threshold
+    data = data[(z_scores.abs() < outlier_threshold).all(axis=1)]
+    if reset_index:
+        data = data.reset_index(drop=True)
     return data

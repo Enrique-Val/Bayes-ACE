@@ -1,7 +1,7 @@
 import os
 import sys
 
-from bayesace.models.utils import PybnesianParallelizationError
+from bayesace.models.bayesian_network_classifier import PybnesianParallelizationError
 
 sys.path.append(os.getcwd())
 import pybnesian as pb

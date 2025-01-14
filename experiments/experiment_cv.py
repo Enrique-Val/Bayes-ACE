@@ -15,8 +15,7 @@ from bayesace.models.conditional_normalizing_flow import NanLogProb
 from bayesace.models.conditional_nvp import ConditionalNVP
 from bayesace.models.conditional_spline import ConditionalSpline
 from bayesace.models.conditional_kde import ConditionalKDE
-from bayesace.models.utils import preprocess_data, remove_outliers
-from bayesace.dataset.utils import get_data
+from bayesace.dataset.utils import get_data, preprocess_data, remove_outliers
 
 import pickle
 
@@ -432,6 +431,14 @@ if __name__ == "__main__":
 
     dataset_id = args.dataset_id
     GRAPHIC = args.graphics
+
+    dummy = True
+    if dummy:
+        k = 2
+        steps = 2
+        n_batches = 2
+        args.n_iter = 10
+        args.dir_name = os.path.join(args.dir_name, "dummy/")
 
     # Hard code parameter space
     param_space_nf = [

@@ -1,9 +1,5 @@
 import pybnesian as pb
 import os
-import numpy as np
-import pandas as pd
-
-from sklearn.preprocessing import StandardScaler
 from bayesace.utils import *
 
 

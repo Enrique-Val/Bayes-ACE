@@ -145,7 +145,6 @@ class ConditionalNVP(ConditionalNF):
         self.hidden_units = hidden_units
         self.layers = layers
         self.n_flows = n_flows
-        self.steps = steps
         dataset = X.copy()
         if isinstance(y, pd.Series):
             y = y.values
@@ -193,7 +192,7 @@ class ConditionalNVP(ConditionalNF):
         patience = 15
         epochs_no_improve = 0
         torch.save(self.dist_x_given_class.state_dict(), model_pth_name)
-
+        epoch = 500
         for epoch in range(steps):
             try:
                 self.dist_x_given_class.train()
@@ -293,6 +292,8 @@ class ConditionalNVP(ConditionalNF):
         self.dist_x_given_class.load_state_dict(torch.load(model_pth_name))
         os.remove(model_pth_name)
         self.trained = True
+        # Save actual number of steps
+        self.steps = epoch + 1
 
     def sample(self, n_samples, ordered=True, seed=None):
         class_sampler = dist.Categorical(torch.tensor(list(self.class_distribution.values())))

@@ -1,11 +1,7 @@
 import os
 import sys
-import numpy as np
-import pandas as pd
 import pybnesian as pb
 
-from sklearn.preprocessing import StandardScaler
-from bayesace.utils import *
 from bayesace.algorithms.face import *
 from itertools import product
 import pickle
@@ -15,6 +11,7 @@ sys.path.append(os.getcwd())
 
 def mlog(x) :
     return -np.log(x)
+
 
 def check_graph(bayesian_network, dataset : pd.DataFrame, graph_type, distance_threshold, log_likelihood_threshold, acc_thresh) :
     #print(graph_type,distance_threshold)
