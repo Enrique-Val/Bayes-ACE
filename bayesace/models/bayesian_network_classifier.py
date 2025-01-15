@@ -46,10 +46,7 @@ class BayesianNetworkClassifier(ConditionalDE):
         if training_params is None:
             training_params = {}
         if isinstance(y, pd.Series):
-            self.class_var_name = y.name
             y = y.values
-        else:
-            self.class_var_name = "class"
         dataset = X.copy()
         dataset[self.class_var_name] = y
         bn = None
@@ -84,7 +81,7 @@ class BayesianNetworkClassifier(ConditionalDE):
         self.bayesian_network = bn
         self.trained = True
 
-    def logl(self, data: pd.DataFrame, class_var_name="class"):
+    def logl(self, X: pd.DataFrame, y: pd.Series | np.ndarray = None):
         """
         Compute the log-likelihood for the given data.
         Parameters:
@@ -93,7 +90,17 @@ class BayesianNetworkClassifier(ConditionalDE):
         Returns:
         - Log-likelihood
         """
-        return self.bayesian_network.logl(data)
+        super().logl(X, y)
+        if y is not None:
+            if y is pd.Series:
+                y = y.values
+            data = X.copy()
+            data[self.class_var_name] = y
+            data[self.class_var_name] = data[self.class_var_name].astype('category')
+            data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
+            return self.bayesian_network.logl(data)
+        else:
+            assert "Super not triggered"
 
     def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
 

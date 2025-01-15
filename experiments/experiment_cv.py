@@ -41,15 +41,17 @@ def cross_validate_bn(dataset: pd.DataFrame, kfold_object: KFold, outliers: floa
         network.fit(df_train[df_train.columns[:-1]], df_train[df_train.columns[-1]], initial_structure="naive",
                     training_params={"score": "bic", "seed": 0})
         time_i = time.time() - t0
-        tmp = network.logl(df_test)
+        X_test = df_test.drop("class", axis=1)
+        y_test = df_test["class"]
+        tmp = network.logl(X_test, y_test)
         logl_i = tmp.mean()
         logl_std_i = tmp.std()
         bn_results_i.append(logl_i)
         bn_results_i.append(logl_std_i)
-        predictions = network.predict_proba(df_test.drop("class", axis=1).values, output="pandas")
-        brier_i = brier_score(df_test["class"].values, predictions)
+        predictions = network.predict_proba(X_test.values, output="pandas")
+        brier_i = brier_score(y_test.values, predictions)
         bn_results_i.append(brier_i)
-        auc_i = auc(df_test["class"].values, predictions)
+        auc_i = auc(y_test.values, predictions)
         bn_results_i.append(auc_i)
         bn_results_i.append(time_i)
         bn_results.append(bn_results_i)
@@ -147,12 +149,14 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
 
 
 def get_metrics(model: ConditionalDE, df_test: pd.DataFrame):
-    logl_data = model.logl(df_test)
+    X_test = df_test.drop("class", axis=1)
+    y_test = df_test["class"]
+    logl_data = model.logl(X_test, y_test)
     logl = logl_data.mean()
     logl_std = logl_data.std()
-    predictions = model.predict_proba(df_test.drop("class", axis=1).values, output="pandas")
-    brier = brier_score(df_test["class"].values, predictions)
-    auc_res = auc(df_test["class"].values, predictions)
+    predictions = model.predict_proba(X_test.values, output="pandas")
+    brier = brier_score(y_test.values, predictions)
+    auc_res = auc(y_test.values, predictions)
     return {"Logl": logl, "LoglStd": logl_std, "Brier": brier, "AUC": auc_res}
 
 
@@ -528,7 +532,7 @@ if __name__ == "__main__":
 
         # Check the metrics of the model given the resampled data
         resampled_dataset_metrics = np.zeros(len(results_df) - 1)
-        tmp = gt_model.logl(resampled_dataset)
+        tmp = gt_model.logl(resampled_dataset.drop("class", axis=1), resampled_dataset["class"])
         resampled_dataset_metrics[0] = tmp.mean()
         resampled_dataset_metrics[2] = tmp.std()
         predictions = gt_model.predict_proba(resampled_dataset.drop("class", axis=1).values, output="pandas")

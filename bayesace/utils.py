@@ -50,36 +50,8 @@ def delta_distance(x_cfx, x_og, eps=0.1):
     return sum(map(lambda i: i > eps, abs_distance[0]))
 
 
-def likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mutable=False) -> np.ndarray:
-    '''
-    Computes the likelihood of the data given the density estimator, marginalizing over all possible values of the
-    class variable. Even if provided, the method will ignore it.
-
-    :param data: The data to compute the likelihood
-    '''
-    if not mutable:
-        data = data.copy()
-    if isinstance(density_estimator, ConditionalDE):
-        return density_estimator.likelihood(data, class_var_name=class_var_name)
-    if class_var_name in data.columns:
-        data = data.drop(class_var_name, axis=1)
-    class_cpd = density_estimator.cpd(class_var_name)
-    class_values = class_cpd.variable_values()
-    n_samples = data.shape[0]
-    likelihood_val = 0.0
-    for v in class_values:
-        data[class_var_name] = pd.Categorical([v] * n_samples, categories=class_values)
-        likelihood_val = likelihood_val + np.e ** density_estimator.logl(data)
-    if (likelihood_val > 1).any():
-        Warning(
-            "Likelihood of some points in the space is higher than 1.")
-    return likelihood_val
-
-def log_likelihood_array(data: np.ndarray, features:list, density_estimator, class_var_name="class", mutable=False) -> np.ndarray:
-    return log_likelihood(pd.DataFrame(data, columns=features), density_estimator, class_var_name, mutable)
-
-def log_likelihood(data: pd.DataFrame, density_estimator, class_var_name="class", mutable=False) -> np.ndarray:
-    ll = likelihood(data, density_estimator, class_var_name, mutable)
+def log_likelihood(data: pd.DataFrame, density_estimator: ConditionalDE, class_var_name="class", mutable=False) -> np.ndarray:
+    ll = density_estimator.likelihood(data, class_var_name)
     logl = np.empty(shape=len(ll))
     logl[ll > 0] = np.log(ll[ll > 0])
     logl[ll <= 0] = -np.inf
@@ -239,8 +211,7 @@ def get_probability_plot(density_estimator, class_var_name="class", limit=3, ste
     prob_list = []
     for label in class_labels:
         grid_df = pd.DataFrame(grid, columns=["x", "y"])
-        grid_df[class_var_name] = pd.Categorical([label] * len(grid), categories=class_labels)
-        post = np.e ** density_estimator.logl(grid_df)
+        post = np.e ** density_estimator.logl(grid_df, np.array([label] * len(grid)))
         post -= np.min(post)
         post /= np.ptp(post)
         post = np.flip(np.resize(post, (resolution, resolution)).transpose(), axis=0)

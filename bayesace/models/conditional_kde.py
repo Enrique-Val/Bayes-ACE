@@ -46,7 +46,7 @@ class ConditionalKDE(ConditionalDE):
             self.kdes[cls] = kde
         self.trained = True
 
-    def logl(self, data: pd.DataFrame, class_var_name="class"):
+    def logl(self, X: pd.DataFrame, y=None):
         """
         Compute the log-likelihood for the given data.
         Parameters:
@@ -54,17 +54,29 @@ class ConditionalKDE(ConditionalDE):
         - class_var_name: name of the class column.
         Returns:
         - Log-likelihood
+        :param y:
         """
-        class_labels = list(self.class_distribution.keys())
+        super().logl(X, y)
+        if y is not None:
+            if isinstance(y, pd.Series):
+                y = y.values
+            data = X.copy()
+            data[self.class_var_name] = y
+            data[self.class_var_name] = data[self.class_var_name].astype('category')
+            data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
+            class_labels = list(self.class_distribution.keys())
 
-        log_likelihood = np.full(data.shape[0], -np.inf)
+            log_likelihood = np.full(data.shape[0], -np.inf)
 
-        # Transform dataset to numpy and cast class from string to numerical
-        total_labels = np.unique(data[class_var_name])
-        for i, label in enumerate(class_labels):
-            if label in total_labels:
-                log_likelihood[data[class_var_name] == label] = self.kdes[label].score_samples(data[data[class_var_name] == label].drop(columns=class_var_name).values)
-        return log_likelihood
+            # Transform dataset to numpy and cast class from string to numerical
+            total_labels = np.unique(data[self.class_var_name])
+            for i, label in enumerate(class_labels):
+                if label in total_labels:
+                    log_likelihood[data[self.class_var_name] == label] = self.kdes[label].score_samples(data[data[self.class_var_name] == label].drop(columns=self.class_var_name).values)
+            return log_likelihood
+        else:
+            assert "Super not triggered"
+
 
     def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
         # If the class variable is passed, remove it
@@ -73,9 +85,7 @@ class ConditionalKDE(ConditionalDE):
 
         lls = np.zeros(data.shape[0])
         for i in self.class_distribution.keys():
-            data_with_class = data.copy()
-            data_with_class["class"] = i
-            lls += np.exp(self.logl(data_with_class))
+            lls += np.exp(self.logl(data, np.repeat(i, data.shape[0])))
         return lls
 
     def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:

@@ -54,15 +54,25 @@ class ConditionalNF(ConditionalDE):
         # To be implemented by specific classes, depending on the implementation of the conditional distribution
         pass
 
-    def logl(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-        class_labels = list(self.class_distribution.keys())
+    def logl(self, X: pd.DataFrame, y=None) -> np.ndarray:
+        super().logl(X, y)
+        if y is not None:
+            if isinstance(y, pd.Series):
+                y = y.values
+            data = X.copy()
+            data[self.class_var_name] = y
+            data[self.class_var_name] = data[self.class_var_name].astype('category')
+            data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
+            class_labels = list(self.class_distribution.keys())
 
-        # Transform dataset to numpy and cast class from string to numerical
-        class_column = np.zeros(data.shape[0], dtype=int)
-        for i, label in enumerate(class_labels):
-            class_column[data[class_var_name] == label] = i
+            # Transform dataset to numpy and cast class from string to numerical
+            class_column = np.zeros(data.shape[0], dtype=int)
+            for i, label in enumerate(class_labels):
+                class_column[data[self.class_var_name] == label] = i
 
-        return self.logl_array(data.drop(columns=class_var_name).values, class_column)
+            return self.logl_array(data.drop(columns=self.class_var_name).values, class_column)
+        else:
+            assert "Super not triggered"
 
     # The likelihood computed is just the likelihood of the data REGARDLESS of the class
     # Can also be understood as the sum of the likelihood for all classes

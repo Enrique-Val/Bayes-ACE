@@ -28,8 +28,9 @@ def read_eqi_dataset(to_del=None):
 
     # Discretize EQI_2Jan2018_VC and code it as str and pd.Categorical
     # Discretize in quantiles: 0-0.05, 0.05-0.2, 0.2-0.4, 0.4-0.6, 0.6-0.8, 0.8-0.0.95, 0.95-1
-    data_eqi["EQI_2Jan2018_VC"] = pd.qcut(data_eqi["EQI_2Jan2018_VC"], q=[0, 0.05, 0.2, 0.4, 0.6, 0.8, 0.95, 1], labels=False)
-    #data_eqi["EQI_2Jan2018_VC"] = pd.qcut(data_eqi["EQI_2Jan2018_VC"], q=5, labels=False)
+    data_eqi["EQI_2Jan2018_VC"] = pd.qcut(data_eqi["EQI_2Jan2018_VC"], q=[0, 0.05, 0.2, 0.4, 0.6, 0.8, 0.95, 1],
+                                          labels=False)
+    # data_eqi["EQI_2Jan2018_VC"] = pd.qcut(data_eqi["EQI_2Jan2018_VC"], q=5, labels=False)
     data_eqi["EQI_2Jan2018_VC"] = data_eqi["EQI_2Jan2018_VC"].astype(str).astype('category')
 
     # Rename as class
@@ -139,11 +140,13 @@ def cross_validate_restricted_bn(dataset, max_indegree=0, blacklist=None, whitel
                     training_params={"max_indegree": max_indegree, "whitelist": whitelist,
                                      "blacklist": blacklist, "seed": hc_seed})
         time_i = time.time() - t0
-        tmp = network.logl(df_val)
+        X_val = df_val.drop("class", axis=1)
+        y_val = df_val["class"]
+        tmp = network.logl(X_val, y_val)
         bn_results.loc[i, "Logl"] = tmp.mean()
         bn_results.loc[i, "LoglStd"] = tmp.std()
-        predictions = network.predict_proba(df_val.drop("class", axis=1).values, output="pandas")
-        brier_i = brier_score(df_val["class"].values, predictions)
+        predictions = network.predict_proba(X_val.values, output="pandas")
+        brier_i = brier_score(X_val.values, predictions)
         bn_results.loc[i, "Brier"] = brier_i
         auc_i = auc(df_val["class"].values, predictions)
         bn_results.loc[i, "AUC"] = auc_i

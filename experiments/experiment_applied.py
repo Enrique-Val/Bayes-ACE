@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from pymoo.algorithms.moo.nsga2 import NSGA2
 
-from bayesace import hill_climbing, get_other_class, brier_score, predict_class, auc
+from bayesace import brier_score, auc
 from bayesace.algorithms.bayesace_algorithm import BayesACE
 from bayesace.algorithms.face import FACE
 from bayesace.algorithms.wachter import WachterCounterfactual
@@ -99,7 +99,7 @@ if __name__ == "__main__":
     print(bn.cpd("class"))
     print(bn.arcs())
     print(np.mean(bn.logl(data_test)))
-    predictions = predict_class(data_test.drop("class", axis=1), bn)
+    predictions = bn.predict_proba(data_test.drop(columns="class").values, output="pandas")
     predictions_c = predictions.copy()
     predictions_c["real_class"] = data_test["class"].reset_index(drop=True)
     predictions_c["logl"] = bn.logl(data_test)
@@ -114,7 +114,7 @@ if __name__ == "__main__":
     target_label = "Safe"
 
     chunks = 20
-    logl_thresh = bn.logl(data_test).mean()+1*bn.logl(data_test).std()
+    logl_thresh = bn.logl(data_test).mean() + 1 * bn.logl(data_test).std()
     pp_thresh = 0.95
     print("Logl threshold", logl_thresh)
 
