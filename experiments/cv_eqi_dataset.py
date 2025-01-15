@@ -230,6 +230,17 @@ if __name__ == "__main__":
                                             color=color_palette[class_i], alpha=0.5)
                 axs[i // 4, i % 4].set_title(feature)
             plt.show()
+        # Now plot for all the EQIs
+        for features_16 in range(0, len(data_train.columns[:-1]), 16):
+            fig, axs = plt.subplots(4, 4, figsize=(20, 20))
+            for i, feature in enumerate(data_train.columns[features_16:features_16 + 16]):
+                if data_train[feature].nunique() < 20 and np.sort(np.histogram(data_train[feature], bins=100)[0])[-3:].sum() > len(data_train) * 0.95:
+                    axs[i // 4, i % 4].hist(data_train[feature], bins=100, color="red", alpha=0.5)
+                else :
+                    axs[i // 4, i % 4].hist(data_train[feature], bins=100, alpha=0.5, color = "green")
+                axs[i // 4, i % 4].set_title(feature)
+            plt.show()
+        raise Exception("Graphical mode finished")
 
     # Create a fold object
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=0)

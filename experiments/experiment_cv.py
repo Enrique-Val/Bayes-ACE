@@ -145,6 +145,7 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
     it_time = time.time() - t0
     metrics = get_metrics(model, df_test)
     metrics["Time"] = it_time
+    metrics["Actual_steps"] = model.steps
     return metrics
 
 
@@ -204,11 +205,14 @@ def cross_validate_nf(dataset: pd.DataFrame, kfold_object: KFold, model_type="NV
         shm.unlink()
     if cv_iter_results is None:
         return None
-    cv_results = {"Logl": [], "LoglStd": [], "Brier": [], "AUC": [], "Time": []}
+    cv_results = {"Logl": [], "LoglStd": [], "Brier": [], "AUC": [], "Time": [], "Actual_steps": []}
     for cv_iter_result in cv_iter_results:
         for key in cv_results.keys():
             cv_results[key].append(cv_iter_result[key])
-    nn_params_print = nn_params.copy()
+    nn_params_copy = nn_params.copy()
+    nn_params_copy["Actual_steps"] = np.mean(cv_results["Actual_steps"])
+    cv_results.pop("Actual_steps")
+    nn_params_print = nn_params_copy.copy()
     # Drop the working directory and permutations
     nn_params_print.pop("perms_instantiation", None)
     nn_params_print.pop("working_dir", None)

@@ -129,6 +129,9 @@ class ConditionalNVP(ConditionalNF):
         # Flag to enable graphics
         self.graphics = graphics
 
+        # Verbose
+        self.verbose = False
+
         # All the attributes of the net. None at the beginning
         self.split_dim = None
         self.hidden_units = None
