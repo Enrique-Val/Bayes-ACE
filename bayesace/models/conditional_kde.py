@@ -60,19 +60,19 @@ class ConditionalKDE(ConditionalDE):
         if y is not None:
             if isinstance(y, pd.Series):
                 y = y.values
-            data = X.copy()
-            data[self.class_var_name] = y
-            data[self.class_var_name] = data[self.class_var_name].astype('category')
-            data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
+            X = X.values
             class_labels = list(self.class_distribution.keys())
 
-            log_likelihood = np.full(data.shape[0], -np.inf)
-
-            # Transform dataset to numpy and cast class from string to numerical
-            total_labels = np.unique(data[self.class_var_name])
-            for i, label in enumerate(class_labels):
-                if label in total_labels:
-                    log_likelihood[data[self.class_var_name] == label] = self.kdes[label].score_samples(data[data[self.class_var_name] == label].drop(columns=self.class_var_name).values)
+            log_likelihood = np.full(X.shape[0], -np.inf)
+            present_labels = np.unique(y)
+            for label in present_labels:
+                if label in class_labels:
+                    indices_w_label = y == label
+                    log_likelihood[indices_w_label] = (
+                            self.kdes[label].score_samples(X[indices_w_label]) +
+                            np.log(self.class_distribution[label]))
+                else :
+                    raise ValueError(f"Class {label} not found in the training data.")
             return log_likelihood
         else:
             assert "Super not triggered"

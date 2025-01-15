@@ -28,7 +28,7 @@ def epsilon_weight(point1, point2, distance, epsilon, f_tilde):
     return f_tilde(epsilon ** d / distance) * distance
 
 
-def kde_weight(point1, point2, distance, density_estimator, f_tilde, variables):
+def kde_weight(point1, point2, distance, density_estimator : ConditionalDE, f_tilde, variables):
     if f_tilde == neg_log:
         return -log_likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2, density_estimator) * distance
     return f_tilde(density_estimator.likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2)) * distance
