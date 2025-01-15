@@ -75,22 +75,22 @@ class ConditionalDE(ABC):
     def fitted(self):
         return self.trained
 
+    @abstractmethod
     def logl(self, X, y=None) -> np.ndarray:
-        if y is None:
-            ll = self.likelihood(X)
-            logl = np.empty(shape=len(ll))
-            logl[ll <= 0] = -np.inf
-            logl[ll > 0] = np.log(ll[ll != 0])
-            return logl
-        else:
-            pass
-
-    def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
         pass
 
+    def likelihood(self, X: pd.DataFrame, y: pd.Series | np.ndarray = None) -> np.ndarray:
+        return np.e ** self.logl(X, y)
+
     def log_likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-        ll = self.likelihood(data, class_var_name)
+        ll = self.likelihood(data)
         logl = np.empty(shape=len(ll))
         logl[ll > 0] = np.log(ll[ll > 0])
         logl[ll <= 0] = -np.inf
         return logl
+
+def logl_from_likelihood(likelihood):
+    logl = np.empty(shape=len(likelihood))
+    logl[likelihood > 0] = np.log(likelihood[likelihood > 0])
+    logl[likelihood <= 0] = -np.inf
+    return logl

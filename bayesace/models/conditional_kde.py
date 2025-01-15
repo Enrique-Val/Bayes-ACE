@@ -4,6 +4,7 @@ import pandas as pd
 import pyarrow as pa
 
 from bayesace import ConditionalDE
+from bayesace.models.conditional_density_estimator import logl_from_likelihood
 
 
 class ConditionalKDE(ConditionalDE):
@@ -56,7 +57,6 @@ class ConditionalKDE(ConditionalDE):
         - Log-likelihood
         :param y:
         """
-        super().logl(X, y)
         if y is not None:
             if isinstance(y, pd.Series):
                 y = y.values
@@ -75,18 +75,10 @@ class ConditionalKDE(ConditionalDE):
                     raise ValueError(f"Class {label} not found in the training data.")
             return log_likelihood
         else:
-            assert "Super not triggered"
-
-
-    def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-        # If the class variable is passed, remove it
-        if class_var_name in data.columns:
-            data = data.drop(columns=class_var_name)
-
-        lls = np.zeros(data.shape[0])
-        for i in self.class_distribution.keys():
-            lls += np.exp(self.logl(data, np.repeat(i, data.shape[0])))
-        return lls
+            lls = np.zeros(X.shape[0])
+            for i in self.class_distribution.keys():
+                lls += np.exp(self.logl(X, np.repeat(i, X.shape[0])))
+            return logl_from_likelihood(lls)
 
     def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
         """

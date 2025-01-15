@@ -4,6 +4,7 @@ import multiprocessing as mp
 import numpy as np
 
 from bayesace import ConditionalDE
+from bayesace.models.conditional_density_estimator import logl_from_likelihood
 
 
 class PybnesianParallelizationError(Exception):
@@ -90,7 +91,6 @@ class BayesianNetworkClassifier(ConditionalDE):
         Returns:
         - Log-likelihood
         """
-        super().logl(X, y)
         if y is not None:
             if y is pd.Series:
                 y = y.values
@@ -100,25 +100,16 @@ class BayesianNetworkClassifier(ConditionalDE):
             data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
             return self.bayesian_network.logl(data)
         else:
-            assert "Super not triggered"
-
-    def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-
-        if class_var_name in data.columns:
-            data = data.drop(class_var_name, axis=1)
-        else:
-            data = data.copy()
-        class_cpd = self.bayesian_network.cpd(class_var_name)
-        class_values = class_cpd.variable_values()
-        n_samples = data.shape[0]
-        likelihood_val = 0.0
-        for v in class_values:
-            data[class_var_name] = pd.Categorical([v] * n_samples, categories=class_values)
-            likelihood_val = likelihood_val + np.e ** self.bayesian_network.logl(data)
-        if (likelihood_val > 1).any():
-            Warning(
-                "Likelihood of some points in the space is higher than 1.")
-        return likelihood_val
+            class_cpd = self.bayesian_network.cpd(self.class_var_name)
+            class_values = class_cpd.variable_values()
+            n_samples = X.shape[0]
+            likelihood_val = 0.0
+            for v in class_values:
+                likelihood_val = likelihood_val + np.e ** self.logl(X, np.repeat(v, n_samples))
+            if (likelihood_val > 1).any():
+                Warning(
+                    "Likelihood of some points in the space is higher than 1.")
+            return logl_from_likelihood(likelihood_val)
 
     def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
         """

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from bayesace.models.conditional_density_estimator import ConditionalDE
+from bayesace.models.conditional_density_estimator import ConditionalDE, logl_from_likelihood
 
 
 class NanLogProb(Exception):
@@ -55,7 +55,6 @@ class ConditionalNF(ConditionalDE):
         pass
 
     def logl(self, X: pd.DataFrame, y=None) -> np.ndarray:
-        super().logl(X, y)
         if y is not None:
             if isinstance(y, pd.Series):
                 y = y.values
@@ -72,20 +71,11 @@ class ConditionalNF(ConditionalDE):
 
             return self.logl_array(data.drop(columns=self.class_var_name).values, class_column)
         else:
-            assert "Super not triggered"
-
-    # The likelihood computed is just the likelihood of the data REGARDLESS of the class
-    # Can also be understood as the sum of the likelihood for all classes
-    def likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-        # If the class variable is passed, remove it
-        if class_var_name in data.columns:
-            data = data.values[:, :-1].astype(float)
-        else :
-            data = data.values
-        lls = np.zeros(data.shape[0])
-        for i in range(len(self.class_distribution.keys())):
-            lls = lls + np.e ** self.logl_array(data, np.repeat(i,data.shape[0]))
-        return lls
+            X = X.values
+            lls = np.zeros(X.shape[0])
+            for i in range(len(self.class_distribution.keys())):
+                lls = lls + np.e ** self.logl_array(X, np.repeat(i, X.shape[0]))
+            return logl_from_likelihood(lls)
 
     '''
     # If the class variable is passed, remove it

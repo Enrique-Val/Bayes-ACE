@@ -51,7 +51,7 @@ def delta_distance(x_cfx, x_og, eps=0.1):
 
 
 def log_likelihood(data: pd.DataFrame, density_estimator: ConditionalDE, class_var_name="class", mutable=False) -> np.ndarray:
-    ll = density_estimator.likelihood(data, class_var_name)
+    ll = density_estimator.likelihood(data)
     logl = np.empty(shape=len(ll))
     logl[ll > 0] = np.log(ll[ll > 0])
     logl[ll <= 0] = -np.inf
