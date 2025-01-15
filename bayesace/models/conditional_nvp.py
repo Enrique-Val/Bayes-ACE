@@ -137,7 +137,7 @@ class ConditionalNVP(ConditionalNF):
         self.hidden_units = None
         self.layers = None
         self.n_flows = None
-        self.steps = None
+        self.steps = 0
         self.perms_instantiation = None
 
     def fit(self, X, y, batch_size=1028, steps=1000, lr=1e-3, weight_decay=0, split_dim=1, hidden_units=150,
@@ -271,6 +271,7 @@ class ConditionalNVP(ConditionalNF):
                 best_val_loss = val_losses[-1]
                 torch.save(self.dist_x_given_class.state_dict(), model_pth_name)
                 epochs_no_improve = 0
+                self.steps = epoch
 
             # Menor patience que que decay en el scheduler
             if epochs_no_improve > patience:
@@ -295,8 +296,6 @@ class ConditionalNVP(ConditionalNF):
         self.dist_x_given_class.load_state_dict(torch.load(model_pth_name))
         os.remove(model_pth_name)
         self.trained = True
-        # Save actual number of steps
-        self.steps = epoch + 1
 
     def sample(self, n_samples, ordered=True, seed=None):
         class_sampler = dist.Categorical(torch.tensor(list(self.class_distribution.values())))
