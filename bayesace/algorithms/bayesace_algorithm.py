@@ -26,7 +26,7 @@ def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estim
 
 
 class BestPathFinder(Problem):
-    def __init__(self, density_estimator, instance, target_label, n_vertex=1, penalty=1, chunks=20,
+    def __init__(self, density_estimator: ConditionalDE, instance, target_label, n_vertex=1, penalty=1, chunks=20,
                  log_likelihood_threshold=-np.inf,
                  posterior_probability_threshold=0.05, sampling_range=(-3, 3), parallelize=False, multi_objective=False, **kwargs):
         n_features = (len(instance.columns) - 1)
@@ -83,7 +83,7 @@ class BestPathFinder(Problem):
         x_cfx = pd.DataFrame(x[:, -self.n_features:], columns=self.features)
         neg_posterior_prob = -self.density_estimator.posterior_probability(pd.DataFrame(x_cfx, columns=self.features),
                                                                            self.target_label)
-        neg_log_likel = -log_likelihood(pd.DataFrame(x_cfx, columns=self.features), self.density_estimator)
+        neg_log_likel = -self.density_estimator.logl(pd.DataFrame(x_cfx, columns=self.features), y=None)
         if self.multi_objective:
             f2 = neg_posterior_prob
             f3 = neg_log_likel
@@ -128,7 +128,7 @@ class BayesACE(ACE):
             candidate_initial = candidate_initial[candidate_initial["class"] == target_label]
 
             # Get likelihood and probability of the class
-            logl = log_likelihood(candidate_initial, self.density_estimator)
+            logl = self.density_estimator.logl(candidate_initial.drop("class", axis=1), y = None)
             post_prob = self.density_estimator.posterior_probability(candidate_initial, target_label)
 
             mask = (logl > self.log_likelihood_threshold) & (post_prob > self.posterior_probability_threshold)

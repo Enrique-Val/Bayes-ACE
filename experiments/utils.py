@@ -10,8 +10,7 @@ from pymoo.operators.mutation.pm import PM
 from pymoo.operators.selection.rnd import RandomSelection
 from pymoo.operators.selection.tournament import TournamentSelection
 
-from bayesace import get_other_class, path, path_likelihood_length, log_likelihood, \
-    total_l0_path
+from bayesace import get_other_class, path, path_likelihood_length, total_l0_path, ConditionalDE
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
@@ -61,16 +60,18 @@ def get_constraints(df_train, df_counterfactuals, gt_estimator: ConditionalNF, e
     xu = df_total.drop(columns=['class']).max().values + eps
     sampling_range = (xl, xu)
 
-    logl_train_with_class = gt_estimator.logl(df_train)
-    logl_train_without_class = gt_estimator.log_likelihood(df_train)
+    X = df_total.drop(columns=['class'])
+    y = df_total['class']
+    logl_train_with_class = gt_estimator.logl(X, y)
+    logl_train_without_class = gt_estimator.logl(X)
     post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
 
     return sampling_range, logl_train_without_class.mean(), logl_train_without_class.std(), post_prob_train.mean(), post_prob_train.std()
 
 
-def check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_prob_threshold, min_instances=50):
+def check_enough_instances(df_train, gt_estimator: ConditionalDE, likelihood_threshold, post_prob_threshold, min_instances=50):
     logl_train_with_class = gt_estimator.logl(df_train)
-    logl_train_without_class = gt_estimator.log_likelihood(df_train)
+    logl_train_without_class = gt_estimator.logl(df_train.drop(columns="class"))
     post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
     is_plausible = logl_train_without_class > likelihood_threshold
     is_accurate = post_prob_train > post_prob_threshold
@@ -79,7 +80,7 @@ def check_enough_instances(df_train, gt_estimator, likelihood_threshold, post_pr
         raise Exception("Not enough instances")
 
 
-def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator, penalty, chunks, l0_epsilon=0.1):
+def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator: ConditionalDE, penalty, chunks, l0_epsilon=0.1):
     print("Instance", instance.index[0])
     target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
     t0 = time.time()
@@ -105,7 +106,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
             path_l0[i] = total_l0_path(result[i].path.values, l0_epsilon)
             cfx_array[i] = result[i].counterfactual.values
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
-        real_logl = log_likelihood(cfx_df, gt_estimator)
+        real_logl = gt_estimator.logl(cfx_df)
         real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
         path_l2 = np.linalg.norm(cfx_array - instance.drop(columns="class").values.flatten(), axis=1)
         return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp
@@ -119,7 +120,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
             pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
             density_estimator=gt_estimator, penalty=penalty)
         cfx_df = pd.DataFrame([result.counterfactual.values], columns=instance.columns[:-1])
-        real_logl = log_likelihood(cfx_df, gt_estimator)
+        real_logl = gt_estimator.logl(cfx_df)
         real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
         path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns="class").values.flatten())
         path_l0 = total_l0_path(result.path.values, l0_epsilon)

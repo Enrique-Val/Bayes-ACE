@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
 
+from bayesace import ConditionalDE
+
 
 class ACEResult():
     def __init__(self, counterfactual: pd.Series, path: pd.DataFrame, distance: float):
@@ -28,8 +30,8 @@ class ACEResult():
 
 
 class Algorithm(ABC):
-    def __init__(self, density_estimator, features):
-        self.density_estimator = density_estimator
+    def __init__(self, density_estimator: ConditionalDE, features):
+        self.density_estimator: ConditionalDE = density_estimator
         self.features = features
         self.n_features = len(self.features)
 
@@ -41,7 +43,7 @@ class Algorithm(ABC):
 
 
 class ACE(Algorithm):
-    def __init__(self, density_estimator, features, chunks, log_likelihood_threshold=-np.inf,
+    def __init__(self, density_estimator: ConditionalDE, features, chunks, log_likelihood_threshold=-np.inf,
                  posterior_probability_threshold=0.5,penalty=1,
                  seed=0, verbose=True, parallelize=False):
         super().__init__(density_estimator, features)

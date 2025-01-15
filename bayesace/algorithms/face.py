@@ -30,9 +30,8 @@ def epsilon_weight(point1, point2, distance, epsilon, f_tilde):
 
 def kde_weight(point1, point2, distance, density_estimator : ConditionalDE, f_tilde, variables):
     if f_tilde == neg_log:
-        return -log_likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2, density_estimator) * distance
+        return -density_estimator.logl(pd.DataFrame([point1 + point2], columns=variables) / 2, y=None) * distance
     return f_tilde(density_estimator.likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2)) * distance
-
 
 
 def knn_weight(point1, point2, distance, k, n_instances, d, f_tilde):
@@ -125,7 +124,7 @@ def find_closest_paths(graph, source_node, target_nodes, parallelize=False):
 
 
 class FACE(ACE):
-    def __init__(self, density_estimator, features, chunks, dataset: pd.DataFrame, distance_threshold,
+    def __init__(self, density_estimator: ConditionalDE, features, chunks, dataset: pd.DataFrame, distance_threshold,
                  graph_type,
                  f_tilde=None, seed=0, verbose=False, log_likelihood_threshold=-np.inf, posterior_probability_threshold=0.50,
                  penalty=1, k=1, parallelize=True):
@@ -203,7 +202,7 @@ class FACE(ACE):
         # Mark target nodes based on the posterior probability and likelihood threshold
 
         # Get likelihood and probability of the class
-        logl = log_likelihood(pd.DataFrame(self.dataset, columns=self.features), self.density_estimator)
+        logl = self.density_estimator.logl(pd.DataFrame(self.dataset, columns=self.features))
         #print(self.log_likelihood_threshold)
         #print(logl)
         post_prob = self.density_estimator.posterior_probability(pd.DataFrame(self.dataset, columns=self.features),
@@ -218,7 +217,7 @@ class FACE(ACE):
         #target_nodes = self.dataset.index[self.y_pred[target_label] > self.posterior_probability_threshold]
 
         if len(target_nodes) > 0:
-            true_array = log_likelihood(self.dataset.iloc[target_nodes], self.density_estimator) > self.log_likelihood_threshold
+            true_array = self.density_estimator.logl(self.dataset.iloc[target_nodes]) > self.log_likelihood_threshold
             target_nodes = target_nodes[true_array]
 
         if len(target_nodes) == 0:

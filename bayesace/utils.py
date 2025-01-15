@@ -50,34 +50,6 @@ def delta_distance(x_cfx, x_og, eps=0.1):
     return sum(map(lambda i: i > eps, abs_distance[0]))
 
 
-def log_likelihood(data: pd.DataFrame, density_estimator: ConditionalDE, class_var_name="class", mutable=False) -> np.ndarray:
-    ll = density_estimator.likelihood(data)
-    logl = np.empty(shape=len(ll))
-    logl[ll > 0] = np.log(ll[ll > 0])
-    logl[ll <= 0] = -np.inf
-    return logl
-'''if not mutable:
-    data = data.copy()
-if isinstance(density_estimator, ConditionalNF):
-    return density_estimator.log_likelihood(data, class_var_name=class_var_name)
-if class_var_name in data.columns:
-    data = data.drop(class_var_name, axis=1)
-class_cpd = density_estimator.cpd(class_var_name)
-class_values = class_cpd.variable_values()
-n_samples = data.shape[0]
-# Set the value of the logl for the first iteration
-data[class_var_name] = pd.Categorical([class_values[0]] * n_samples, categories=class_values)
-log_likelihood_val = density_estimator.logl(data)
-for v in class_values[1:]:
-    data[class_var_name] = pd.Categorical([v] * n_samples, categories=class_values)
-    logly = density_estimator.logl(data)
-    log_likelihood_val = log_likelihood_val + np.log(1 + np.e ** (logly - log_likelihood_val))
-
-if (log_likelihood_val > 0).any():
-    Warning(
-        "Log likelihood of some points in the space is higher than 0.")
-return log_likelihood_val'''
-
 def brier_score(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
     encoder = OneHotEncoder(sparse_output=False)
     y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
@@ -174,12 +146,12 @@ def path(vertex_array: np.ndarray, chunks=2) -> np.ndarray:
         return np.inf
 '''
 
-def path_likelihood_length(path: pd.DataFrame, density_estimator, penalty=1):
+def path_likelihood_length(path: pd.DataFrame, density_estimator: ConditionalDE, penalty=1):
     # Separation is computed between each row without for loops, fully vectorised
     separation = np.linalg.norm(path.diff(axis=0).drop(0), axis=1)
 
     medium_points = ((path + path.shift()) / 2).drop(0).reset_index(drop=True)
-    logl_points = -log_likelihood(medium_points, density_estimator)
+    logl_points = -density_estimator.logl(medium_points)
     # Array with 1 if positive, 0 if 0 and -1 if negative
     sign_array = np.sign(logl_points)
     point_evaluations = logl_points ** penalty
@@ -194,18 +166,14 @@ def L0_norm(x_1, x_2, eps=0.01):
     return Counter(np.abs(x_1 - x_2) > eps)[True]
 
 
-def get_probability_plot(density_estimator, class_var_name="class", limit=3, step=0.01):
+def get_probability_plot(density_estimator : ConditionalDE, limit=3, step=0.01):
     grid = np.array([
         [a, b]
         for a in np.arange(-limit, limit, step)
         for b in np.arange(-limit, limit, step)
     ])
     resolution = len(np.arange(-limit, limit, step))
-    class_labels = None
-    if isinstance(density_estimator, ConditionalDE):
-        class_labels = density_estimator.get_class_labels()
-    else:
-        class_labels = density_estimator.cpd(class_var_name).variable_values()
+    class_labels = density_estimator.get_class_labels()
     if len(class_labels) > 3:
         raise ValueError("The number of classes is too high to plot the probability plot")
     prob_list = []

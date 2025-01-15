@@ -1,10 +1,12 @@
 import pybnesian as pb
 import os
+
+from bayesace.models.bayesian_network_classifier import BayesianNetworkClassifier
 from bayesace.utils import *
 
 
-def test_likelihood(x_cfx: pd.DataFrame, bn):
-    assert round(log_likelihood(x_cfx.drop("class", axis=1), bn)[0], 2) == -13.76
+def test_likelihood(x_cfx: pd.DataFrame, bn: BayesianNetworkClassifier):
+    assert round(bn.logl(x_cfx.drop("class", axis=1), "a")[0], 2) == -13.76
 
 
 def test_accuracy(x_cfx: pd.DataFrame, y_og: str | list, bn):

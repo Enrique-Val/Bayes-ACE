@@ -1,12 +1,12 @@
 import numpy as np
 import pandas as pd
 
-from bayesace import median_absolute_deviation, path_likelihood_length, path, log_likelihood
+from bayesace import median_absolute_deviation, path_likelihood_length, path, ConditionalDE
 from bayesace.algorithms.algorithm import Algorithm, ACEResult
 
 
 class WachterCounterfactual(Algorithm):
-    def __init__(self, density_estimator, features, dataset:pd.DataFrame,
+    def __init__(self, density_estimator: ConditionalDE, features, dataset:pd.DataFrame,
                  target_proximity_weight=0.0, log_likelihood_threshold=-np.inf, posterior_probability_threshold=0.50):
         """
         Initialize with the density estimator, features, dataset, and weight for proximity in the loss.
@@ -94,7 +94,7 @@ class WachterCounterfactual(Algorithm):
         candidate_cfs = self.dataset_features[target_indices]
 
         # Get likelihood and probability of the class
-        logl = log_likelihood(pd.DataFrame(candidate_cfs,columns=self.features), self.density_estimator)
+        logl = self.density_estimator.logl(pd.DataFrame(candidate_cfs,columns=self.features), target_label)
         post_prob = self.density_estimator.posterior_probability(pd.DataFrame(candidate_cfs,columns=self.features),
                                                                  target_label)
 

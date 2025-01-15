@@ -37,9 +37,9 @@ def check_copy(bn):
 class BayesianNetworkClassifier(ConditionalDE):
     def __init__(self, network_type="CLG"):
         super().__init__()
-        self.bayesian_network = None
+        self.bayesian_network: pb.BayesianNetwork = None
         self.class_var_name = None
-        self.network_type = network_type
+        self.network_type: str = network_type
 
     def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray, initial_structure="naive",
             training_params=None):
@@ -50,7 +50,7 @@ class BayesianNetworkClassifier(ConditionalDE):
             y = y.values
         dataset = X.copy()
         dataset[self.class_var_name] = y
-        bn = None
+        bn: pb.BayesianNetwork = None
         if self.network_type == "CLG":
             bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.CLGNetwork, initial_structure),
                        operators=["arcs"], **training_params)
