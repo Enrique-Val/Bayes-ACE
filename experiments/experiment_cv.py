@@ -436,7 +436,7 @@ if __name__ == "__main__":
     dataset_id = args.dataset_id
     GRAPHIC = args.graphics
 
-    dummy = True
+    dummy = False
     if dummy:
         k = 2
         steps = 2

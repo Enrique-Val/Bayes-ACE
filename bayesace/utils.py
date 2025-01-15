@@ -209,6 +209,7 @@ def get_decision_boundary_plot(density_estimator, class_var_name="class", limit=
         prob_list.append(np.zeros((resolution, resolution)))
     return np.dstack(prob_list)
 
+
 def plot_path(df, res_b=None):
     # I need you to generalize this code for any class values names
     # x_1 = x_og.drop("class", axis=1)
