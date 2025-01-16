@@ -104,7 +104,8 @@ class ConditionalNormalizingFlow(nn.Module):
     def log_prob(self, x, H):
         try :
             cond_flow_dist = self._condition(H)
-            return cond_flow_dist.log_prob(x)
+            cond_dist = cond_flow_dist.log_prob(x)
+            return cond_dist
         except ValueError:
             raise NanLogProb()
 
@@ -244,13 +245,14 @@ class ConditionalNVP(ConditionalNF):
                 break
 
             except NanLogProb as e:
-                if err_scale < 0.2:
+                if err_scale < 0.1:
                     os.remove(model_pth_name)
                     raise e
                 if len(val_losses) == 0:
                     self.dist_x_given_class.load_state_dict(torch.load(model_pth_name, weights_only=True))
                     self.dist_x_given_class.apply(lambda m : weights_init(m, scale=err_scale))
                     warnings.warn("Nan in first epoch. Restarting with smaller weights")
+                    warnings.warn("New scale: " + str(err_scale))
                     err_scale -= 0.1
                     losses = []
                     val_losses = []

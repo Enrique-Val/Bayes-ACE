@@ -133,16 +133,19 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
     X_train = df_train[df_train.columns[:-1]]
     y_train = df_train[df_train.columns[-1]]
 
-    t0 = time.time()
-    model = None
-    if model_type == "NVP":
-        model = ConditionalNVP(graphics=False)
-        model.fit(X_train, y_train, model_pth_name=directory_path + "model_" + str(os.getpid()) + ".pth",
-                    **nn_params_copy)
-    elif model_type == "Spline":
-        model = ConditionalSpline()
-        model.fit(X_train, y_train, **nn_params_copy)
-    it_time = time.time() - t0
+    try :
+        t0 = time.time()
+        model = None
+        if model_type == "NVP":
+            model = ConditionalNVP(graphics=False)
+            model.fit(X_train, y_train, model_pth_name=directory_path + "model_" + str(os.getpid()) + ".pth",
+                        **nn_params_copy)
+        elif model_type == "Spline":
+            model = ConditionalSpline()
+            model.fit(X_train, y_train, **nn_params_copy)
+        it_time = time.time() - t0
+    except NanLogProb as e:
+        return None
     metrics = get_metrics(model, df_test)
     metrics["Time"] = it_time
     metrics["Actual_steps"] = model.steps
@@ -165,46 +168,35 @@ def cross_validate_nf(dataset: pd.DataFrame, kfold_object: KFold, model_type="NV
                       nn_params: dict = None) -> list | None:
     cv_iter_results = []
     if not parallelize:
-        try:
-            for train_index, test_index in kfold_object.split(dataset):
-                df_train = dataset.iloc[train_index].reset_index(drop=True)
-                df_test = dataset.iloc[test_index].reset_index(drop=True)
-                cv_iter_results.append(
-                    train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params,
-                                             directory_path=working_dir))
-        except NanLogProb as e:
-            cv_iter_results = None
-            to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
-                        "Consider smoothing data, decreasing the value of the lr or the complexity of the "
-                        "network.") + str(nn_params)
-            warnings.warn(to_print, RuntimeWarning)
-            print()
+        for train_index, test_index in kfold_object.split(dataset):
+            df_train = dataset.iloc[train_index].reset_index(drop=True)
+            df_test = dataset.iloc[test_index].reset_index(drop=True)
+            cv_iter_results.append(
+                train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params,
+                                         directory_path=working_dir))
+
     elif parallelize:
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
         column_names = dataset.columns.tolist()
         pool = mp.Pool(min(mp.cpu_count() - 1, k))
-        try:
-            # Use starmap with the shared memory array and other needed parameters
-            cv_iter_results = pool.starmap(worker_nf,
-                                           [(shm.name, shared_array.shape, shared_array.dtype, column_names,
-                                             ordinal_mapping, i_fold, model_type, nn_params,
-                                             working_dir)
-                                            for i_fold in kfold_object.split(dataset)])
-        except NanLogProb as e:
-            cv_iter_results = None
-            to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
-                        "Consider smoothing data, decreasing the value of the lr or the complexity of the "
-                        "network.") + str(nn_params)
-            warnings.warn(to_print, RuntimeWarning)
-            print()
-
+        # Use starmap with the shared memory array and other needed parameters
+        cv_iter_results = pool.starmap(worker_nf,
+                                       [(shm.name, shared_array.shape, shared_array.dtype, column_names,
+                                         ordinal_mapping, i_fold, model_type, nn_params,
+                                         working_dir)
+                                        for i_fold in kfold_object.split(dataset)])
         pool.close()
         pool.join()
 
         shm.close()
         shm.unlink()
-    if cv_iter_results is None:
-        return None
+        if None in cv_iter_results:
+            to_print = ("Error while computing log_prob. Returning a high value for the objective function. "
+                        "Consider smoothing data, decreasing the value of the lr or the complexity of the "
+                        "network.") + str(nn_params)
+            warnings.warn(to_print, RuntimeWarning)
+            print()
+            return None
     cv_results = {"Logl": [], "LoglStd": [], "Brier": [], "AUC": [], "Time": [], "Actual_steps": []}
     for cv_iter_result in cv_iter_results:
         for key in cv_results.keys():
@@ -263,10 +255,10 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter
         # Cross validate
         result_cv = cross_validate_nf(dataset, kfold_object, model_type=model_type, parallelize=parallelize,
                                       working_dir=working_dir, nn_params=params)
-        if result_cv is None or result_cv[0] < -3e11:
+        if result_cv is None or result_cv[0] < -3e5:
             # If the logl is too low, return a high value for the objective function. This allows to not overpenalize
             # regions of the space
-            return 3e11
+            return 3e5
         return -result_cv[0]  # Assuming we want to maximize loglikelihood
 
     # Get number of features
@@ -305,7 +297,16 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter
 
     # Prior to training, we DERELATIVIZE the hidden units
     best_params["hidden_units"] = d * best_params["hidden_units"]
-    model.fit(dataset[dataset.columns[:-1]], dataset[dataset.columns[-1]], **best_params)
+    # Since a exception might appear due to stochasticity, we include random restart with a max of 10 restarts
+    for _ in range(10):
+        try:
+            model.fit(dataset[dataset.columns[:-1]], dataset[dataset.columns[-1]], **best_params)
+            break
+        except NanLogProb as e:
+            print("Nan log prob. Restarting...")
+            continue
+    if not model.trained:
+        raise Exception("Model not trained")
     return model, metrics, result
 
 
@@ -419,7 +420,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_id", nargs='?', default=44127, type=int)
     parser.add_argument('--graphics', action=argparse.BooleanOptionalAction)
     parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
-    parser.add_argument('--n_iter', nargs='?', default=100, type=int)
+    parser.add_argument('--n_iter', nargs='?', default=50, type=int)
     parser.add_argument('--part', choices=['full', 'rd', 'sd'], default='full')
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_2_kde/", type=str)
