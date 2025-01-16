@@ -34,10 +34,11 @@ def worker(instance: pd.DataFrame, density_estimator_path: str, gt_estimator_pat
 def get_counterfactuals(instance: pd.DataFrame, density_estimator: ConditionalDE, gt_estimator: ConditionalDE,
                         penalty: int,
                         n_vertices: int, ace_params: dict):
+    class_var_name = density_estimator.get_class_var_name()
     distances = np.zeros(n_vertices)
     times = np.zeros(n_vertices)
     for n_vertex in range(n_vertices):
-        target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
+        target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
         t0 = time.time()
         print("Vertices:", n_vertex)
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],

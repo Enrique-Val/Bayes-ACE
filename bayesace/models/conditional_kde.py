@@ -16,7 +16,7 @@ class ConditionalKDE(ConditionalDE):
         super().__init__()
         self.bandwidth = bandwidth
         self.kernel = kernel
-        self.kdes = {}  # Maps each class to its KDE
+        self.kdes : dict[str, KernelDensity] = {}  # Maps each class to its KDE
 
     def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray):
         """
@@ -110,7 +110,7 @@ class ConditionalKDE(ConditionalDE):
     def get_class_labels(self):
         return list(self.class_distribution.keys()).copy()
 
-    def sample(self, n_samples, ordered=True, seed=None):
+    def sample(self, n_samples, seed=None) -> pd.DataFrame:
         np.random.seed(seed)
         samples = []
         samples_class_label = []
@@ -128,7 +128,6 @@ class ConditionalKDE(ConditionalDE):
         samples["class"] = pd.Categorical(samples["class"], categories=self.classes)
         # Shuffle the samples
         samples = samples.sample(frac=1, random_state=seed)
-        return pa.Table.from_pandas(samples)
         return samples
 
     def sample_given_class(self, n_samples, class_label, seed=None):

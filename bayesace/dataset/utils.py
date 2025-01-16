@@ -29,13 +29,14 @@ def get_data(dataset_id: int, standardize=True):
     data = data.reset_index(drop=True)
 
     # Transform the class into a categorical variable
-    class_processed = data[data.columns[-1]].astype('string').astype('category')
-    data = data.drop(data.columns[-1], axis=1)
-    data["class"] = class_processed
+    class_var_name = data.columns[-1]
+    class_processed = data[class_var_name].astype('string').astype('category')
+    data = data.drop(class_var_name, axis=1)
+    data[class_var_name] = class_processed
 
     if standardize:
         # Scale the rest of the dataset
-        feature_columns = [i for i in data.columns if i != "class"]
+        feature_columns = [i for i in data.columns if i != class_var_name]
         data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
     return data
 

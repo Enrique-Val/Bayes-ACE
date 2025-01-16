@@ -47,8 +47,6 @@ class ConditionalNF(ConditionalDE):
 
         return train_loader, val_loader
 
-    def sample(self, n_samples, ordered=True, seed=None):
-        pass
 
     def logl_array(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         # To be implemented by specific classes, depending on the implementation of the conditional distribution

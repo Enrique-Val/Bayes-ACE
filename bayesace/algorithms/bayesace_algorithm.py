@@ -46,13 +46,14 @@ class BestPathFinder(Problem):
                          n_ieq_constr=2,
                          xl=xl,
                          xu=xu, **kwargs)
-        self.x_og = instance.drop("class", axis=1).values
-        self.y_og = instance["class"].values[0]
+        self.class_var_name = density_estimator.get_class_var_name()
+        self.x_og = instance.drop(self.class_var_name, axis=1).values
+        self.y_og = instance[self.class_var_name].values[0]
         self.target_label = target_label
         assert self.y_og != self.target_label
         self.n_vertex = n_vertex
         self.penalty = penalty
-        self.features = instance.drop("class", axis=1).columns
+        self.features = instance.drop(self.class_var_name, axis=1).columns
         self.n_features = n_features
         self.density_estimator = density_estimator
         assert self.density_estimator.fitted()
@@ -102,17 +103,8 @@ class BayesACE(ACE):
         if not self.density_estimator.fitted():
             print(type(self.density_estimator))
             raise Exception("The density estimator must be fitted before running the algorithm")
-        y_og = instance["class"].values[0]
-        class_labels = None
-        probabilities = None
-        if isinstance(self.density_estimator, ConditionalDE):
-            class_labels = self.density_estimator.get_class_labels()
-            probabilities = list(self.density_estimator.get_class_distribution().values())
-
-        else:
-            class_cpd = self.density_estimator.cpd("class")
-            class_labels = class_cpd.variable_values()
-            probabilities = self.density_estimator.cpd("class").probabilities()
+        class_labels = self.density_estimator.get_class_labels()
+        probabilities = list(self.density_estimator.get_class_distribution().values())
         var_probs = {class_labels[i]: probabilities[i] for i in
                      range(len(class_labels))}
 
@@ -123,17 +115,17 @@ class BayesACE(ACE):
         initial_sample = pd.DataFrame(columns=self.features)
         count = 0
         while not completed:
-            candidate_initial = self.density_estimator.sample(n_samples, ordered=True,
-                                                              seed=self.seed + count).to_pandas()
-            candidate_initial = candidate_initial[candidate_initial["class"] == target_label]
+            candidate_initial = self.density_estimator.sample(n_samples,
+                                                              seed=self.seed + count)
+            candidate_initial = candidate_initial[candidate_initial[self.class_var_name] == target_label]
 
             # Get likelihood and probability of the class
-            logl = self.density_estimator.logl(candidate_initial.drop("class", axis=1), y = None)
+            logl = self.density_estimator.logl(candidate_initial.drop(self.class_var_name, axis=1), y = None)
             post_prob = self.density_estimator.posterior_probability(candidate_initial, target_label)
 
             mask = (logl > self.log_likelihood_threshold) & (post_prob > self.posterior_probability_threshold)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
-            candidate_initial = candidate_initial.drop("class", axis=1)
+            candidate_initial = candidate_initial.drop(self.class_var_name, axis=1)
             if candidate_initial.shape[0] > 0:
                 count = 0
             # We concatenate the new samples to the initial sample. We have to do a couple checks in case some of
@@ -163,11 +155,11 @@ class BayesACE(ACE):
             return initial_sample
 
         if self.initialization == "random":
-            paths_sample = self.density_estimator.sample(self.n_vertex * self.population_size, ordered=True,
-                                                         seed=self.seed).to_pandas()
-            paths_sample = paths_sample.drop("class", axis=1)
+            paths_sample = self.density_estimator.sample(self.n_vertex * self.population_size,
+                                                         seed=self.seed)
+            paths_sample = paths_sample.drop(self.class_var_name, axis=1)
             paths_sample = paths_sample.clip(self.sampling_range[0], self.sampling_range[1])
-            # new_sample = new_sample[new_sample["class"] != y_og].head(self.population_size).reset_index(drop=True)
+            # new_sample = new_sample[new_sample[self.class_var_name] != y_og].head(self.population_size).reset_index(drop=True)
             path_sample = np.resize(
                 paths_sample.to_numpy(),
                 new_shape=(self.population_size, self.n_vertex * self.n_features))
@@ -175,7 +167,7 @@ class BayesACE(ACE):
         elif self.initialization == "guided":
             paths_sample = []
             for i in initial_sample:
-                paths_sample.append(np.linspace(instance.drop("class", axis=1).values, i, self.n_vertex + 2).flatten())
+                paths_sample.append(np.linspace(instance.drop(self.class_var_name, axis=1).values, i, self.n_vertex + 2).flatten())
             paths_sample = np.array(paths_sample)
             paths_sample = paths_sample[:, self.n_features:]
             return paths_sample
@@ -214,7 +206,7 @@ class BayesACE(ACE):
         initial_sample = self.get_initial_sample(instance=instance, target_label=target_label)
         # Check if it was possible to even initialize the problem
         if initial_sample is None:
-            return ACEResult(None, instance.drop("class", axis=1), np.inf)
+            return ACEResult(None, instance.drop(self.class_var_name, axis=1), np.inf)
 
         problem = BestPathFinder(density_estimator=self.density_estimator, instance=instance,
                                  target_label=target_label, n_vertex=self.n_vertex,
@@ -235,11 +227,11 @@ class BayesACE(ACE):
                 if res.F[i][0] < MAX_VALUE_FLOAT:
                     cf_list.append(self.create_ACEResult(instance, res.X[i]))
             if len(cf_list) == 0:
-                return ACEResult(None, instance.drop("class", axis=1), np.inf)
+                return ACEResult(None, instance.drop(self.class_var_name, axis=1), np.inf)
             else:
                 return cf_list
         elif len(res.F) > 1 or res.X is None or res.F > MAX_VALUE_FLOAT:
-            return ACEResult(None, instance.drop("class", axis=1), np.inf)
+            return ACEResult(None, instance.drop(self.class_var_name, axis=1), np.inf)
         else:
             return self.create_ACEResult(instance, res.X)
 

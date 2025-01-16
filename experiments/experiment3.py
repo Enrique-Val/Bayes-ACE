@@ -77,6 +77,9 @@ if __name__ == "__main__":
     faces_str = [face_str+"_eps"+str(eps) for face_str,eps in product(["face_baseline", "face_kde", "face_eps"],epsilons)]
     algorithm_str_list = faces_str + ["bayesace_" + model_str + "_v" + str(n_vertex) + "_pen" + str(penalty) for model_str, n_vertex,penalty in product(models_str, n_vertices, penalties)]
 
+    # Store the name of the class variable
+    class_var_name = gt_estimator.get_class_var_name()
+
     # List for storing the models
     algorithms = []
 
@@ -95,7 +98,7 @@ if __name__ == "__main__":
 
         t0 = time.time()
         alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
-                   dataset=df_train.drop("class", axis = 1),
+                   dataset=df_train.drop(class_var_name, axis = 1),
                    distance_threshold=eps, graph_type="kde", f_tilde=None, seed=0, verbose=verbose,
                    log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, penalty=1, parallelize=parallelize)
         tf = time.time()-t0
@@ -104,7 +107,7 @@ if __name__ == "__main__":
 
         t0 = time.time()
         alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
-                   dataset=df_train.drop("class", axis = 1),
+                   dataset=df_train.drop(class_var_name, axis = 1),
                    distance_threshold=eps, graph_type="epsilon", f_tilde="identity", seed=0, verbose=verbose,
                    log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, penalty=1, parallelize=parallelize)
         tf = time.time()-t0

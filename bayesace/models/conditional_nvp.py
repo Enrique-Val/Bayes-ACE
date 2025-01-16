@@ -299,7 +299,7 @@ class ConditionalNVP(ConditionalNF):
         os.remove(model_pth_name)
         self.trained = True
 
-    def sample(self, n_samples, ordered=True, seed=None):
+    def sample(self, n_samples, seed=None) -> pd.DataFrame:
         class_sampler = dist.Categorical(torch.tensor(list(self.class_distribution.values())))
         classes = class_sampler.sample((n_samples,))
         # Reshape the class sampling
@@ -308,7 +308,6 @@ class ConditionalNVP(ConditionalNF):
         sample_df = pd.DataFrame(X, columns=self.columns)
         sample_df["class"] = pd.Categorical([list(self.class_distribution.keys())[i] for i in classes],
                                             categories=self.get_class_labels())
-        return pa.Table.from_pandas(sample_df)
         return sample_df
 
     def logl_array(self, X: np.ndarray, y: np.ndarray):

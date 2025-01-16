@@ -27,13 +27,15 @@ def worker(instance, density_estimator_path, gt_estimator_path, penalty, n_verti
 
 
 def get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices, likelihood_threshold,
+def get_counterfactuals(instance, density_estimator : ConditionalDE, gt_estimator, penalty, n_vertices, likelihood_threshold,
                         accuracy_threshold, chunks,
                         sampling_range, opt_algorithm_params):
+    class_var_name = density_estimator.get_class_var_name()
     distances = np.zeros(n_vertices)
     real_distances = np.zeros(n_vertices)
     times = np.zeros(n_vertices)
     for n_vertex in range(n_vertices):
-        target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
+        target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
         t0 = time.time()
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
                        n_vertex=n_vertex,

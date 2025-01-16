@@ -190,7 +190,7 @@ class FACE(ACE):
 
     def run(self, instance: pd.DataFrame, target_label) -> ACEResult:
         super().run(instance, target_label)
-        x_og = instance.drop("class", axis=1)
+        x_og = instance.drop(self.class_var_name, axis=1)
 
         # Add node to the graph
         self.add_point_to_graph(x_og)

@@ -32,6 +32,7 @@ class ACEResult():
 class Algorithm(ABC):
     def __init__(self, density_estimator: ConditionalDE, features):
         self.density_estimator: ConditionalDE = density_estimator
+        self.class_var_name = density_estimator.get_class_var_name()
         self.features = features
         self.n_features = len(self.features)
 

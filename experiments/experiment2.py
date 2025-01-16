@@ -98,6 +98,9 @@ if __name__ == "__main__":
     algorithm_str_list = faces_str + [BAYESACE + "_" + model_str + "_v" + str(n_vertex) for model_str, n_vertex in
                                       product(models_str, n_vertices)]
 
+    # Name of the class variable
+    class_var_name = gt_estimator.get_class_var_name()
+
     # List for storing the models
     algorithms = []
 
@@ -110,7 +113,7 @@ if __name__ == "__main__":
 
     t0 = time.time()
     alg = FACE(density_estimator=gt_estimator, features=df_train.columns[:-1], chunks=chunks,
-               dataset=df_train.drop("class", axis=1),
+               dataset=df_train.drop(class_var_name, axis=1),
                distance_threshold=eps, graph_type="integral", f_tilde=None, seed=0, verbose=verbose,
                log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0
@@ -120,7 +123,7 @@ if __name__ == "__main__":
 
     t0 = time.time()
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
-               dataset=df_train.drop("class", axis=1),
+               dataset=df_train.drop(class_var_name, axis=1),
                distance_threshold=eps, graph_type="kde", f_tilde=None, seed=0, verbose=verbose,
                log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0
@@ -132,7 +135,7 @@ if __name__ == "__main__":
     # Not necessary, as having an infinite epsilon equates this algorithm to the Wachter algorithm
     t0 = time.time()
     alg = FACE(density_estimator=normalizing_flow, features=df_train.columns[:-1], chunks=chunks,
-               dataset=df_train.drop("class", axis=1),
+               dataset=df_train.drop(class_var_name, axis=1),
                distance_threshold=eps, graph_type="epsilon", f_tilde=None, seed=0, verbose=verbose,
                log_likelihood_threshold=0.00, accuracy_threshold=0.00, penalty=1, parallelize=parallelize)
     tf = time.time() - t0

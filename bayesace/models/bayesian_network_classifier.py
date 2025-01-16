@@ -139,5 +139,5 @@ class BayesianNetworkClassifier(ConditionalDE):
     def get_class_labels(self):
         return self.bayesian_network.cpd(self.class_var_name).variable_values()
 
-    def sample(self, n_samples, ordered=True, seed=None):
-        return self.bayesian_network.sample(n_samples, ordered=ordered, seed=seed)
+    def sample(self, n_samples, seed=None) -> pd.DataFrame:
+        return self.bayesian_network.sample(n_samples, ordered=True, seed=seed).to_pandas()

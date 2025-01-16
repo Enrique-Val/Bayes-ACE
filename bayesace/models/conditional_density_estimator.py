@@ -63,7 +63,7 @@ class ConditionalDE(ABC):
         return to_ret
 
     @abstractmethod
-    def sample(self, n_samples: int, ordered=True, seed=None):
+    def sample(self, n_samples: int, seed=None):
         """
         Abstract method for generating samples.
         """
@@ -71,6 +71,9 @@ class ConditionalDE(ABC):
 
     def get_class_distribution(self):
         return self.class_distribution.copy()
+
+    def get_class_var_name(self) -> str:
+        return self.class_var_name
 
     def fitted(self):
         return self.trained
@@ -82,12 +85,6 @@ class ConditionalDE(ABC):
     def likelihood(self, X: pd.DataFrame, y: pd.Series | np.ndarray = None) -> np.ndarray:
         return np.e ** self.logl(X, y)
 
-    def log_likelihood(self, data: pd.DataFrame, class_var_name="class") -> np.ndarray:
-        ll = self.likelihood(data)
-        logl = np.empty(shape=len(ll))
-        logl[ll > 0] = np.log(ll[ll > 0])
-        logl[ll <= 0] = -np.inf
-        return logl
 
 def logl_from_likelihood(likelihood):
     logl = np.empty(shape=len(likelihood))

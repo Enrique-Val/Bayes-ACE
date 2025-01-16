@@ -22,12 +22,12 @@ class WachterCounterfactual(Algorithm):
         self.posterior_probability_threshold = posterior_probability_threshold
 
         # Ensure that the dataset features match the expected features and their order
-        columns_without_class = [col for col in dataset.columns if col != "class"]
+        columns_without_class = [col for col in dataset.columns if col != self.class_var_name]
         assert (columns_without_class == self.features).all()
 
         # Extract the features and labels from the dataset
         self.dataset_features = dataset[self.features].values
-        self.dataset_labels = dataset["class"].values
+        self.dataset_labels = dataset[self.class_var_name].values
 
         # Compute the median absolute deviation for each feature
         self.feature_mad = median_absolute_deviation(self.dataset_features, axis=0)
@@ -75,11 +75,11 @@ class WachterCounterfactual(Algorithm):
             An ACEResult containing the best counterfactual, path, and distance.
         """
         # Ensure that instance features match the expected features and its order
-        columns_without_class = [col for col in instance.columns if col != "class"]
+        columns_without_class = [col for col in instance.columns if col != self.class_var_name]
         assert (columns_without_class == self.features).all()
 
         # Ensure the instance class does not already match the target label
-        assert (instance["class"].values[0] != target_label)
+        assert (instance[self.class_var_name].values[0] != target_label)
 
         # Convert the instance to a NumPy array for efficient calculation
         original_instance = instance[self.features].values.flatten()
@@ -104,7 +104,7 @@ class WachterCounterfactual(Algorithm):
 
         if candidate_cfs.size == 0:
             print("No instances in the dataset match the likelihood and posterior probability thresholds.")
-            return ACEResult(counterfactual=None, path=instance.drop("class",axis=1), distance=np.nan)
+            return ACEResult(counterfactual=None, path=instance.drop(self.class_var_name,axis=1), distance=np.nan)
 
         # Compute the proximity loss in a vectorized way
         proximity_losses = self._proximity_loss(candidate_cfs, original_instance)
