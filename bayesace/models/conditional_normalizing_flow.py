@@ -23,8 +23,8 @@ class ConditionalNF(ConditionalDE):
         # Transform dataset to numpy and cast class from string to numerical
         class_column = np.zeros(len(dataset))
         for i, label in enumerate(self.class_distribution.keys()):
-            class_column[dataset["class"] == label] = i
-        dataset["class"] = class_column
+            class_column[dataset[self.class_var_name] == label] = i
+        dataset[self.class_var_name] = class_column
         #dataset = dataset.astype(float)
         dataset_numpy = dataset.values
 

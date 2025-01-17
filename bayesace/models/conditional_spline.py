@@ -25,7 +25,7 @@ class ConditionalSpline(ConditionalNF):
         dataset = X.copy()
         if isinstance(y, pd.Series):
             y = y.values
-        dataset["class"] = y
+        dataset[self.class_var_name] = y
         train_loader, val_loader = self.get_loaders(dataset, batch_size)
 
         # Create conditional transformations
@@ -116,7 +116,7 @@ class ConditionalSpline(ConditionalNF):
         X = self.dist_x_given_class.condition(classes_res).sample(
             (n_samples,)).cpu()  # .reshape(-1, self.n_dims).float()
         sample_df = pd.DataFrame(X, columns=self.columns)
-        sample_df["class"] = pd.Categorical([list(self.class_distribution.keys())[i] for i in classes],
+        sample_df[self.class_var_name] = pd.Categorical([list(self.class_distribution.keys())[i] for i in classes],
                                             categories=self.get_class_labels())
         return sample_df
 

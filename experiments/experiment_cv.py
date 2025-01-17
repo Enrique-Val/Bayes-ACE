@@ -41,8 +41,8 @@ def cross_validate_bn(dataset: pd.DataFrame, kfold_object: KFold, outliers: floa
         network.fit(df_train[df_train.columns[:-1]], df_train[df_train.columns[-1]], initial_structure="naive",
                     training_params={"score": "bic", "seed": 0})
         time_i = time.time() - t0
-        X_test = df_test.drop("class", axis=1)
-        y_test = df_test["class"]
+        X_test = df_test.drop(network.get_class_var_name(), axis=1)
+        y_test = df_test[network.get_class_var_name()]
         tmp = network.logl(X_test, y_test)
         logl_i = tmp.mean()
         logl_std_i = tmp.std()
@@ -69,18 +69,19 @@ def cross_validate_bn(dataset: pd.DataFrame, kfold_object: KFold, outliers: floa
 
 # Convert the dataset to a NumPy array for shared memory usage
 def to_numpy_shared(df: pd.DataFrame) -> tuple[shared_memory.SharedMemory, np.ndarray, dict]:
-    unique_values = df["class"].unique()
+    class_var_name = df.columns[-1]
+    unique_values = df[class_var_name].unique()
     ordinal_mapping = {value: idx for idx, value in enumerate(unique_values)}
     # Convert DataFrame to NumPy array
-    df_numpy = df.drop("class", axis=1).to_numpy()
-    df_numpy = np.hstack((df_numpy, np.array([ordinal_mapping[value] for value in df["class"]]).reshape(-1, 1)))
+    df_numpy = df.drop(class_var_name, axis=1).to_numpy()
+    df_numpy = np.hstack((df_numpy, np.array([ordinal_mapping[value] for value in df[class_var_name]]).reshape(-1, 1)))
     shm = shared_memory.SharedMemory(create=True, size=df_numpy.nbytes)
     shared_array = np.ndarray(df_numpy.shape, dtype=df_numpy.dtype, buffer=shm.buf)
     np.copyto(shared_array, df_numpy)
     return shm, shared_array, ordinal_mapping
 
 
-def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
+def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, class_var_name: str, ordinal_mapping: dict,
                 i_fold: tuple) -> tuple[pd.DataFrame, pd.DataFrame]:
     train_index, test_index = i_fold
     # Reconstruct the DataFrame using the shared memory array
@@ -90,7 +91,7 @@ def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list
     # Create a DataFrame from the shared memory array
     df_shared = pd.DataFrame(shared_array, columns=column_names)
     # Recodify the str of the class using the ordinal mapping
-    df_shared["class"] = df_shared["class"].apply(
+    df_shared[class_var_name] = df_shared[class_var_name].apply(
         lambda x: list(ordinal_mapping.keys())[list(ordinal_mapping.values()).index(x)])
     # Create train and test DataFrames
     df_train = df_shared.iloc[train_index].reset_index(drop=True)
@@ -99,18 +100,18 @@ def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list
 
 
 # Worker function that accesses shared memory
-def worker_nf(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
+def worker_nf(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, class_var_name: str, ordinal_mapping: dict,
               i_fold: tuple, model_type="NVP", nn_params: dict = None, directory_path="./"):
     torch.set_num_threads(1)
-    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold)
+    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, class_var_name, ordinal_mapping, i_fold)
     return train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params,
                                     directory_path=directory_path)
 
 
-def worker_ckde(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
+def worker_ckde(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, class_var_name: str, ordinal_mapping: dict,
                 i_fold: tuple, bandwidth=1.0, kernel="gaussian"):
     torch.set_num_threads(1)
-    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold)
+    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, class_var_name, ordinal_mapping, i_fold)
     # Proceed with training
     return train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel)
 
@@ -153,8 +154,8 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
 
 
 def get_metrics(model: ConditionalDE, df_test: pd.DataFrame):
-    X_test = df_test.drop("class", axis=1)
-    y_test = df_test["class"]
+    X_test = df_test.drop(model.get_class_var_name(), axis=1)
+    y_test = df_test[model.get_class_var_name()]
     logl_data = model.logl(X_test, y_test)
     logl = logl_data.mean()
     logl_std = logl_data.std()
@@ -524,7 +525,7 @@ if __name__ == "__main__":
     if args.part == 'sd' or args.part == 'full':
         gt_model: ConditionalKDE = pickle.load(open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "rb"))
         resampled_dataset = pd.read_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv", index_col=0)
-        resampled_dataset["class"] = resampled_dataset["class"].astype('str').astype('category')
+        resampled_dataset[gt_model.get_class_var_name()] = resampled_dataset[gt_model.get_class_var_name()].astype('str').astype('category')
         results_df = pd.read_csv(directory_path + 'data_' + str(dataset_id) + '.csv', index_col=0)
         if len(results_df.columns) > 2:
             results_df = results_df.drop("CLG", axis=1)
@@ -539,12 +540,14 @@ if __name__ == "__main__":
 
         # Check the metrics of the model given the resampled data
         resampled_dataset_metrics = np.zeros(len(results_df) - 1)
-        tmp = gt_model.logl(resampled_dataset.drop("class", axis=1), resampled_dataset["class"])
+        resampled_X = resampled_dataset.drop(gt_model.get_class_var_name(), axis=1)
+        resampled_y = resampled_dataset[gt_model.get_class_var_name()]
+        tmp = gt_model.logl(resampled_X, resampled_y)
         resampled_dataset_metrics[0] = tmp.mean()
         resampled_dataset_metrics[2] = tmp.std()
-        predictions = gt_model.predict_proba(resampled_dataset.drop("class", axis=1).values, output="pandas")
-        resampled_dataset_metrics[4] = brier_score(resampled_dataset["class"].values, predictions)
-        resampled_dataset_metrics[6] = auc(resampled_dataset["class"].values, predictions)
+        predictions = gt_model.predict_proba(resampled_X.values, output="pandas")
+        resampled_dataset_metrics[4] = brier_score(resampled_y.values, predictions)
+        resampled_dataset_metrics[6] = auc(resampled_y.values, predictions)
         resampled_dataset_metrics = list(resampled_dataset_metrics)
         resampled_dataset_metrics.append(results_df["GT_RD"].values[-1])
         results_df["GT_SD"] = resampled_dataset_metrics

@@ -123,9 +123,9 @@ class ConditionalKDE(ConditionalDE):
         samples_class_label = np.concatenate(samples_class_label, axis=0)
         samples_class_label = samples_class_label[:n_samples]
         samples = pd.DataFrame(samples, columns=self.columns).head(n_samples)
-        samples["class"] = samples_class_label
+        samples[self.class_var_name] = samples_class_label
         # Convert to categorical
-        samples["class"] = pd.Categorical(samples["class"], categories=self.classes)
+        samples[self.class_var_name] = pd.Categorical(samples[self.class_var_name], categories=self.classes)
         # Shuffle the samples
         samples = samples.sample(frac=1, random_state=seed)
         return samples

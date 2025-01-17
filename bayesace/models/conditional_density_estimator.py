@@ -44,7 +44,7 @@ class ConditionalDE(ABC):
         """
         pass
 
-    def posterior_probability(self, X: pd.DataFrame, y: str | np.ndarray, class_var_name="class"):
+    def posterior_probability(self, X: pd.DataFrame, y: str | np.ndarray):
         # Obtain the labels accesing either the MultiBNAF model or the cpd of the bn
         class_labels = self.get_class_labels()
         if isinstance(y, str):

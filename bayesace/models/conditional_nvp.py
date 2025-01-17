@@ -152,7 +152,7 @@ class ConditionalNVP(ConditionalNF):
         dataset = X.copy()
         if isinstance(y, pd.Series):
             y = y.values
-        dataset["class"] = y
+        dataset[self.class_var_name] = y
         train_loader, val_loader = self.get_loaders(dataset, batch_size)
 
         # If graphical, then import pyplot
@@ -306,7 +306,7 @@ class ConditionalNVP(ConditionalNF):
         classes_res = torch.reshape(classes, (-1, 1)).to(self.device, dtype=torch.get_default_dtype())
         X = self.dist_x_given_class.sample(num_samples=n_samples, H=classes_res).cpu().detach()
         sample_df = pd.DataFrame(X, columns=self.columns)
-        sample_df["class"] = pd.Categorical([list(self.class_distribution.keys())[i] for i in classes],
+        sample_df[self.class_var_name] = pd.Categorical([list(self.class_distribution.keys())[i] for i in classes],
                                             categories=self.get_class_labels())
         return sample_df
 

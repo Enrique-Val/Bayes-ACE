@@ -12,10 +12,11 @@ class PybnesianParallelizationError(Exception):
 
 
 def get_initial_structure(data: pd.DataFrame, bn_type, structure_type="naive"):
+    class_var_name = data.columns[-1]
     initial = bn_type(data.columns)
     if structure_type == "naive":
-        for i in [i for i in data.columns if i != "class"]:
-            initial.add_arc("class", i)
+        for i in [i for i in data.columns if i != class_var_name]:
+            initial.add_arc(class_var_name, i)
     elif structure_type == "empty":
         pass
     else:

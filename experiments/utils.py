@@ -11,6 +11,7 @@ from pymoo.operators.selection.rnd import RandomSelection
 from pymoo.operators.selection.tournament import TournamentSelection
 
 from bayesace import get_other_class, path, path_likelihood_length, total_l0_path, ConditionalDE
+from bayesace.algorithms.algorithm import ACEResult
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
@@ -84,7 +85,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
     print("Instance", instance.index[0])
     target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
     t0 = time.time()
-    result = algorithm.run(instance, target_label=target_label)
+    result: list[ACEResult] | ACEResult = algorithm.run(instance, target_label=target_label)
     tf = time.time() - t0
     '''
     # Uncomment if all paths want to be stored
@@ -98,23 +99,25 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         path_lengths_gt = np.zeros(shape=len(result))
         path_l0 = np.zeros(shape=len(result))
         for i, _ in enumerate(result):
-            path_to_compute = path(result[i].path.values, chunks=chunks)
-            path_length_gt = path_likelihood_length(
-                pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
-                density_estimator=gt_estimator, penalty=penalty)
-            path_lengths_gt[i] = path_length_gt
-            path_l0[i] = total_l0_path(result[i].path.values, l0_epsilon)
-            cfx_array[i] = result[i].counterfactual.values
+            if isinstance(result[i], ACEResult) :
+                path_to_compute = path(result[i].path.values, chunks=chunks)
+                path_length_gt = path_likelihood_length(
+                    pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
+                    density_estimator=gt_estimator, penalty=penalty)
+                path_lengths_gt[i] = path_length_gt
+                path_l0[i] = total_l0_path(result[i].path.values, l0_epsilon)
+                cfx_array[i] = result[i].counterfactual.values
+            else :
+                raise TypeError("List do not contain exclusively ACEResult objects")
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
         real_logl = gt_estimator.logl(cfx_df)
         real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
         path_l2 = np.linalg.norm(cfx_array - instance.drop(columns="class").values.flatten(), axis=1)
         return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp
-    # Check if indeed a counterfactual was found
-    elif result.counterfactual is None:
-        print("Counterfactual for:", instance.index[0], "not found")
-        return np.inf, np.inf, np.inf, tf, None, -np.inf, 0
-    else:
+    elif isinstance(result, ACEResult):
+        if result.counterfactual is None:
+            print("Counterfactual for:", instance.index[0], "not found")
+            return np.inf, np.inf, np.inf, tf, None, -np.inf, 0
         path_to_compute = path(result.path.values, chunks=chunks)
         path_length_gt = path_likelihood_length(
             pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
@@ -126,7 +129,8 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         path_l0 = total_l0_path(result.path.values, l0_epsilon)
         print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)
         return path_length_gt, path_l0, path_l2, tf, result.counterfactual.values, real_logl, real_pp
-
+    else:
+        raise TypeError("Result is not list nor ACEResult")
 
 def friedman_posthoc(data, correct="bergmann") -> dict[str, pd.DataFrame | pd.Series]:
     '''
