@@ -15,6 +15,7 @@ from bayesace import brier_score, auc
 from bayesace.models.bayesian_network_classifier import BayesianNetworkClassifier
 from experiments.experiment_cv import get_best_normalizing_flow
 
+class_var_name = "EQI"
 
 def read_eqi_dataset(to_del=None):
     if to_del is None:
@@ -34,7 +35,7 @@ def read_eqi_dataset(to_del=None):
     data_eqi["EQI_2Jan2018_VC"] = data_eqi["EQI_2Jan2018_VC"].astype(str).astype('category')
 
     # Rename as class
-    data_eqi = data_eqi.rename(columns={"EQI_2Jan2018_VC": "class"})
+    data_eqi = data_eqi.rename(columns={"EQI_2Jan2018_VC": class_var_name})
 
     # Store the EQI columns
     eqis = list(data_eqi.columns[:-1])
@@ -76,7 +77,7 @@ def get_bn_restrictions(features, eqis, var_types):
     # Create whitelist. Force arcs from class to all EQIs
     whitelist = []
     for i in eqis:
-        whitelist.append(("class", i))
+        whitelist.append((class_var_name, i))
 
     # Create blacklist. Force no arcs between variables in different domains
     domains = np.array(list(var_types.keys()))
@@ -94,7 +95,7 @@ def get_bn_restrictions(features, eqis, var_types):
 
     # Discard arcs between class and the rest of the variables
     for feature in features:
-        blacklist.append(("class", feature))
+        blacklist.append((class_var_name, feature))
 
     # Remove arcs between eqi and the rest of the variables
     for eqi in eqis:
@@ -130,8 +131,8 @@ def cross_validate_restricted_bn(dataset, max_indegree=0, blacklist=None, whitel
         df_train = dataset.iloc[train_index].reset_index(drop=True)
         scaler = StandardScaler()
         df_train[df_train.columns[:-1]] = scaler.fit_transform(df_train[df_train.columns[:-1]])
-        X_train = df_train.drop("class", axis=1)
-        y_train = df_train["class"]
+        X_train = df_train.drop(class_var_name, axis=1)
+        y_train = df_train[class_var_name]
         df_val = dataset.iloc[test_index].reset_index(drop=True)
         df_val[df_val.columns[:-1]] = scaler.transform(df_val[df_val.columns[:-1]])
         t0 = time.time()
@@ -140,15 +141,15 @@ def cross_validate_restricted_bn(dataset, max_indegree=0, blacklist=None, whitel
                     training_params={"max_indegree": max_indegree, "whitelist": whitelist,
                                      "blacklist": blacklist, "seed": hc_seed})
         time_i = time.time() - t0
-        X_val = df_val.drop("class", axis=1)
-        y_val = df_val["class"]
+        X_val = df_val.drop(class_var_name, axis=1)
+        y_val = df_val[class_var_name]
         tmp = network.logl(X_val, y_val)
         bn_results.loc[i, "Logl"] = tmp.mean()
         bn_results.loc[i, "LoglStd"] = tmp.std()
         predictions = network.predict_proba(X_val.values, output="pandas")
-        brier_i = brier_score(X_val.values, predictions)
+        brier_i = brier_score(y_val.values, predictions)
         bn_results.loc[i, "Brier"] = brier_i
-        auc_i = auc(df_val["class"].values, predictions)
+        auc_i = auc(y_val.values, predictions)
         bn_results.loc[i, "AUC"] = auc_i
         bn_results.loc[i, "Time"] = time_i
 
@@ -213,8 +214,8 @@ if __name__ == "__main__":
     scaler = StandardScaler()
     data_train_scaled = data_train.copy()
     data_train_scaled[features + eqis] = scaler.fit_transform(data_train[features + eqis])
-    X_train = data_train_scaled.drop("class", axis=1)
-    y_train = data_train_scaled["class"]
+    X_train = data_train_scaled.drop(class_var_name, axis=1)
+    y_train = data_train_scaled[class_var_name]
 
     if args.graphical:
         color_palette = {"0": "red", "1": "blue", "2": "green", "3": "orange", "4": "purple",
@@ -225,8 +226,8 @@ if __name__ == "__main__":
         for features_16 in range(0, len(data_train.columns), 16):
             fig, axs = plt.subplots(4, 4, figsize=(20, 20))
             for i, feature in enumerate(data_train.columns[features_16:features_16 + 16]):
-                for class_i in data_train["class"].unique():
-                    axs[i // 4, i % 4].hist(data_train[data_train["class"] == class_i][feature], bins=30,
+                for class_i in data_train[class_var_name].unique():
+                    axs[i // 4, i % 4].hist(data_train[data_train[class_var_name] == class_i][feature], bins=30,
                                             color=color_palette[class_i], alpha=0.5)
                 axs[i // 4, i % 4].set_title(feature)
             plt.show()

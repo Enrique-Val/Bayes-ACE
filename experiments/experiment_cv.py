@@ -479,10 +479,13 @@ if __name__ == "__main__":
 
     if args.part == 'rd' or args.part == 'full':
         # Load the dataset and preprocess it
-        dataset_oml = get_data(dataset_id, standardize=True)
-        dataset_oml = preprocess_data(dataset_oml, standardize=True, eliminate_outliers=ELIM_OUTL,
+        dataset_oml = get_data(dataset_id)
+        dataset_oml, scaler = preprocess_data(dataset_oml, standardize=True, eliminate_outliers=ELIM_OUTL,
                                       min_unique_vals=min_unique_vals,
                                       max_instances=50000, max_cum_values=max_cum_values)
+        # Pickle the scaler
+        pickle.dump(scaler, open(directory_path + "scaler_" + str(dataset_id) + ".pkl", "wb"))
+
         d = len(dataset_oml.columns) - 1
         n_instances = dataset_oml.shape[0]
         batch_size = int((n_instances / n_batches) * 0.8 + 1)

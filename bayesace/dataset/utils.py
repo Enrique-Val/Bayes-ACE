@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 import numpy as np
 
 
-def get_data(dataset_id: int, standardize=True):
+def get_data(dataset_id: int):
     if dataset_id < 0:
         # Load a toy dataset, but first, change the syspath to access it easily
         print(os.getcwd())
@@ -34,10 +34,6 @@ def get_data(dataset_id: int, standardize=True):
     data = data.drop(class_var_name, axis=1)
     data[class_var_name] = class_processed
 
-    if standardize:
-        # Scale the rest of the dataset
-        feature_columns = [i for i in data.columns if i != class_var_name]
-        data[feature_columns] = StandardScaler().fit_transform(data[feature_columns].values)
     return data
 
 def preprocess_data(data: pd.DataFrame | np.ndarray,  eliminate_outliers=np.inf, standardize=True,
@@ -62,15 +58,17 @@ def preprocess_data(data: pd.DataFrame | np.ndarray,  eliminate_outliers=np.inf,
     stds = data[data.columns[:-1]].std()
     data = data[(np.abs((data[data.columns[:-1]] - means) / stds) < eliminate_outliers).all(axis=1)]
 
+    scaler = None
     if standardize:
-        data[data.columns[:-1]] = StandardScaler().fit_transform(data[data.columns[:-1]].values)
+        scaler = StandardScaler()
+        data[data.columns[:-1]] = scaler.transform(data[data.columns[:-1]].values)
     # Assert that there are no missing values
     if data.isnull().values.any():
         raise ValueError("There are missing values in the post-processed dataset.")
     if array_flag:
-        return data.values
+        return data.values, scaler
     else:
-        return data
+        return data, scaler
 
 
 def remove_outliers(data: pd.DataFrame, outlier_threshold: float, reset_index: bool=False):
