@@ -81,7 +81,7 @@ def to_numpy_shared(df: pd.DataFrame) -> tuple[shared_memory.SharedMemory, np.nd
     return shm, shared_array, ordinal_mapping
 
 
-def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, class_var_name: str, ordinal_mapping: dict,
+def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
                 i_fold: tuple) -> tuple[pd.DataFrame, pd.DataFrame]:
     train_index, test_index = i_fold
     # Reconstruct the DataFrame using the shared memory array
@@ -91,6 +91,7 @@ def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list
     # Create a DataFrame from the shared memory array
     df_shared = pd.DataFrame(shared_array, columns=column_names)
     # Recodify the str of the class using the ordinal mapping
+    class_var_name = column_names[-1]
     df_shared[class_var_name] = df_shared[class_var_name].apply(
         lambda x: list(ordinal_mapping.keys())[list(ordinal_mapping.values()).index(x)])
     # Create train and test DataFrames
@@ -100,20 +101,20 @@ def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list
 
 
 # Worker function that accesses shared memory
-def worker_nf(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, class_var_name: str, ordinal_mapping: dict,
+def worker_nf(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
               i_fold: tuple, model_type="NVP", nn_params: dict = None, directory_path="./"):
     torch.set_num_threads(1)
-    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, class_var_name, ordinal_mapping, i_fold)
+    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold)
     return train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params,
                                     directory_path=directory_path)
 
 
-def worker_ckde(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, class_var_name: str, ordinal_mapping: dict,
-                i_fold: tuple, bandwidth=1.0, kernel="gaussian"):
+def worker_ckde(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
+                i_fold: tuple, bandwidth=1.0, kernel="gaussian", outliers = np.inf):
     torch.set_num_threads(1)
-    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, class_var_name, ordinal_mapping, i_fold)
+    df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold)
     # Proceed with training
-    return train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel)
+    return train_ckde_and_get_results(df_train, df_test, bandwidth=bandwidth, kernel=kernel, outliers=outliers)
 
 
 ################
@@ -365,7 +366,7 @@ def cross_validate_ckde(dataset: pd.DataFrame, kfold_object: KFold, bandwidth: f
     return [cv_results_summary[i] for i in cv_results_summary.keys()] + [{"bandwidth": bandwidth, "kernel": kernel}]
 
 
-def grid_search_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict, previous_best=None):
+def grid_search_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict, previous_best=None, parallelize=False):
     best_bandwidth = None
     best_kernel = None
     best_logl = -np.inf
@@ -374,7 +375,7 @@ def grid_search_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: di
         best_bandwidth = previous_best["bandwidth"]
         best_kernel = previous_best["kernel"]
     for bandwidth, kernel in product(param_space["bandwidth"], param_space["kernel"]):
-        metrics = cross_validate_ckde(dataset, kfold_object, bandwidth=bandwidth, kernel=kernel)
+        metrics = cross_validate_ckde(dataset, kfold_object, bandwidth=bandwidth, kernel=kernel, parallelize=parallelize)
         # Get the mean_logl
         mean_logl = metrics[0]
         if mean_logl > best_logl:
@@ -384,7 +385,7 @@ def grid_search_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: di
     return best_logl, best_bandwidth, best_kernel
 
 
-def get_best_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict = None):
+def get_best_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict = None, parallelize=False):
     # Param space is a grid of parameters. Instead of Bayesian optimization, we will use a grid search
     if param_space is None:
         param_space_gauss = {"bandwidth": np.logspace(-1, 0, num=10),
@@ -392,7 +393,7 @@ def get_best_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict 
         param_space_linear = {"bandwidth": np.logspace(0, 1, num=10),
                               "kernel": ["epanechnikov", "linear"]}
         best_logl, best_bandwidth, best_kernel = grid_search_ckde(dataset, kfold_object,
-                                                                  param_space_gauss)
+                                                                  param_space_gauss, parallelize=parallelize)
         '''_, best_bandwidth, best_kernel = grid_search_ckde(dataset, kf,
                                                           param_space_linear,
                                                           previous_best={
@@ -481,8 +482,8 @@ if __name__ == "__main__":
         # Load the dataset and preprocess it
         dataset_oml = get_data(dataset_id)
         dataset_oml, scaler = preprocess_data(dataset_oml, standardize=True, eliminate_outliers=ELIM_OUTL,
-                                      min_unique_vals=min_unique_vals,
-                                      max_instances=50000, max_cum_values=max_cum_values)
+                                              min_unique_vals=min_unique_vals,
+                                              max_instances=50000, max_cum_values=max_cum_values)
         # Pickle the scaler
         pickle.dump(scaler, open(directory_path + "scaler_" + str(dataset_id) + ".pkl", "wb"))
 
@@ -512,7 +513,7 @@ if __name__ == "__main__":
         print()
 
         # First, learn a KDE serving as ground truth flow and sample new synthetic data
-        gt_model, metrics_ckde, result = get_best_ckde(dataset_oml, kf)
+        gt_model, metrics_ckde, result = get_best_ckde(dataset_oml, kf, parallelize=args.parallelize)
         results_df["GT_RD"] = metrics_ckde
 
         pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))

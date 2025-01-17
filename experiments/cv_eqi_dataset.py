@@ -218,6 +218,8 @@ if __name__ == "__main__":
     y_train = data_train_scaled[class_var_name]
 
     if args.graphical:
+        n_features = len(data_train.columns) - 1
+        n_final_features = 0
         color_palette = {"0": "red", "1": "blue", "2": "green", "3": "orange", "4": "purple",
                          "5": "olive", "6": "cyan"}
 
@@ -235,12 +237,17 @@ if __name__ == "__main__":
         for features_16 in range(0, len(data_train.columns[:-1]), 16):
             fig, axs = plt.subplots(4, 4, figsize=(20, 20))
             for i, feature in enumerate(data_train.columns[features_16:features_16 + 16]):
-                if data_train[feature].nunique() < 20 and np.sort(np.histogram(data_train[feature], bins=100)[0])[-3:].sum() > len(data_train) * 0.95:
-                    axs[i // 4, i % 4].hist(data_train[feature], bins=100, color="red", alpha=0.5)
+                if data_train[feature].nunique() < 20 or np.sort(np.histogram(data_train[feature], bins=100)[0])[-3:].sum() > len(data_train) * 0.95:
+                    axs[i // 4, i % 4].hist(data_train[feature], bins=100, color="red")
+                elif data_train[feature].nunique() < 20 or np.sort(np.histogram(data_train[feature], bins=100)[0])[-3:].sum() > len(data_train) * 0.90:
+                    axs[i // 4, i % 4].hist(data_train[feature], bins=100, color="orange")
+
                 else :
-                    axs[i // 4, i % 4].hist(data_train[feature], bins=100, alpha=0.5, color = "green")
+                    axs[i // 4, i % 4].hist(data_train[feature], bins=100, color = "green")
+                    n_final_features += 1
                 axs[i // 4, i % 4].set_title(feature)
             plt.show()
+        print(f"Initial features: {n_features}, final features: {n_final_features}")
         raise Exception("Graphical mode finished")
 
     # Create a fold object

@@ -61,7 +61,7 @@ def preprocess_data(data: pd.DataFrame | np.ndarray,  eliminate_outliers=np.inf,
     scaler = None
     if standardize:
         scaler = StandardScaler()
-        data[data.columns[:-1]] = scaler.transform(data[data.columns[:-1]].values)
+        data[data.columns[:-1]] = scaler.fit_transform(data[data.columns[:-1]].values)
     # Assert that there are no missing values
     if data.isnull().values.any():
         raise ValueError("There are missing values in the post-processed dataset.")
