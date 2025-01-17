@@ -512,7 +512,9 @@ if __name__ == "__main__":
         results_df["GT_RD"] = metrics_ckde
 
         pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
-        resampled_dataset = gt_model.sample(np.min((len(dataset_oml), 50000)), seed=0)
+        n_resampled_lower = np.max((len(dataset_oml), 15000))
+        n_resampled = np.min((n_resampled_lower, 50000))
+        resampled_dataset = gt_model.sample(n_resampled, seed=0)
         resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
 
         if args.part == 'rd':
