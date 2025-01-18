@@ -17,11 +17,7 @@ from experiments.experiment_cv import get_best_normalizing_flow
 
 class_var_name = "EQI"
 
-def read_eqi_dataset(to_del=None):
-    if to_del is None:
-        # Hard coded columns to remove. They are ordinal and have a very low number of unique values:
-        to_del = ["Radon", "W_ETHYLBENZ_ln", "W_HG_ln"]
-
+def read_eqi_dataset(delete_features = True):
     # Import EQI dataset
     data_eqi = pd.read_csv("datasets/EQI_2010/2006_2010_EQI_clean.csv", index_col=0)
     data_eqi = data_eqi.drop(columns=["State", "County_Name", "cat_RUCC"])
@@ -43,8 +39,27 @@ def read_eqi_dataset(to_del=None):
     # Load the rest of the features
     data_features = pd.read_csv("datasets/EQI_2010/PCA_Input_Variables.csv", index_col=0)
 
-    # Delete the columns that are not needed
+    # Save the name of the metadata features.
+    metadata_features = list(data_features.columns[:3])
+
+    # Store the data separately, for the moment
+    data_tmp = data_features.drop(columns=metadata_features)
+
+    # Set data to float
+    data_tmp = data_tmp.astype(float)
+
+    to_del = []
+    # If we want to delete the features, then preprocess as usual
+    if delete_features:
+        data_features_norm = data_tmp
+        data_features_norm[:] = StandardScaler().fit_transform(data_features_norm)
+        for i, col in enumerate(data_features_norm.columns):
+            if data_features_norm[col].nunique() < 20 or np.sort(np.histogram(data_features_norm[col], bins=100)[0])[-3:].sum() > len(data_features) * 0.9:
+                to_del.append(col)
+
     data_features = data_features.drop(columns=to_del)
+
+    # After the deletion, store the data features
     features = list(data_features.columns[3:])
 
     # Join features and eqi
@@ -52,12 +67,10 @@ def read_eqi_dataset(to_del=None):
     # Drop rows with nans
     data = data.dropna()
 
-    # Convert the necessary features
-    data["Med_HH_Value"] = data["Med_HH_Value"].astype(float)
-
-    # Save metadata and delete the selected features
-    data_metadata = data[["State", "County_Name", "cat_RUCC"]]
-    data = data.drop(columns=["State", "County_Name", "cat_RUCC"])
+    # Save metadata and delete it from the actual data. Cast it to float (except the class, last column)
+    data_metadata = data[metadata_features]
+    data = data.drop(columns=metadata_features) # or data = data[features+eqis]
+    data[data.columns[:-1]] = data[data.columns[:-1]].astype(float)
 
     # Create the variable dictionary. Load the corresponding file
     variable_description = pd.read_csv("datasets/EQI_2010/Data Dictionary Variables EQI 2006_2010.csv", sep=";")
@@ -185,7 +198,7 @@ if __name__ == "__main__":
         n_folds = 2
         max_indegree = 1
 
-    data, data_metadata, var_types, features, eqis = read_eqi_dataset()
+    data, data_metadata, var_types, features, eqis = read_eqi_dataset(delete_features=True)
     whitelist, blacklist = get_bn_restrictions(features, eqis, var_types)
 
     data_train, data_test = train_test_split(data, test_size=0.2, random_state=0)
@@ -260,7 +273,6 @@ if __name__ == "__main__":
     param_space_nf = [
         Real(1e-4, 5e-3, name='lr'),
         Real(1e-4, 1e-2, name='weight_decay'),
-        Integer(2, 16, name='count_bins'),
         Integer(2, 10, name='hidden_units'),
         Integer(1, 5, name='layers'),
         Integer(1, 10, name='n_flows'),
