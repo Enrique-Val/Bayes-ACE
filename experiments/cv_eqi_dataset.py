@@ -112,12 +112,9 @@ def get_bn_restrictions(features, eqis, var_types):
     return whitelist, blacklist
 
 
-def cross_validate_restricted_bn(dataset, max_indegree=0, blacklist=None, whitelist=None, hc_seed=None,
-                                 kfold_object=None):
-    if blacklist is None:
-        blacklist = []
-    if whitelist is None:
-        whitelist = []
+def cross_validate_restricted_bn(dataset, kfold_object=None, training_params= None):
+    if training_params is None:
+        training_params = {}
     if kfold_object is None:
         kfold_object = KFold(n_splits=10)
     fold_indices = list(kfold_object.split(dataset))
@@ -138,8 +135,7 @@ def cross_validate_restricted_bn(dataset, max_indegree=0, blacklist=None, whitel
         t0 = time.time()
         network = BayesianNetworkClassifier(network_type="CLG")
         network.fit(X_train, y_train, initial_structure="empty",
-                    training_params={"max_indegree": max_indegree, "whitelist": whitelist,
-                                     "blacklist": blacklist, "seed": hc_seed})
+                    training_params=training_params)
         time_i = time.time() - t0
         X_val = df_val.drop(class_var_name, axis=1)
         y_val = df_val[class_var_name]
@@ -254,37 +250,31 @@ if __name__ == "__main__":
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=0)
 
     # Learn the restricted BN with only max_indegree parents per node
+    training_params = {"max_indegree": max_indegree, "arc_whitelist": whitelist,
+                       "arc_blacklist": blacklist, "seed": 0, "score": "bic"}
     bn_restricted_lim_arcs = BayesianNetworkClassifier(network_type="CLG")
     bn_restricted_lim_arcs.fit(X_train, y_train, initial_structure="empty",
-                training_params={"max_indegree": max_indegree, "whitelist": whitelist,
-                                 "blacklist": blacklist, "seed": 0})
-    metrics_restricted_lim_arcs = cross_validate_restricted_bn(data_train, max_indegree=max_indegree,
-                                                               blacklist=blacklist,
-                                                               whitelist=whitelist,
-                                                               hc_seed=0,
-                                                               kfold_object=kf)
+                               training_params=training_params)
+    metrics_restricted_lim_arcs = cross_validate_restricted_bn(data_train, kfold_object=kf,
+                                                               training_params=training_params)
     print("Restricted BN learned with limited arcs learned")
 
     if not DUMMY:
         # Learn the restricted BN
+        training_params = {"arc_whitelist": whitelist, "arc_blacklist": blacklist, "seed": 0, "score": "bic"}
         bn_restricted = BayesianNetworkClassifier(network_type="CLG")
-        bn_restricted.fit(X_train, y_train, initial_structure="empty",
-                    training_params={"max_indegree": 0, "whitelist": whitelist,
-                                     "blacklist": blacklist, "seed": 0})
-        metrics_restricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=blacklist,
-                                                          whitelist=whitelist,
-                                                          hc_seed=0,
-                                                          kfold_object=kf)
+        bn_restricted.fit(X_train, y_train, initial_structure="empty", training_params=training_params)
+        metrics_restricted = cross_validate_restricted_bn(data_train, kfold_object=kf, training_params=training_params)
         print("Restricted BN learned")
 
+        # Learn the unrestricted BN
+        training_params = {"seed": 0, "score": "bic"}
         bn = BayesianNetworkClassifier(network_type="CLG")
-        bn.fit(X_train, y_train, initial_structure="empty",
-                    training_params={"seed": 0})
-        metrics_unrestricted = cross_validate_restricted_bn(data_train, max_indegree=0, blacklist=[], whitelist=[],
-                                                            hc_seed=0, kfold_object=kf)
+        bn.fit(X_train, y_train, initial_structure="empty", training_params=training_params)
+        metrics_unrestricted = cross_validate_restricted_bn(data_train, kfold_object=kf, training_params=training_params)
         print("Unrestricted BN learned")
 
-    best_nf, metrics, result_gp = get_best_normalizing_flow(data_train_scaled, kf=kf, n_iter=args.n_iter,
+    best_nf, metrics, result_gp = get_best_normalizing_flow(data_train_scaled, kfold_object=kf, n_iter=args.n_iter,
                                                             nn_params_fixed=nn_params_fixed,
                                                             model_type="NVP",
                                                             parallelize=args.parallelize, working_dir=args.dir_name,
