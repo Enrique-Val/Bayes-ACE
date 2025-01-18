@@ -173,24 +173,6 @@ if __name__ == "__main__":
     if not os.path.exists(args.dir_name):
         os.makedirs(args.dir_name)
 
-    # Hard coded params of the second round
-    param_space = [
-        Real(5e-5, 5e-4, name='lr'),
-        Real(1e-4, 1, name='weight_decay'),
-        Integer(2, 5, name='hidden_units'),
-        Integer(1, 5, name='layers'),
-        Integer(1, 8, name='n_flows'),
-        Real(0.1, 0.5, name='sam_noise', prior='log-uniform')
-    ]
-    '''# Hard coded params of the first round
-    param_space = [
-        Real(1e-4, 1e-3, name='lr'),
-        Real(1e-4, 1e-2, name='weight_decay'),
-        Integer(2, 5, name='hidden_units'),
-        Integer(1, 3, name='layers'),
-        Integer(1, 5, name='n_flows'),
-        Real(0.05, 0.4, name='sam_noise', prior='log-uniform')
-    ]'''
     nn_params_fixed = {"steps": 500, "batch_size": 256}
     n_folds = 10
     max_indegree = 3
@@ -274,11 +256,22 @@ if __name__ == "__main__":
         metrics_unrestricted = cross_validate_restricted_bn(data_train, kfold_object=kf, training_params=training_params)
         print("Unrestricted BN learned")
 
+    # Hard code parameter space
+    param_space_nf = [
+        Real(1e-4, 5e-3, name='lr'),
+        Real(1e-4, 1e-2, name='weight_decay'),
+        Integer(2, 16, name='count_bins'),
+        Integer(2, 10, name='hidden_units'),
+        Integer(1, 5, name='layers'),
+        Integer(1, 10, name='n_flows'),
+        Real(0.01, 0.3, name='sam_noise', prior='log-uniform')
+    ]
+
     best_nf, metrics, result_gp = get_best_normalizing_flow(data_train_scaled, kfold_object=kf, n_iter=args.n_iter,
                                                             nn_params_fixed=nn_params_fixed,
                                                             model_type="NVP",
                                                             parallelize=args.parallelize, working_dir=args.dir_name,
-                                                            param_space=param_space)
+                                                            param_space=param_space_nf)
 
     # Pop some params to not print/store them
     metrics[-1].pop("perms_instantiation")
