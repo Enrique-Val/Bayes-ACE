@@ -38,7 +38,6 @@ def weights_init(m, scale=1.0):
 class ConditionalNormalizingFlow(nn.Module):
     def __init__(self, input_dim=2, split_dim=1, context_dim=1, hidden_dim=128, num_layers=1, flow_length=10,
                  use_cuda=False, perms_instantiation = None):
-        print("Split_dim", split_dim)
         super(ConditionalNormalizingFlow, self).__init__()
         self.base_dist = dist.Normal(torch.zeros(input_dim),
                                      torch.ones(input_dim))  # base distribution is Isotropic Gaussian

@@ -121,7 +121,7 @@ class BayesACE(ACE):
 
             # Get likelihood and probability of the class
             logl = self.density_estimator.logl(candidate_initial.drop(self.class_var_name, axis=1), y = None)
-            post_prob = self.density_estimator.posterior_probability(candidate_initial, target_label)
+            post_prob = self.density_estimator.posterior_probability(candidate_initial.drop(self.class_var_name,axis=1), target_label)
 
             mask = (logl > self.log_likelihood_threshold) & (post_prob > self.posterior_probability_threshold)
             candidate_initial = candidate_initial[mask].reset_index(drop=True)
@@ -236,7 +236,8 @@ class BayesACE(ACE):
             return self.create_ACEResult(instance, res.X)
 
     def create_ACEResult(self, instance: pd.DataFrame, cfx: np.ndarray):
-        total_path = np.resize(np.append(separate_dataset_and_class(instance)[0].values[0], cfx),
+        instance_X = instance.drop(self.class_var_name, axis=1)
+        total_path = np.resize(np.append(instance_X.values[0], cfx),
                                new_shape=(self.n_vertex + 2, self.n_features))
         path_to_ret = pd.DataFrame(data=total_path,
                                    columns=self.features)

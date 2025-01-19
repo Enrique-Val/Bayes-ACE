@@ -25,19 +25,22 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
     df_train = pd.read_csv(results_cv_dir + 'resampled_data' + str(dataset_id) + '.csv',
                            index_col=0)
+    class_var_name = df_train.columns[-1]
     # Transform the class into a categorical variable
-    class_processed = df_train[df_train.columns[-1]].astype('string').astype('category')
-    df_train = df_train.drop(df_train.columns[-1], axis=1)
-    df_train["class"] = class_processed
+    class_processed = df_train[class_var_name].astype('string').astype('category')
+    df_train = df_train.drop(class_var_name, axis=1)
+    df_train[class_var_name] = class_processed
 
     # Load the pickled gt density estimator from the correct folder
     gt_estimator_path = results_cv_dir + 'gt_nf_' + str(dataset_id) + '.pkl'
     gt_estimator: ConditionalNF = pickle.load(
         open(gt_estimator_path, 'rb'))
 
+    assert class_var_name == gt_estimator.get_class_var_name(), "Class variable name does not match"
+
     # Generate a test sample
     torch.manual_seed(0)
-    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0).to_pandas()
+    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0)
 
     # Open the Bayesian network (conditional linear Gaussian)
     clg_network_path = results_cv_dir + 'clg_' + str(dataset_id) + '.pkl'
@@ -57,12 +60,13 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 def get_constraints(df_train, df_counterfactuals, gt_estimator: ConditionalNF, eps=0.01):
     assert eps >= 0, "Epsilon must be greater or equal to 0"
     df_total = pd.concat([df_train, df_counterfactuals]).reset_index(drop=True)
-    xl = df_total.drop(columns=['class']).min().values - eps
-    xu = df_total.drop(columns=['class']).max().values + eps
+    class_var_name = gt_estimator.get_class_var_name()
+    xl = df_total.drop(columns=[class_var_name]).min().values - eps
+    xu = df_total.drop(columns=[class_var_name]).max().values + eps
     sampling_range = (xl, xu)
 
-    X = df_total.drop(columns=['class'])
-    y = df_total['class']
+    X = df_total.drop(columns=[class_var_name])
+    y = df_total[class_var_name]
     logl_train_with_class = gt_estimator.logl(X, y)
     logl_train_without_class = gt_estimator.logl(X)
     post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
@@ -71,8 +75,11 @@ def get_constraints(df_train, df_counterfactuals, gt_estimator: ConditionalNF, e
 
 
 def check_enough_instances(df_train, gt_estimator: ConditionalDE, likelihood_threshold, post_prob_threshold, min_instances=50):
-    logl_train_with_class = gt_estimator.logl(df_train)
-    logl_train_without_class = gt_estimator.logl(df_train.drop(columns="class"))
+    class_var_name = gt_estimator.get_class_var_name()
+    X_train = df_train.drop(columns=class_var_name)
+    y_train = df_train[class_var_name]
+    logl_train_with_class = gt_estimator.logl(X_train, y_train)
+    logl_train_without_class = gt_estimator.logl(X_train)
     post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
     is_plausible = logl_train_without_class > likelihood_threshold
     is_accurate = post_prob_train > post_prob_threshold
@@ -83,7 +90,8 @@ def check_enough_instances(df_train, gt_estimator: ConditionalDE, likelihood_thr
 
 def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator: ConditionalDE, penalty, chunks, l0_epsilon=0.1):
     print("Instance", instance.index[0])
-    target_label = get_other_class(instance["class"].cat.categories, instance["class"].values[0])
+    class_var_name = gt_estimator.get_class_var_name()
+    target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
     t0 = time.time()
     result: list[ACEResult] | ACEResult = algorithm.run(instance, target_label=target_label)
     tf = time.time() - t0
@@ -112,7 +120,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
         real_logl = gt_estimator.logl(cfx_df)
         real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
-        path_l2 = np.linalg.norm(cfx_array - instance.drop(columns="class").values.flatten(), axis=1)
+        path_l2 = np.linalg.norm(cfx_array - instance.drop(columns=class_var_name).values.flatten(), axis=1)
         return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp
     elif isinstance(result, ACEResult):
         if result.counterfactual is None:
@@ -125,7 +133,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         cfx_df = pd.DataFrame([result.counterfactual.values], columns=instance.columns[:-1])
         real_logl = gt_estimator.logl(cfx_df)
         real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
-        path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns="class").values.flatten())
+        path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns=class_var_name).values.flatten())
         path_l0 = total_l0_path(result.path.values, l0_epsilon)
         print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)
         return path_length_gt, path_l0, path_l2, tf, result.counterfactual.values, real_logl, real_pp

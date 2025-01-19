@@ -92,7 +92,7 @@ def remove_outliers_median(data: pd.DataFrame, perc_outliers: float, reset_index
     median = data[numeric_columns].median()
     # Delete the n_outliers. The ones that are furthest (euclidean distance)
     distances = np.sqrt(np.sum((data[numeric_columns] - median) ** 2, axis=1))
-    data = data[distances.nsmallest(len(data) - n_outliers).index]
+    data = data.loc[distances.nsmallest(len(data) - n_outliers).index]
     if reset_index:
         data = data.reset_index(drop=True)
     return data

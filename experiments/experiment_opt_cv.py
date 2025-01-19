@@ -8,9 +8,8 @@ import argparse
 
 import time
 
-import pandas as pd
 import torch
-from pymoo.algorithms.moo.nsga2 import NSGA2, binary_tournament
+from pymoo.algorithms.moo.nsga2 import binary_tournament
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
 from pymoo.operators.selection.rnd import RandomSelection
@@ -23,44 +22,36 @@ from experiments.utils import setup_experiment, get_constraints, check_enough_in
 
 
 # Worker function for parallelization
-def worker(instance: pd.DataFrame, density_estimator_path: str, gt_estimator_path: str, penalty: int,
-           n_vertices: int, ace_params: dict):
+def worker(instance: pd.DataFrame, density_estimator_path: str, penalty: int,
+           list_vertices: list[int], ace_params: dict):
     torch.set_num_threads(1)
     density_estimator = pickle.load(open(density_estimator_path, 'rb'))
-    gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
-    return get_counterfactuals(instance, density_estimator, gt_estimator, penalty, n_vertices, ace_params)
+    return get_counterfactuals(instance, density_estimator, penalty, list_vertices, ace_params)
 
 
-def get_counterfactuals(instance: pd.DataFrame, density_estimator: ConditionalDE, gt_estimator: ConditionalDE,
+def get_counterfactuals(instance: pd.DataFrame, density_estimator: ConditionalDE,
                         penalty: int,
-                        n_vertices: int, ace_params: dict):
+                        vertices_list: list[int], ace_params: dict):
     class_var_name = density_estimator.get_class_var_name()
-    distances = np.zeros(n_vertices)
-    times = np.zeros(n_vertices)
-    for n_vertex in range(n_vertices):
+    distances = np.zeros(len(vertices_list))
+    times = np.zeros(len(vertices_list))
+    for i,vertices in enumerate(vertices_list):
         target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
         t0 = time.time()
-        print("Vertices:", n_vertex)
+        print("Vertices:", vertices)
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
-                       n_vertex=n_vertex + 1,
-                       **ace_params,
-                       generations=1000, parallelize=False)
+                       n_vertex=vertices,
+                       **ace_params, parallelize=False, penalty=penalty)
         result = alg.run(instance, target_label=target_label)
         tf = time.time() - t0
         if result.counterfactual is None:
-            distances[n_vertex] = np.nan
-            times[n_vertex] = tf
+            distances[i] = np.nan
+            times[i] = tf
         else:
-            path_to_compute = path(result.path.values, chunks=chunks)
-            pll = path_likelihood_length(
-                pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
-                density_estimator=gt_estimator, penalty=penalty)
-            if pll == np.inf:
-                warnings.warn("Path length over ground truth is infinite for instance " + str(instance.index[0]) + ", "
-                              + str(n_vertex) + " vertices, penalty of " + str(penalty) + "and estimator " + str(
-                    type(density_estimator)))
-            distances[n_vertex] = pll
-            times[n_vertex] = tf
+            if np.isnan(result.distance):
+                raise ValueError("Distance is not a number")
+            distances[i] = result.distance
+            times[i] = tf
     return distances, times
 
 
@@ -69,7 +60,7 @@ if __name__ == "__main__":
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     likelihood_threshold_sigma = -0.5
     post_prob_threshold_sigma = -0.5
-    n_vertices = 2
+    vertices_list = [0,1]
     penalties = [1, 5]
     # Number of points for approximating integrals:
     chunks = 20
@@ -77,10 +68,10 @@ if __name__ == "__main__":
     n_counterfactuals = 20
 
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=-1, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=44089, type=int)
     parser.add_argument('--model', nargs='?', default='nf', type=str, choices=['nf', 'clg', 'gt'])
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
+    parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv/', type=str)
     parser.add_argument('--results_dir', nargs='?', default='./results/exp_opt_cv/', type=str)
     args = parser.parse_args()
 
@@ -88,12 +79,30 @@ if __name__ == "__main__":
     dataset_id = args.dataset_id
     parallelize = args.parallelize
 
+    # Some hard-coded parameters
+    generations = 1000
+    pop_size = 100
+    param_grid = {
+        'eta_crossover': [10, 15, 20],  # Example range for crossover eta
+        'eta_mutation': [10, 20, 30],  # Example range for mutation eta
+        'selection_type': ["tourn", "ran"]  # Example range for selection type
+        # Types of selection methods
+    }
+
+
     DUMMY = False
     if DUMMY:
         chunks = 2
-        n_counterfactuals = 2
+        n_counterfactuals = 1
         penalties = [1]
-        n_vertices = 1
+        vertices_list = [0]
+        generations = 2
+        pop_size = 10
+        param_grid = {
+            'eta_crossover': [10],  # Example range for crossover eta
+            'eta_mutation': [10,20],  # Example range for mutation eta
+            'selection_type': ["tourn"]  # Example range for selection type
+        }
 
     random.seed(0)
 
@@ -107,6 +116,7 @@ if __name__ == "__main__":
     post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt, 0.99)
     # Check if there are instances with this threshold in the training set
     check_enough_instances(df_train, gt_estimator, log_likelihood_threshold, post_prob_threshold)
+    print("Enough instances found. Running experiment.")
 
     if model_str == 'nf':
         density_estimator_path = nf_path
@@ -117,17 +127,13 @@ if __name__ == "__main__":
     elif model_str == 'gt':
         density_estimator_path = gt_estimator_path
         density_estimator = gt_estimator
+    else:
+        raise ValueError("Model not found")
 
-    param_grid = {
-        'eta_crossover': [10, 15, 20],  # Example range for crossover eta
-        'eta_mutation': [10, 20, 30],  # Example range for mutation eta
-        'selection_type': ["tourn", "ran"]  # Example range for selection type
-        # Types of selection methods
-    }
     param_combinations = ParameterGrid(param_grid)
 
     results_df = pd.DataFrame(columns=[str(params) for params in param_combinations],
-                              index=range(n_counterfactuals * len(penalties) * n_vertices))
+                              index=range(n_counterfactuals * len(penalties) * len(vertices_list)))
 
     for params in param_combinations:
         print("Running with parameters: " + str(params) + " in model " + model_str)
@@ -135,20 +141,21 @@ if __name__ == "__main__":
         ace_params = {"posterior_probability_threshold": post_prob_threshold,
                       "log_likelihood_threshold": log_likelihood_threshold, "chunks": chunks,
                       "sampling_range": sampling_range, "opt_algorithm_params": {
-                "pop_size": 100,
+                "pop_size": pop_size,
                 "crossover": SBX(eta=params["eta_crossover"]),
                 "mutation": PM(eta=params["eta_mutation"]),
-                "selection": TournamentSelection(func_comp=binary_tournament) if params["selection_type"] == "tourn" else RandomSelection()}}
+                "selection": TournamentSelection(func_comp=binary_tournament) if params["selection_type"] == "tourn" else RandomSelection()},
+                      "generations": generations}
         distances = []
         for penalty in penalties:
             print("Running with parameters: " + str(params) + "      Penalty " + str(penalty))
             # Result storage
-            distances_mat = np.zeros((n_counterfactuals, n_vertices))
+            distances_mat = np.zeros((n_counterfactuals, len(vertices_list)))
             if parallelize:
                 pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
                 results = pool.starmap(worker,
-                                       [(df_counterfactuals.iloc[[i]], gt_estimator_path, gt_estimator_path,
-                                         penalty, n_vertices, ace_params) for i in
+                                       [(df_counterfactuals.iloc[[i]], gt_estimator_path,
+                                         penalty, vertices_list, ace_params) for i in
                                         range(n_counterfactuals)])
                 pool.close()
                 pool.join()
@@ -158,8 +165,8 @@ if __name__ == "__main__":
             else:
                 for i in range(n_counterfactuals):
                     instance = df_counterfactuals.iloc[[i]]
-                    distances_mat[i], _ = get_counterfactuals(instance, density_estimator, gt_estimator,
-                                                              penalty, n_vertices, ace_params)
+                    distances_mat[i], _ = get_counterfactuals(instance, density_estimator,
+                                                              penalty, vertices_list, ace_params)
             distances_pen = distances_mat.flatten()
             distances.append(distances_pen)
         distances = np.concatenate(distances)
@@ -169,3 +176,6 @@ if __name__ == "__main__":
         if not os.path.exists(results_dir):
             os.makedirs(results_dir)
         results_df.to_csv(os.path.join(results_dir, 'results_data' + str(dataset_id) + '_' + model_str + '.csv'))
+    else :
+        print("Results")
+        print(results_df)

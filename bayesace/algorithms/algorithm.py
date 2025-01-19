@@ -59,7 +59,7 @@ class ACE(Algorithm):
 
     @abstractmethod
     def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
-        assert (instance["class"].values[0] != target_label)
+        assert (instance[self.class_var_name].values[0] != target_label)
         return ACEResult(None, pd.DataFrame(), np.nan)
 
     def set_log_likelihood_threshold(self, log_likelihood_threshold):
