@@ -180,7 +180,7 @@ def cross_validate_nf(dataset: pd.DataFrame, kfold_object: KFold, model_type="NV
     elif parallelize:
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
         column_names = dataset.columns.tolist()
-        pool = mp.Pool(min(mp.cpu_count() - 1, k))
+        pool = mp.Pool(min(mp.cpu_count() - 1, kfold_object.n_splits))
         # Use starmap with the shared memory array and other needed parameters
         cv_iter_results = pool.starmap(worker_nf,
                                        [(shm.name, shared_array.shape, shared_array.dtype, column_names,
@@ -219,7 +219,7 @@ def cross_validate_nf(dataset: pd.DataFrame, kfold_object: KFold, model_type="NV
                           "Time_mean": np.mean(cv_results["Time"]), "Time_std": np.std(cv_results["Time"])}
     print(cv_results_summary)
     print()
-    return [cv_results_summary[i] for i in cv_results_summary.keys()] + [nn_params]
+    return [cv_results_summary[i] for i in cv_results_summary.keys()] + [nn_params_copy]
 
 
 def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter: int = 100, nn_params_fixed: dict = None,
@@ -340,7 +340,7 @@ def cross_validate_ckde(dataset: pd.DataFrame, kfold_object: KFold, bandwidth: f
     elif parallelize:
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
         column_names = dataset.columns.tolist()
-        pool = mp.Pool(min(mp.cpu_count() - 1, k))
+        pool = mp.Pool(min(mp.cpu_count() - 1, kfold_object.n_splits))
         cv_iter_results = pool.starmap(worker_ckde,
                                        [(shm.name, shared_array.shape, shared_array.dtype, column_names,
                                          ordinal_mapping, i_fold, bandwidth, kernel, outliers)
@@ -574,7 +574,7 @@ if __name__ == "__main__":
         pickle.dump(bn, open(directory_path + "clg_" + str(dataset_id) + ".pkl", "wb"))
 
         # Validate normalizing flow with different params. Specify also the fixed params
-        nn_params_fixed = {"splt_dim": d//2, "batch_size": batch_size, "steps": steps, "working_dir": directory_path}
+        nn_params_fixed = {"split_dim": d//2, "batch_size": batch_size, "steps": steps, "working_dir": directory_path}
 
         nf_model, metrics_nf, result = get_best_normalizing_flow(resampled_dataset, kf, model_type=args.type,
                                                                  n_iter=args.n_iter, nn_params_fixed=nn_params_fixed,

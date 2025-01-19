@@ -38,6 +38,7 @@ def weights_init(m, scale=1.0):
 class ConditionalNormalizingFlow(nn.Module):
     def __init__(self, input_dim=2, split_dim=1, context_dim=1, hidden_dim=128, num_layers=1, flow_length=10,
                  use_cuda=False, perms_instantiation = None):
+        print("Split_dim", split_dim)
         super(ConditionalNormalizingFlow, self).__init__()
         self.base_dist = dist.Normal(torch.zeros(input_dim),
                                      torch.ones(input_dim))  # base distribution is Isotropic Gaussian
@@ -331,7 +332,7 @@ class ConditionalNVP(ConditionalNF):
         state_dict = state['module_state_dict']
         del state['module_state_dict']
         self.__dict__.update(state)
-        self.dist_x_given_class = ConditionalNormalizingFlow(input_dim=self.input_dim, split_dim=self.split_dim, hidden_dim=self.hidden_units, num_layers=self.layers, flow_length=self.n_flows, perms_instantiation=self.perms_instantiation)
+        self.dist_x_given_class = ConditionalNormalizingFlow(input_dim=self.n_dims, split_dim=self.split_dim, hidden_dim=self.hidden_units, num_layers=self.layers, flow_length=self.n_flows, perms_instantiation=self.perms_instantiation)
         self.dist_x_given_class.load_state_dict(state_dict)
         # Restore the other attributes
 
