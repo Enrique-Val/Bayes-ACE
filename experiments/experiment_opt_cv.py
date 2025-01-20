@@ -22,7 +22,7 @@ from experiments.utils import setup_experiment, get_constraints, check_enough_in
 
 
 # Worker function for parallelization
-def worker(instance: pd.DataFrame, density_estimator_path: str, penalty: int,
+def worker(instance: pd.DataFrame, density_estimator_path: str, penalty: float,
            list_vertices: list[int], ace_params: dict):
     torch.set_num_threads(1)
     density_estimator = pickle.load(open(density_estimator_path, 'rb'))
@@ -30,7 +30,7 @@ def worker(instance: pd.DataFrame, density_estimator_path: str, penalty: int,
 
 
 def get_counterfactuals(instance: pd.DataFrame, density_estimator: ConditionalDE,
-                        penalty: int,
+                        penalty: float,
                         vertices_list: list[int], ace_params: dict):
     class_var_name = density_estimator.get_class_var_name()
     distances = np.zeros(len(vertices_list))
@@ -60,12 +60,12 @@ if __name__ == "__main__":
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     likelihood_threshold_sigma = -0.5
     post_prob_threshold_sigma = -0.5
-    vertices_list = [0,1]
-    penalties = [1, 5]
+    vertices_list = [0,1,2]
+    penalty_range = (1,10)
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
-    n_counterfactuals = 20
+    n_counterfactuals = 30
 
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=44089, type=int)
@@ -93,8 +93,7 @@ if __name__ == "__main__":
     DUMMY = False
     if DUMMY:
         chunks = 2
-        n_counterfactuals = 1
-        penalties = [1]
+        n_counterfactuals = 2
         vertices_list = [0]
         generations = 2
         pop_size = 10
@@ -132,11 +131,16 @@ if __name__ == "__main__":
 
     param_combinations = ParameterGrid(param_grid)
 
-    results_df = pd.DataFrame(columns=[str(params) for params in param_combinations],
-                              index=range(n_counterfactuals * len(penalties) * len(vertices_list)))
+    # Sample n_counterfactuals random penalties
+    penalties = np.random.randint(penalty_range[0], penalty_range[1], n_counterfactuals)
 
+    results_df = pd.DataFrame(columns=[str(params) for params in param_combinations],
+                              index=range(n_counterfactuals * len(vertices_list)))
+
+    # Run the experiment
+    print("Running with model " + model_str + " and dataset " + str(dataset_id))
     for params in param_combinations:
-        print("Running with parameters: " + str(params) + " in model " + model_str)
+        print("Running with parameters: " + str(params))
         # Create dictionary of ace parameters
         ace_params = {"posterior_probability_threshold": post_prob_threshold,
                       "log_likelihood_threshold": log_likelihood_threshold, "chunks": chunks,
@@ -146,31 +150,25 @@ if __name__ == "__main__":
                 "mutation": PM(eta=params["eta_mutation"]),
                 "selection": TournamentSelection(func_comp=binary_tournament) if params["selection_type"] == "tourn" else RandomSelection()},
                       "generations": generations}
-        distances = []
-        for penalty in penalties:
-            print("Running with parameters: " + str(params) + "      Penalty " + str(penalty))
-            # Result storage
-            distances_mat = np.zeros((n_counterfactuals, len(vertices_list)))
-            if parallelize:
-                pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
-                results = pool.starmap(worker,
-                                       [(df_counterfactuals.iloc[[i]], gt_estimator_path,
-                                         penalty, vertices_list, ace_params) for i in
-                                        range(n_counterfactuals)])
-                pool.close()
-                pool.join()
+        # Result storage
+        distances_mat = np.zeros((n_counterfactuals, len(vertices_list)))
+        if parallelize:
+            pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
+            results = pool.starmap(worker,
+                                   [(df_counterfactuals.iloc[[i]], gt_estimator_path,
+                                     penalties[i], vertices_list, ace_params) for i in
+                                    range(n_counterfactuals)])
+            pool.close()
+            pool.join()
 
-                for i in range(n_counterfactuals):
-                    distances_mat[i], _ = results[i]
-            else:
-                for i in range(n_counterfactuals):
-                    instance = df_counterfactuals.iloc[[i]]
-                    distances_mat[i], _ = get_counterfactuals(instance, density_estimator,
-                                                              penalty, vertices_list, ace_params)
-            distances_pen = distances_mat.flatten()
-            distances.append(distances_pen)
-        distances = np.concatenate(distances)
-        results_df[str(params)] = distances
+            for i in range(n_counterfactuals):
+                distances_mat[i], _ = results[i]
+        else:
+            for i in range(n_counterfactuals):
+                instance = df_counterfactuals.iloc[[i]]
+                distances_mat[i], _ = get_counterfactuals(instance, density_estimator,
+                                                          penalties[i], vertices_list, ace_params)
+        results_df[str(params)] = distances_mat.flatten()
 
     if not DUMMY :
         if not os.path.exists(results_dir):
