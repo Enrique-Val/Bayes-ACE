@@ -72,7 +72,6 @@ if __name__ == "__main__":
     parser.add_argument('--model', nargs='?', default='nf', type=str, choices=['nf', 'clg', 'gt'])
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv/', type=str)
-    parser.add_argument('--results_dir', nargs='?', default='./results/exp_opt_cv/', type=str)
     args = parser.parse_args()
 
     model_str: str = args.model
@@ -106,7 +105,7 @@ if __name__ == "__main__":
     random.seed(0)
 
     results_cv_dir = args.cv_dir + str(dataset_id) + '/'
-    results_dir = args.results_dir
+    results_dir = os.path.join(results_cv_dir, "opt_results")
 
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
@@ -170,7 +169,7 @@ if __name__ == "__main__":
                                                           penalties[i], vertices_list, ace_params)
         results_df[str(params)] = distances_mat.flatten()
 
-    if not DUMMY :
+    if not DUMMY:
         if not os.path.exists(results_dir):
             os.makedirs(results_dir)
         results_df.to_csv(os.path.join(results_dir, 'results_data' + str(dataset_id) + '_' + model_str + '.csv'))

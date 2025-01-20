@@ -74,14 +74,14 @@ def get_constraints(df_train, df_counterfactuals, gt_estimator: ConditionalNF, e
     return sampling_range, logl_train_without_class.mean(), logl_train_without_class.std(), post_prob_train.mean(), post_prob_train.std()
 
 
-def check_enough_instances(df_train, gt_estimator: ConditionalDE, likelihood_threshold, post_prob_threshold, min_instances=50):
+def check_enough_instances(df_train, gt_estimator: ConditionalDE, log_likelihood_threshold, post_prob_threshold, min_instances=50):
     class_var_name = gt_estimator.get_class_var_name()
     X_train = df_train.drop(columns=class_var_name)
     y_train = df_train[class_var_name]
     logl_train_with_class = gt_estimator.logl(X_train, y_train)
     logl_train_without_class = gt_estimator.logl(X_train)
     post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
-    is_plausible = logl_train_without_class > likelihood_threshold
+    is_plausible = logl_train_without_class > log_likelihood_threshold
     is_accurate = post_prob_train > post_prob_threshold
     if (is_accurate & is_plausible).sum() < min_instances:
         print("There are not enough instances in the training set that are both accurate and plausible")
