@@ -54,7 +54,7 @@ if __name__ == "__main__" :
     # Create the necessary algorithms for the experiment. All BayesACE models
     algorithms = {}
     for model, vertices, penalty in product(models.keys(), vertices_list, penalty_list):
-        alg = BayesACE(density_estimator=models[model], features=test_data.columns[:-1], n_vertex=vertices,
+        alg = BayesACE(density_estimator=models[model], features=test_data.columns[:-1], n_vertices=vertices,
                        generations=100, opt_algorithm=NSGA2, opt_algorithm_params={"pop_size": 100}, seed=0,
                        penalty=penalty, verbose=True, posterior_probability_threshold=0.90, log_likelihood_threshold=-150,
                        parallelize=False)

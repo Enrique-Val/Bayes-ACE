@@ -15,8 +15,8 @@ n_processes = np.max((1, int(mp.cpu_count() / 1)))
 
 
 # Helper function to encapsulate the parallelization logic
-def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estimator, penalty):
-    vertex_array = np.resize(np.append(x_og, x_i), new_shape=(n_vertex + 2, n_features))
+def process_x_i(x_i, x_og, n_vertices, n_features, chunks, features, density_estimator, penalty):
+    vertex_array = np.resize(np.append(x_og, x_i), new_shape=(n_vertices + 2, n_features))
     paths = path(vertex_array, chunks=chunks)
     f1_i = path_likelihood_length(pd.DataFrame(paths, columns=features),
                                   density_estimator=density_estimator, penalty=penalty)
@@ -26,22 +26,22 @@ def process_x_i(x_i, x_og, n_vertex, n_features, chunks, features, density_estim
 
 
 class BestPathFinder(Problem):
-    def __init__(self, density_estimator: ConditionalDE, instance, target_label, n_vertex=1, penalty=1, chunks=20,
+    def __init__(self, density_estimator: ConditionalDE, instance, target_label, n_vertices=1, penalty=1, chunks=20,
                  log_likelihood_threshold=-np.inf,
                  posterior_probability_threshold=0.05, sampling_range=(-3, 3), parallelize=False, multi_objective=False, **kwargs):
         n_features = (len(instance.columns) - 1)
         xl = None
         xu = None
         if sampling_range is None:
-            xl = np.array([-3] * (n_features * (n_vertex + 1)))
-            xu = np.array([3] * (n_features * (n_vertex + 1)))
+            xl = np.array([-3] * (n_features * (n_vertices + 1)))
+            xu = np.array([3] * (n_features * (n_vertices + 1)))
         else:
-            xl = np.array(list(sampling_range[0]) * (n_vertex + 1))
-            xu = np.array(list(sampling_range[1]) * (n_vertex + 1))
+            xl = np.array(list(sampling_range[0]) * (n_vertices + 1))
+            xu = np.array(list(sampling_range[1]) * (n_vertices + 1))
         n_obj = 1
         if multi_objective:
             n_obj = 3
-        super().__init__(n_var=n_features * (n_vertex + 1),
+        super().__init__(n_var=n_features * (n_vertices + 1),
                          n_obj=n_obj,
                          n_ieq_constr=2,
                          xl=xl,
@@ -51,7 +51,7 @@ class BestPathFinder(Problem):
         self.y_og = instance[self.class_var_name].values[0]
         self.target_label = target_label
         assert self.y_og != self.target_label
-        self.n_vertex = n_vertex
+        self.n_vertices = n_vertices
         self.penalty = penalty
         self.features = instance.drop(self.class_var_name, axis=1).columns
         self.n_features = n_features
@@ -64,16 +64,16 @@ class BestPathFinder(Problem):
         self.multi_objective = multi_objective
 
     def _evaluate(self, x, out, *args, **kwargs):
-        assert len(np.append(self.x_og, x[0])) == (self.n_vertex + 2) * self.n_features
+        assert len(np.append(self.x_og, x[0])) == (self.n_vertices + 2) * self.n_features
         f1 = []
         if self.parallelize:
             with mp.Pool(n_processes) as pool:
                 f1 = pool.starmap(process_x_i,
-                                  [(x_i, self.x_og, self.n_vertex, self.n_features, self.chunks, self.features,
+                                  [(x_i, self.x_og, self.n_vertices, self.n_features, self.chunks, self.features,
                                     self.density_estimator, self.penalty) for x_i in x])
         else:
             for x_i in x:
-                vertex_array = np.resize(np.append(self.x_og, x_i), new_shape=(self.n_vertex + 2, self.n_features))
+                vertex_array = np.resize(np.append(self.x_og, x_i), new_shape=(self.n_vertices + 2, self.n_features))
                 paths = path(vertex_array, chunks=self.chunks)
                 f1_i = path_likelihood_length(pd.DataFrame(paths, columns=self.features),
                                               density_estimator=self.density_estimator, penalty=self.penalty)
@@ -151,28 +151,28 @@ class BayesACE(ACE):
         initial_sample = initial_sample.clip(self.sampling_range[0]+eps, self.sampling_range[1]-eps)
         initial_sample = initial_sample.to_numpy()
 
-        if self.n_vertex == 0:
+        if self.n_vertices == 0:
             return initial_sample
 
         if self.initialization == "random":
-            paths_sample = self.density_estimator.sample(self.n_vertex * self.population_size,
+            paths_sample = self.density_estimator.sample(self.n_vertices * self.population_size,
                                                          seed=self.seed)
             paths_sample = paths_sample.drop(self.class_var_name, axis=1)
             paths_sample = paths_sample.clip(self.sampling_range[0], self.sampling_range[1])
             # new_sample = new_sample[new_sample[self.class_var_name] != y_og].head(self.population_size).reset_index(drop=True)
             path_sample = np.resize(
                 paths_sample.to_numpy(),
-                new_shape=(self.population_size, self.n_vertex * self.n_features))
+                new_shape=(self.population_size, self.n_vertices * self.n_features))
             return np.hstack((path_sample, initial_sample))
         elif self.initialization == "guided":
             paths_sample = []
             for i in initial_sample:
-                paths_sample.append(np.linspace(instance.drop(self.class_var_name, axis=1).values, i, self.n_vertex + 2).flatten())
+                paths_sample.append(np.linspace(instance.drop(self.class_var_name, axis=1).values, i, self.n_vertices + 2).flatten())
             paths_sample = np.array(paths_sample)
             paths_sample = paths_sample[:, self.n_features:]
             return paths_sample
 
-    def __init__(self, density_estimator, features, n_vertex, chunks=20,
+    def __init__(self, density_estimator, features, n_vertices, chunks=20,
                  opt_algorithm: Type[GeneticAlgorithm] = NSGA2,
                  opt_algorithm_params: dict = None,
                  generations: int = 1000,
@@ -188,7 +188,7 @@ class BayesACE(ACE):
         if "pop_size" not in opt_algorithm_params:
             opt_algorithm_params["pop_size"] = 100
         self.population_size = opt_algorithm_params["pop_size"]
-        self.n_vertex = n_vertex
+        self.n_vertices = n_vertices
         self.opt_algorithm = opt_algorithm
         self.opt_algorithm_params = opt_algorithm_params
         self.generations = generations
@@ -209,7 +209,7 @@ class BayesACE(ACE):
             return ACEResult(None, instance.drop(self.class_var_name, axis=1), np.inf)
 
         problem = BestPathFinder(density_estimator=self.density_estimator, instance=instance,
-                                 target_label=target_label, n_vertex=self.n_vertex,
+                                 target_label=target_label, n_vertices=self.n_vertices,
                                  penalty=self.penalty, chunks=self.chunks,
                                  log_likelihood_threshold=self.log_likelihood_threshold,
                                  posterior_probability_threshold=self.posterior_probability_threshold, sampling_range=self.sampling_range, multi_objective=self.multi_objective)
@@ -238,7 +238,7 @@ class BayesACE(ACE):
     def create_ACEResult(self, instance: pd.DataFrame, cfx: np.ndarray):
         instance_X = instance.drop(self.class_var_name, axis=1)
         total_path = np.resize(np.append(instance_X.values[0], cfx),
-                               new_shape=(self.n_vertex + 2, self.n_features))
+                               new_shape=(self.n_vertices + 2, self.n_features))
         path_to_ret = pd.DataFrame(data=total_path,
                                    columns=self.features)
         counterfactual = path_to_ret.iloc[-1]

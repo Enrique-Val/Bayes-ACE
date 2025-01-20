@@ -159,7 +159,7 @@ if __name__ == "__main__":
         for n_vertex in n_vertices:
             t0 = time.time()
             alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
-                           n_vertex=n_vertex,
+                           n_vertices=n_vertex,
                            posterior_probability_threshold=0.00, log_likelihood_threshold=0.00,
                            chunks=chunks, penalty=penalty, sampling_range=sampling_range,
                            initialization="guided",

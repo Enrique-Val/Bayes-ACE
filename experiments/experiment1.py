@@ -6,7 +6,9 @@ import pickle
 
 import argparse
 import time
+from itertools import product
 
+import pandas as pd
 import torch
 from pymoo.algorithms.moo.nsga2 import NSGA2
 
@@ -16,43 +18,34 @@ from experiments.utils import setup_experiment, get_constraints, check_enough_in
 
 
 # Worker function for parallelization
-def worker(instance, density_estimator_path, gt_estimator_path, n_vertices, ace_params):
+def worker(instance: pd.DataFrame, density_estimator_path, gt_estimator_path, n_vertices, ace_params):
     torch.set_num_threads(1)
     density_estimator = pickle.load(open(density_estimator_path, 'rb'))
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
-    return get_counterfactuals(instance, density_estimator, gt_estimator, n_vertices,
-                               ace_params)
+    return get_counterfactual(instance, density_estimator, gt_estimator, n_vertices,
+                              ace_params)
 
 
-def get_counterfactuals(instance, density_estimator : ConditionalDE, gt_estimator, n_vertices, ace_params):
+def get_counterfactual(instance: pd.DataFrame, density_estimator: ConditionalDE, gt_estimator, n_vertices, ace_params):
     class_var_name = density_estimator.get_class_var_name()
-    distances = np.zeros(n_vertices)
-    real_distances = np.zeros(n_vertices)
-    times = np.zeros(n_vertices)
-    for n_vertex in range(n_vertices):
-        target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
-        t0 = time.time()
-        alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
-                       n_vertex=n_vertex, **ace_params)
-        result = alg.run(instance, target_label=target_label)
-        tf = time.time() - t0
-        if result.counterfactual is None:
-            distances[n_vertex] = np.nan
-            real_distances[n_vertex] = np.nan
-            times[n_vertex] = tf
-        else:
-            path_to_compute = path(result.path.values, chunks=chunks)
-            pll = path_likelihood_length(
-                pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
-                density_estimator=gt_estimator, penalty=penalty)
-            if pll == np.inf:
-                warnings.warn("Path length over ground truth is infinite for instance " + str(instance.index[0]) + ", "
-                              + str(n_vertex) + " vertices, penalty of " + str(penalty) + "and estimator " + str(
-                    type(density_estimator)))
-            distances[n_vertex] = result.distance
-            real_distances[n_vertex] = pll
-            times[n_vertex] = tf
-    return distances, real_distances, times
+    target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
+    t0 = time.time()
+    alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
+                   n_vertices=n_vertices, **ace_params)
+    result = alg.run(instance, target_label=target_label)
+    tf = time.time() - t0
+    if result.counterfactual is None:
+        return np.inf, np.inf, tf
+    else:
+        path_to_compute = path(result.path.values, chunks=chunks)
+        pll = path_likelihood_length(
+            pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
+            density_estimator=gt_estimator, penalty=penalty)
+        if pll == np.inf:
+            warnings.warn("Path length over ground truth is infinite for instance " + str(instance.index[0]) + ", "
+                          + str(n_vertices) + " vertices, penalty of " + str(penalty) + "and estimator " + str(
+                type(density_estimator)))
+        return result.distance, pll, tf
 
 
 if __name__ == "__main__":
@@ -71,7 +64,7 @@ if __name__ == "__main__":
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     likelihood_threshold_sigma = -0.5
     post_prob_threshold_sigma = -0.5
-    n_vertices = 4
+    n_vertices_range = 4
     penalties = [1, 5, 10,15,20]
     # Number of points for approximating integrals:
     chunks = 20
@@ -102,34 +95,33 @@ if __name__ == "__main__":
                                                    dir=results_opt_cv_dir)
         opt_algorithm_params["population_size"] = 100
         for penalty in penalties:
-            # Result storage
-            distances_mat = np.zeros((n_counterfactuals, n_vertices))
-            real_distances_mat = np.zeros((n_counterfactuals, n_vertices))
-            times_mat = np.zeros((n_counterfactuals, n_vertices))
             ace_params = {"posterior_probability_threshold": post_prob_threshold,
                           "log_likelihood_threshold": log_likelihood_threshold, "chunks": chunks,
                           "sampling_range": sampling_range, "opt_algorithm_params": opt_algorithm_params,
                           "generations": generations, "penalty": penalty}
             if parallelize:
-                pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
+                pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals*n_vertices_range))
                 results = pool.starmap(worker,
                                        [(df_counterfactuals.iloc[[i]], density_estimator_path, gt_estimator_path,
-                                         n_vertices, ace_params) for i in
-                                        range(n_counterfactuals)])
+                                         n_vertices, ace_params) for i, n_vertices in
+                                        product(range(n_counterfactuals), range(n_vertices_range))])
                 pool.close()
                 pool.join()
 
-                for i in range(n_counterfactuals):
-                    distances_mat[i], real_distances_mat[i], times_mat[i] = results[i]
             else:
                 results = []
-                for i in range(n_counterfactuals):
+                for i,n_vertices in product(range(n_counterfactuals), range(n_vertices_range)):
                     instance = df_counterfactuals.iloc[[i]]
-                    results_i = get_counterfactuals(instance, density_estimator, gt_estimator,
-                                                    n_vertices, ace_params)
+                    results_i = get_counterfactual(instance, density_estimator, gt_estimator,
+                                                   n_vertices, ace_params)
                     results[i] = results_i
-            for i in range(n_counterfactuals):
-                distances_mat[i], real_distances_mat[i], times_mat[i] = results[i]
+            distances_mat = np.zeros((n_counterfactuals, n_vertices_range))
+            real_distances_mat = np.zeros((n_counterfactuals, n_vertices_range))
+            times_mat = np.zeros((n_counterfactuals, n_vertices_range))
+            for i, n_vertices in product(range(n_counterfactuals), range(n_vertices_range)):
+                distances_mat[i, n_vertices] = results[i*n_vertices_range + n_vertices][0]
+                real_distances_mat[i, n_vertices] = results[i*n_vertices_range + n_vertices][1]
+                times_mat[i, n_vertices] = results[i*n_vertices_range + n_vertices][2]
 
             # Create the file names
             suffix = str(dataset_id) + '_model' + model_str + '_penalty' + str(penalty)
@@ -139,11 +131,11 @@ if __name__ == "__main__":
             if not os.path.exists(results_dir + model_str + '/'):
                 os.makedirs(results_dir + model_str + '/')
 
-            to_ret = pd.DataFrame(data=distances_mat, columns=range(n_vertices))
+            to_ret = pd.DataFrame(data=distances_mat, columns=range(n_vertices_range))
             to_ret.to_csv(os.path.join(model_dir, 'distances_data' + suffix + '.csv'))
 
-            to_ret = pd.DataFrame(data=real_distances_mat, columns=range(n_vertices))
+            to_ret = pd.DataFrame(data=real_distances_mat, columns=range(n_vertices_range))
             to_ret.to_csv(os.path.join(model_dir, 'real_distances_data' + suffix + '.csv'))
 
-            to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices))
+            to_ret = pd.DataFrame(data=times_mat, columns=range(n_vertices_range))
             to_ret.to_csv(os.path.join(model_dir, 'time_data' + suffix + '.csv'))
