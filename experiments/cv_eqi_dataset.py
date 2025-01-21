@@ -208,6 +208,8 @@ if __name__ == "__main__":
     X_train = data_train_scaled.drop(class_var_name, axis=1)
     y_train = data_train_scaled[class_var_name]
 
+    nn_params_fixed["split_dim"] = len(X_train.columns) //2
+
     if args.graphical:
         n_features = len(data_train.columns) - 1
         n_final_features = 0

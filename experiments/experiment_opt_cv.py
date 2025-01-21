@@ -7,6 +7,7 @@ import pickle
 import argparse
 
 import time
+from itertools import product
 
 import torch
 from pymoo.algorithms.moo.nsga2 import binary_tournament
@@ -23,36 +24,29 @@ from experiments.utils import setup_experiment, get_constraints, check_enough_in
 
 # Worker function for parallelization
 def worker(instance: pd.DataFrame, density_estimator_path: str, penalty: float,
-           list_vertices: list[int], ace_params: dict):
+           n_vertices: int, ace_params: dict):
     torch.set_num_threads(1)
     density_estimator = pickle.load(open(density_estimator_path, 'rb'))
-    return get_counterfactuals(instance, density_estimator, penalty, list_vertices, ace_params)
+    return get_counterfactual(instance, density_estimator, penalty, n_vertices, ace_params)
 
 
-def get_counterfactuals(instance: pd.DataFrame, density_estimator: ConditionalDE,
+def get_counterfactual(instance: pd.DataFrame, density_estimator: ConditionalDE,
                         penalty: float,
-                        vertices_list: list[int], ace_params: dict):
+                        n_vertices: int, ace_params: dict):
     class_var_name = density_estimator.get_class_var_name()
-    distances = np.zeros(len(vertices_list))
-    times = np.zeros(len(vertices_list))
-    for i,vertices in enumerate(vertices_list):
-        target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
-        t0 = time.time()
-        print("Vertices:", vertices)
-        alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
-                       n_vertices=vertices,
-                       **ace_params, parallelize=False, penalty=penalty)
-        result = alg.run(instance, target_label=target_label)
-        tf = time.time() - t0
-        if result.counterfactual is None:
-            distances[i] = np.nan
-            times[i] = tf
-        else:
-            if np.isnan(result.distance):
-                raise ValueError("Distance is not a number")
-            distances[i] = result.distance
-            times[i] = tf
-    return distances, times
+    target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
+    t0 = time.time()
+    alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
+                   n_vertices=n_vertices,
+                   **ace_params, parallelize=False, penalty=penalty)
+    result = alg.run(instance, target_label=target_label)
+    tf = time.time() - t0
+    if result.counterfactual is None:
+        return np.inf, tf
+    else:
+        if np.isnan(result.distance):
+            raise ValueError("Distance is not a number")
+        return result.distance, tf
 
 
 if __name__ == "__main__":
@@ -60,12 +54,12 @@ if __name__ == "__main__":
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
     likelihood_threshold_sigma = -0.5
     post_prob_threshold_sigma = -0.5
-    vertices_list = [0,1,2]
-    penalty_range = (1,10)
+    vertices_list = [0, 1, 2, 3]
+    penalty_range = (1, 10)
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
-    n_counterfactuals = 30
+    n_counterfactuals = 15
 
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=44089, type=int)
@@ -93,7 +87,7 @@ if __name__ == "__main__":
     if DUMMY:
         chunks = 2
         n_counterfactuals = 2
-        vertices_list = [0]
+        vertices_list = [0,1]
         generations = 2
         pop_size = 10
         param_grid = {
@@ -149,30 +143,28 @@ if __name__ == "__main__":
                 "mutation": PM(eta=params["eta_mutation"]),
                 "selection": TournamentSelection(func_comp=binary_tournament) if params["selection_type"] == "tourn" else RandomSelection()},
                       "generations": generations}
-        # Result storage
-        distances_mat = np.zeros((n_counterfactuals, len(vertices_list)))
+
         if parallelize:
-            pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals))
+            pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals*len(vertices_list)))
             results = pool.starmap(worker,
                                    [(df_counterfactuals.iloc[[i]], gt_estimator_path,
-                                     penalties[i], vertices_list, ace_params) for i in
-                                    range(n_counterfactuals)])
+                                     penalties[i], n_vertices, ace_params) for i,n_vertices in
+                                    product(range(n_counterfactuals), vertices_list)])
             pool.close()
             pool.join()
-
-            for i in range(n_counterfactuals):
-                distances_mat[i], _ = results[i]
         else:
-            for i in range(n_counterfactuals):
+            results = []
+            for i,n_vertices in product(range(n_counterfactuals), vertices_list):
                 instance = df_counterfactuals.iloc[[i]]
-                distances_mat[i], _ = get_counterfactuals(instance, density_estimator,
-                                                          penalties[i], vertices_list, ace_params)
-        results_df[str(params)] = distances_mat.flatten()
+                results.append(get_counterfactual(instance, density_estimator,
+                                                  penalties[i], n_vertices, ace_params))
+
+        results_df[str(params)] = list(zip(*results))[0]
 
     if not DUMMY:
         if not os.path.exists(results_dir):
             os.makedirs(results_dir)
         results_df.to_csv(os.path.join(results_dir, 'results_data' + str(dataset_id) + '_' + model_str + '.csv'))
-    else :
+    else:
         print("Results")
         print(results_df)

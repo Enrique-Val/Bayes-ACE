@@ -293,7 +293,6 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter
     model = None
     if model_type == "NVP":
         model = ConditionalNVP(graphics=False)
-        best_params["split_dim"] = d // 2
     elif model_type == "Splines":
         model = ConditionalSpline()
 
