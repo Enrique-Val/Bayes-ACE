@@ -55,7 +55,7 @@ if __name__ == "__main__":
     likelihood_threshold_sigma = -0.5
     post_prob_threshold_sigma = -0.5
     vertices_list = [0, 1, 2, 3]
-    penalty_range = (1, 10)
+    penalty_range = (1, 5, 10)
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
@@ -124,8 +124,8 @@ if __name__ == "__main__":
 
     param_combinations = ParameterGrid(param_grid)
 
-    # Sample n_counterfactuals random penalties
-    penalties = np.random.randint(penalty_range[0], penalty_range[1], n_counterfactuals)
+    # Sample n_counterfactuals random penalties. We only sample values contained in penalty range as a multinomial
+    penalties = np.repeat(penalty_range, n_counterfactuals//len(penalty_range)+1)[:n_counterfactuals]
 
     results_df = pd.DataFrame(columns=[str(params) for params in param_combinations],
                               index=range(n_counterfactuals * len(vertices_list)))
