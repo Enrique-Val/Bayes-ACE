@@ -32,7 +32,7 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     df_train[class_var_name] = class_processed
 
     # Load the pickled gt density estimator from the correct folder
-    gt_estimator_path = results_cv_dir + 'gt_nf_' + str(dataset_id) + '.pkl'
+    gt_estimator_path = results_cv_dir + 'gt_' + str(dataset_id) + '.pkl'
     gt_estimator: ConditionalNF = pickle.load(
         open(gt_estimator_path, 'rb'))
 

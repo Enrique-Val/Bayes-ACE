@@ -40,7 +40,7 @@ def get_counterfactuals(instance: pd.DataFrame, density_estimator: ConditionalDE
         t0 = time.time()
         print("Vertices:", n_vertex)
         alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
-                       n_vertex=n_vertex + 1,
+                       n_vertices=n_vertex + 1,
                        **ace_params,
                        generations=1000, parallelize=False)
         result = alg.run(instance, target_label=target_label)

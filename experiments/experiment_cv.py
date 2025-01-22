@@ -102,11 +102,12 @@ def prep_worker(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list
 
 # Worker function that accesses shared memory
 def worker_nf(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
-              i_fold: tuple, model_type="NVP", nn_params: dict = None, directory_path="./"):
+              i_fold: tuple, model_type="NVP", nn_params: dict = None, directory_path="./",
+              fold_id: int = None, gpu_acceleration=False):
     torch.set_num_threads(1)
     df_train, df_test = prep_worker(shm_name, shape, dtype, column_names, ordinal_mapping, i_fold)
     return train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params,
-                                    directory_path=directory_path)
+                                    directory_path=directory_path, fold_id=fold_id, gpu_acceleration=gpu_acceleration)
 
 
 def worker_ckde(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list, ordinal_mapping: dict,
@@ -122,7 +123,10 @@ def worker_ckde(shm_name: str, shape: tuple, dtype: np.dtype, column_names: list
 ################
 
 def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, model_type="NVP", nn_params: dict = None,
-                             directory_path="./"):
+                             directory_path="./", fold_id: int=None, gpu_acceleration=False):
+    if fold_id is None :
+        fold_id = os.getpid()
+
     d = df_train.shape[1] - 1
 
     # We make a copy, since the hidden units that we specify are RELATIVE to the inputs
@@ -139,8 +143,8 @@ def train_nf_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, mode
         t0 = time.time()
         model = None
         if model_type == "NVP":
-            model = ConditionalNVP(graphics=False)
-            model.fit(X_train, y_train, model_pth_name=directory_path + "model_" + str(os.getpid()) + ".pth",
+            model = ConditionalNVP(graphics=False, gpu_acceleration=gpu_acceleration)
+            model.fit(X_train, y_train, model_pth_name=os.path.join(directory_path, "model_" + str(fold_id) + ".pth"),
                         **nn_params_copy)
         elif model_type == "Spline":
             model = ConditionalSpline()
@@ -167,15 +171,16 @@ def get_metrics(model: ConditionalDE, df_test: pd.DataFrame):
 
 
 def cross_validate_nf(dataset: pd.DataFrame, kfold_object: KFold, model_type="NVP", parallelize=False, working_dir="./",
-                      nn_params: dict = None) -> list | None:
+                      nn_params: dict = None, gpu_acceleration = False) -> list | None:
     cv_iter_results = []
     if not parallelize:
-        for train_index, test_index in kfold_object.split(dataset):
+        for i, (train_index, test_index) in enumerate(kfold_object.split(dataset)):
             df_train = dataset.iloc[train_index].reset_index(drop=True)
             df_test = dataset.iloc[test_index].reset_index(drop=True)
             cv_iter_results.append(
                 train_nf_and_get_results(df_train, df_test, model_type=model_type, nn_params=nn_params,
-                                         directory_path=working_dir))
+                                         directory_path=working_dir, fold_id=i,
+                                         gpu_acceleration = gpu_acceleration))
 
     elif parallelize:
         shm, shared_array, ordinal_mapping = to_numpy_shared(dataset)
@@ -185,8 +190,8 @@ def cross_validate_nf(dataset: pd.DataFrame, kfold_object: KFold, model_type="NV
         cv_iter_results = pool.starmap(worker_nf,
                                        [(shm.name, shared_array.shape, shared_array.dtype, column_names,
                                          ordinal_mapping, i_fold, model_type, nn_params,
-                                         working_dir)
-                                        for i_fold in kfold_object.split(dataset)])
+                                         working_dir, i, gpu_acceleration)
+                                        for i, i_fold in enumerate(kfold_object.split(dataset))])
         pool.close()
         pool.join()
 
@@ -223,9 +228,8 @@ def cross_validate_nf(dataset: pd.DataFrame, kfold_object: KFold, model_type="NV
 
 
 def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter: int = 100, nn_params_fixed: dict = None,
-                              model_type="NVP",
-                              parallelize: bool = False,
-                              param_space: list[Dimension] = None, working_dir="./"):
+                              model_type="NVP", parallelize: bool = False,
+                              param_space: list[Dimension] = None, working_dir="./", gpu_acceleration=False):
     # Bayesian optimization
 
     # List to store the random permutations
@@ -256,7 +260,7 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter
             params.update(nn_params_fixed)
         # Cross validate
         result_cv = cross_validate_nf(dataset, kfold_object, model_type=model_type, parallelize=parallelize,
-                                      working_dir=working_dir, nn_params=params)
+                                      working_dir=working_dir, nn_params=params, gpu_acceleration=gpu_acceleration)
         if result_cv is None or result_cv[0] < -3e5:
             # If the logl is too low, return a high value for the objective function. This allows to not overpenalize
             # regions of the space
@@ -292,7 +296,8 @@ def get_best_normalizing_flow(dataset: pd.DataFrame, kfold_object: KFold, n_iter
     # Train once again to return the object
     model = None
     if model_type == "NVP":
-        model = ConditionalNVP(graphics=False)
+        model = ConditionalNVP(graphics=False, gpu_acceleration=gpu_acceleration)
+        best_params["model_pth_name"] = os.path.join(working_dir, "best_model.pth")
     elif model_type == "Splines":
         model = ConditionalSpline()
 
@@ -315,7 +320,7 @@ def train_ckde_and_get_results(df_train: pd.DataFrame, df_test: pd.DataFrame, ba
                                kernel="gaussian", outliers: float = np.inf):
     # Remove outliers in training
     df_train = remove_outliers(df_train, outliers)
-    df_train = df_train.head(15000)
+    df_train = df_train.head(10000)
     X_train = df_train[df_train.columns[:-1]]
     y_train = df_train[df_train.columns[-1]]
     t0 = time.time()
@@ -425,6 +430,7 @@ if __name__ == "__main__":
     parser.add_argument('--part', choices=['full', 'rd', 'sd'], default='full')
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_2_kde/", type=str)
+    parser.add_argument('--gpu', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
 
     # Hard code some parameters
@@ -461,10 +467,18 @@ if __name__ == "__main__":
         Real(0.01, 0.3, name='sam_noise', prior='log-uniform')
     ]
 
-    directory_path = args.dir_name + str(dataset_id) + "/"
+    directory_path = os.path.join(args.dir_name, str(dataset_id))
     if not os.path.exists(directory_path):
         # If the directory does not exist, create it
         os.makedirs(directory_path)
+
+    # File naming
+    results_file = os.path.join(directory_path, "results_" + str(dataset_id) + ".csv")
+    resampled_data_file = os.path.join(directory_path, "resampleddata_" + str(dataset_id) + ".csv")
+    clg_pkl = os.path.join(directory_path, "clg_" + str(dataset_id) + ".pkl")
+    gt_pkl = os.path.join(directory_path, "gt_" + str(dataset_id) + ".pkl")
+    nf_pkl = os.path.join(directory_path, "nf_" + str(dataset_id) + ".pkl")
+    scaler_pkl = os.path.join(directory_path, "scaler_" + str(dataset_id) + ".pkl")
 
     print("Cross validation dataset: ", dataset_id)
 
@@ -484,7 +498,7 @@ if __name__ == "__main__":
                                               min_unique_vals=min_unique_vals,
                                               max_instances=50000, max_cum_values=max_cum_values)
         # Pickle the scaler
-        pickle.dump(scaler, open(directory_path + "scaler_" + str(dataset_id) + ".pkl", "wb"))
+        pickle.dump(scaler, open(scaler_pkl, "wb"))
 
         d = len(dataset_oml.columns) - 1
         n_instances = dataset_oml.shape[0]
@@ -515,21 +529,21 @@ if __name__ == "__main__":
         gt_model, metrics_ckde, result = get_best_ckde(dataset_oml, kf, parallelize=args.parallelize)
         results_df["GT_RD"] = metrics_ckde
 
-        pickle.dump(gt_model, open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "wb"))
+        pickle.dump(gt_model, open(gt_pkl, "wb"))
         n_resampled_lower = np.max((len(dataset_oml), 15000))
         n_resampled = np.min((n_resampled_lower, 50000))
         resampled_dataset = gt_model.sample(n_resampled, seed=0)
-        resampled_dataset.to_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv")
+        resampled_dataset.to_csv(resampled_data_file)
 
         if args.part == 'rd':
             print(results_df.drop("params"))
-        results_df.to_csv(directory_path + 'data_' + str(dataset_id) + '.csv')
+        results_df.to_csv(results_file)
 
     if args.part == 'sd' or args.part == 'full':
-        gt_model: ConditionalKDE = pickle.load(open(directory_path + "gt_nf_" + str(dataset_id) + ".pkl", "rb"))
-        resampled_dataset = pd.read_csv(directory_path + "resampled_data" + str(dataset_id) + ".csv", index_col=0)
+        gt_model: ConditionalKDE = pickle.load(open(gt_pkl, "rb"))
+        resampled_dataset = pd.read_csv(resampled_data_file, index_col=0)
         resampled_dataset[gt_model.get_class_var_name()] = resampled_dataset[gt_model.get_class_var_name()].astype('str').astype('category')
-        results_df = pd.read_csv(directory_path + 'data_' + str(dataset_id) + '.csv', index_col=0)
+        results_df = pd.read_csv(results_file, index_col=0)
         if len(results_df.columns) > 2:
             results_df = results_df.drop("CLG", axis=1)
             results_df = results_df.drop("GT_SD", axis=1)
@@ -570,18 +584,20 @@ if __name__ == "__main__":
         X_resampled = resampled_dataset[resampled_dataset.columns[:-1]]
         y_resampled = resampled_dataset[resampled_dataset.columns[-1]]
         bn.fit(X_resampled, y_resampled, initial_structure="naive", training_params={"score": "bic", "seed": 0})
-        pickle.dump(bn, open(directory_path + "clg_" + str(dataset_id) + ".pkl", "wb"))
+        pickle.dump(bn, open(clg_pkl, "wb"))
 
         # Validate normalizing flow with different params. Specify also the fixed params
-        nn_params_fixed = {"split_dim": d//2, "batch_size": batch_size, "steps": steps, "working_dir": directory_path}
+        nn_params_fixed = {"split_dim": d//2, "batch_size": batch_size, "steps": steps}
 
         nf_model, metrics_nf, result = get_best_normalizing_flow(resampled_dataset, kf, model_type=args.type,
                                                                  n_iter=args.n_iter, nn_params_fixed=nn_params_fixed,
                                                                  parallelize=args.parallelize,
-                                                                 param_space=param_space_nf)
+                                                                 param_space=param_space_nf,
+                                                                 working_dir=directory_path,
+                                                                 gpu_acceleration=args.gpu)
         results_df["NF"] = metrics_nf
 
-        pickle.dump(nf_model, open(directory_path + "nf_" + str(dataset_id) + ".pkl", "wb"))
+        pickle.dump(nf_model, open(nf_pkl, "wb"))
 
         if GRAPHIC:
             # Visualize the convergence of the objective function
@@ -596,4 +612,4 @@ if __name__ == "__main__":
 
             # Train neural net using the best parameters to get metrics
         print(results_df.drop("params"))
-        results_df.to_csv(directory_path + 'data_' + str(dataset_id) + '.csv')
+        results_df.to_csv(results_file)

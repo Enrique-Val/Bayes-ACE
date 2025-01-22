@@ -180,6 +180,7 @@ if __name__ == "__main__":
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_eqi/", type=str)
     parser.add_argument('--dummy', action=argparse.BooleanOptionalAction)
     parser.add_argument('--graphical', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--gpu', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
 
     # Create dir if it does not exist
@@ -208,7 +209,7 @@ if __name__ == "__main__":
     X_train = data_train_scaled.drop(class_var_name, axis=1)
     y_train = data_train_scaled[class_var_name]
 
-    nn_params_fixed["split_dim"] = len(X_train.columns) //2
+    nn_params_fixed["split_dim"] = len(X_train.columns) // 2
 
     if args.graphical:
         n_features = len(data_train.columns) - 1
@@ -285,7 +286,7 @@ if __name__ == "__main__":
                                                             nn_params_fixed=nn_params_fixed,
                                                             model_type="NVP",
                                                             parallelize=args.parallelize, working_dir=args.dir_name,
-                                                            param_space=param_space_nf)
+                                                            param_space=param_space_nf, gpu_acceleration=args.gpu)
 
     # Pop some params to not print/store them
     metrics[-1].pop("perms_instantiation")
