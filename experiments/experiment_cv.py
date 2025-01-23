@@ -412,8 +412,8 @@ def get_best_ckde(dataset: pd.DataFrame, kfold_object: KFold, param_space: dict 
 
     # Train once again to return the object
     model = ConditionalKDE(bandwidth=best_bandwidth, kernel=best_kernel)
-    X = dataset[dataset.columns[:-1]]
-    y = dataset[dataset.columns[-1]]
+    X = dataset[dataset.columns[:-1]].head(10000)
+    y = dataset[dataset.columns[-1]].head(10000)
     model.fit(X, y)
     return model, metrics, best_bandwidth
 

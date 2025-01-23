@@ -23,7 +23,7 @@ import platform
 def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int) -> tuple[
     pd.DataFrame, pd.DataFrame, ConditionalNF, str, pb.CLGNetwork, str, ConditionalNF, str]:
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    df_train = pd.read_csv(results_cv_dir + 'resampled_data' + str(dataset_id) + '.csv',
+    df_train = pd.read_csv(results_cv_dir + 'resampleddata_' + str(dataset_id) + '.csv',
                            index_col=0)
     class_var_name = df_train.columns[-1]
     # Transform the class into a categorical variable

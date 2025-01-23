@@ -5,7 +5,7 @@ import pandas as pd
 from scipy.stats import wilcoxon
 
 # Path to dataset root
-root_dir = "../results/exp_cv_2/"
+root_dir = "../results/exp_cv/"
 
 metrics_test = {"Logl_mean": "less", "Brier_mean": "greater", "AUC_mean": "less", "Time_mean": "less"}
 
@@ -18,7 +18,7 @@ for i in metrics_test.keys():
 for dataset_id in os.listdir(root_dir):
     dataset_path = os.path.join(root_dir, dataset_id)
     if os.path.isdir(dataset_path):
-        file = os.path.join(dataset_path, "data_" + dataset_id + ".csv")
+        file = os.path.join(dataset_path, "results_" + dataset_id + ".csv")
         df = pd.read_csv(file, index_col=0)
         for i in rd_dfs.keys():
             rd_dfs[i] = pd.concat((rd_dfs[i], df.loc[[i], ["CLG_RD", "GT_RD"]]))

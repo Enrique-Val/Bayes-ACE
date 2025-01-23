@@ -26,7 +26,7 @@ if __name__ == "__main__" :
     models_path = {}
     model_dir = os.path.join(args.dir_name, "models")
     for model in os.listdir(model_dir):
-        if model != "bn_restricted.pkl" :
+        if model != "bn_restricted.pkl":
             continue
         model_path = os.path.join(model_dir, model)
         with open(model_path, "rb") as f:
