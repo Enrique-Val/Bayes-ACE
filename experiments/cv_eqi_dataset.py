@@ -81,7 +81,7 @@ def read_eqi_dataset(delete_features = True):
     # Create a dictionary with the variables, associated to a domain
     var_types = {}
     for i in np.unique(variable_description["Domain"]):
-        var_types[i] = variable_description[variable_description["Domain"] == i]["Variable Name"].values
+        var_types[i] = variable_description[variable_description["Domain"] == i]["Variable Name"].to_numpy()
 
     return data, data_metadata, var_types, features, eqis
 
@@ -155,10 +155,10 @@ def cross_validate_restricted_bn(dataset, kfold_object=None, training_params= No
         tmp = network.logl(X_val, y_val)
         bn_results.loc[i, "Logl"] = tmp.mean()
         bn_results.loc[i, "LoglStd"] = tmp.std()
-        predictions = network.predict_proba(X_val.values, output="pandas")
-        brier_i = brier_score(y_val.values, predictions)
+        predictions = network.predict_proba(X_val.to_numpy(), output="pandas")
+        brier_i = brier_score(y_val.to_numpy(), predictions)
         bn_results.loc[i, "Brier"] = brier_i
-        auc_i = auc(y_val.values, predictions)
+        auc_i = auc(y_val.to_numpy(), predictions)
         bn_results.loc[i, "AUC"] = auc_i
         bn_results.loc[i, "Time"] = time_i
 

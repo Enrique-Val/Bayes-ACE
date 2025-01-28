@@ -4,8 +4,6 @@ import multiprocessing as mp
 import numpy as np
 
 from bayesace import ConditionalDE
-from bayesace.models.conditional_density_estimator import logl_from_likelihood
-
 
 class PybnesianParallelizationError(Exception):
     pass
@@ -48,7 +46,7 @@ class BayesianNetworkClassifier(ConditionalDE):
         if training_params is None:
             training_params = {}
         if isinstance(y, pd.Series):
-            y = y.values
+            y = y.to_numpy()
         dataset = X.copy()
         dataset[self.class_var_name] = y
         bn: pb.BayesianNetwork = None
@@ -94,14 +92,14 @@ class BayesianNetworkClassifier(ConditionalDE):
         """
         if y is not None:
             if y is pd.Series:
-                y = y.values
+                y = y.to_numpy()
             data = X.copy()
             data[self.class_var_name] = y
             data[self.class_var_name] = data[self.class_var_name].astype('category')
             data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
             return self.bayesian_network.logl(data)
         else:
-            class_cpd = self.bayesian_network.cpd(self.class_var_name)
+            '''class_cpd = self.bayesian_network.cpd(self.class_var_name)
             class_values = class_cpd.variable_values()
             n_samples = X.shape[0]
             likelihood_val = 0.0
@@ -110,7 +108,19 @@ class BayesianNetworkClassifier(ConditionalDE):
             if (likelihood_val > 1).any():
                 Warning(
                     "Likelihood of some points in the space is higher than 1.")
-            return logl_from_likelihood(likelihood_val)
+            return logl_from_likelihood(likelihood_val)'''
+            log_likelihoods = []  # Store log-likelihoods for each class
+            for i in range(len(self.class_distribution.keys())):
+                log_likelihoods.append(self.logl(X, np.repeat(i, X.shape[0])))
+
+            # Stack log-likelihoods and apply the log-sum-exp trick
+            log_likelihoods = np.stack(log_likelihoods, axis=0)  # Shape: (num_classes, num_samples)
+            max_log_likelihoods = np.max(log_likelihoods, axis=0)  # Shape: (num_samples,)
+
+            # Log-sum-exp computation
+            lls = max_log_likelihoods + np.log(np.sum(np.exp(log_likelihoods - max_log_likelihoods), axis=0))
+
+            return lls
 
     def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
         """

@@ -9,6 +9,7 @@ import argparse
 import time
 from itertools import product
 
+import numpy as np
 import torch
 from pymoo.algorithms.moo.nsga2 import binary_tournament
 from pymoo.operators.crossover.sbx import SBX
@@ -47,6 +48,46 @@ def get_counterfactual(instance: pd.DataFrame, density_estimator: ConditionalDE,
         if np.isnan(result.distance):
             raise ValueError("Distance is not a number")
         return result.distance, tf
+
+
+def optimize_ga(ace_params, param_combinations, df_counterfactuals, density_estimator_path, penalty_range,
+                n_counterfactuals, vertices_list, model_str, dataset_name:str, parallelize=False):
+    density_estimator = pickle.load(open(density_estimator_path, 'rb'))
+
+    # Sample n_counterfactuals random penalties. We only sample values contained in penalty range as a multinomial
+    penalties = np.repeat(penalty_range, n_counterfactuals // len(penalty_range) + 1)[:n_counterfactuals]
+
+    results_df = pd.DataFrame(columns=[str(params) for params in param_combinations],
+                              index=range(n_counterfactuals * len(vertices_list)))
+
+    # Run the experiment
+    print("Running with model " + model_str + " and dataset " + dataset_name)
+    for params in param_combinations:
+        print("Running with parameters: " + str(params))
+        # Create dictionary of ace parameters
+        ace_params_copy = ace_params.copy()
+        ace_params_copy["opt_algorithm_params"]["crossover"] = SBX(eta=params["eta_crossover"])
+        ace_params_copy["opt_algorithm_params"]["mutation"] = PM(eta=params["eta_mutation"])
+        ace_params_copy["opt_algorithm_params"]["selection"] = TournamentSelection(func_comp=binary_tournament) if \
+        params["selection_type"] == "tourn" else RandomSelection()
+
+        if parallelize:
+            pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals * len(vertices_list)))
+            results = pool.starmap(worker,
+                                   [(df_counterfactuals.iloc[[i]], density_estimator_path,
+                                     penalties[i], n_vertices, ace_params_copy) for i, n_vertices in
+                                    product(range(n_counterfactuals), vertices_list)])
+            pool.close()
+            pool.join()
+        else:
+            results = []
+            for i, n_vertices in product(range(n_counterfactuals), vertices_list):
+                instance = df_counterfactuals.iloc[[i]]
+                results.append(get_counterfactual(instance, density_estimator,
+                                                  penalties[i], n_vertices, ace_params_copy))
+
+        results_df[str(params)] = list(zip(*results))[0]
+    return results_df
 
 
 if __name__ == "__main__":
@@ -103,7 +144,8 @@ if __name__ == "__main__":
 
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator)
+    df_total = pd.concat([df_train, df_counterfactuals])
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_total, df_total, gt_estimator)
     log_likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
     post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt, 0.99)
     # Check if there are instances with this threshold in the training set
@@ -112,54 +154,22 @@ if __name__ == "__main__":
 
     if model_str == 'nf':
         density_estimator_path = nf_path
-        density_estimator = normalizing_flow
     elif model_str == 'clg':
         density_estimator_path = clg_network_path
-        density_estimator = clg_network
     elif model_str == 'gt':
         density_estimator_path = gt_estimator_path
-        density_estimator = gt_estimator
     else:
         raise ValueError("Model not found")
 
     param_combinations = ParameterGrid(param_grid)
+    ace_params = {"posterior_probability_threshold": post_prob_threshold,
+                  "log_likelihood_threshold": log_likelihood_threshold, "chunks": chunks,
+                  "sampling_range": sampling_range, "opt_algorithm_params": {
+                    "pop_size": pop_size},
+                  "generations": generations}
 
-    # Sample n_counterfactuals random penalties. We only sample values contained in penalty range as a multinomial
-    penalties = np.repeat(penalty_range, n_counterfactuals//len(penalty_range)+1)[:n_counterfactuals]
-
-    results_df = pd.DataFrame(columns=[str(params) for params in param_combinations],
-                              index=range(n_counterfactuals * len(vertices_list)))
-
-    # Run the experiment
-    print("Running with model " + model_str + " and dataset " + str(dataset_id))
-    for params in param_combinations:
-        print("Running with parameters: " + str(params))
-        # Create dictionary of ace parameters
-        ace_params = {"posterior_probability_threshold": post_prob_threshold,
-                      "log_likelihood_threshold": log_likelihood_threshold, "chunks": chunks,
-                      "sampling_range": sampling_range, "opt_algorithm_params": {
-                "pop_size": pop_size,
-                "crossover": SBX(eta=params["eta_crossover"]),
-                "mutation": PM(eta=params["eta_mutation"]),
-                "selection": TournamentSelection(func_comp=binary_tournament) if params["selection_type"] == "tourn" else RandomSelection()},
-                      "generations": generations}
-
-        if parallelize:
-            pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals*len(vertices_list)))
-            results = pool.starmap(worker,
-                                   [(df_counterfactuals.iloc[[i]], gt_estimator_path,
-                                     penalties[i], n_vertices, ace_params) for i,n_vertices in
-                                    product(range(n_counterfactuals), vertices_list)])
-            pool.close()
-            pool.join()
-        else:
-            results = []
-            for i,n_vertices in product(range(n_counterfactuals), vertices_list):
-                instance = df_counterfactuals.iloc[[i]]
-                results.append(get_counterfactual(instance, density_estimator,
-                                                  penalties[i], n_vertices, ace_params))
-
-        results_df[str(params)] = list(zip(*results))[0]
+    results_df = optimize_ga(ace_params, param_combinations, df_counterfactuals, density_estimator_path, penalty_range,
+                             n_counterfactuals, vertices_list, model_str, str(dataset_id), parallelize)
 
     if not DUMMY:
         if not os.path.exists(results_dir):

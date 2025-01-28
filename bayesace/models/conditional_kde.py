@@ -4,7 +4,6 @@ import pandas as pd
 import pyarrow as pa
 
 from bayesace import ConditionalDE
-from bayesace.models.conditional_density_estimator import logl_from_likelihood
 
 
 class ConditionalKDE(ConditionalDE):
@@ -27,9 +26,9 @@ class ConditionalKDE(ConditionalDE):
         """
         super().fit(X, y)
 
-        X = X.values
+        X = X.to_numpy()
         if isinstance(y, pd.Series):
-            y = y.values
+            y = y.to_numpy()
 
         # Compute class priors
         unique_classes, counts = np.unique(y, return_counts=True)
@@ -59,8 +58,8 @@ class ConditionalKDE(ConditionalDE):
         """
         if y is not None:
             if isinstance(y, pd.Series):
-                y = y.values
-            X = X.values
+                y = y.to_numpy()
+            X = X.to_numpy()
             class_labels = list(self.class_distribution.keys())
 
             log_likelihood = np.full(X.shape[0], -np.inf)
@@ -75,10 +74,22 @@ class ConditionalKDE(ConditionalDE):
                     raise ValueError(f"Class {label} not found in the training data.")
             return log_likelihood
         else:
-            lls = np.zeros(X.shape[0])
+            '''lls = np.zeros(X.shape[0])
             for i in self.class_distribution.keys():
                 lls += np.exp(self.logl(X, np.repeat(i, X.shape[0])))
-            return logl_from_likelihood(lls)
+            return logl_from_likelihood(lls)'''
+            log_likelihoods = []  # Store log-likelihoods for each class
+            for i in range(len(self.class_distribution.keys())):
+                log_likelihoods.append(self.logl(X, np.repeat(i, X.shape[0])))
+
+            # Stack log-likelihoods and apply the log-sum-exp trick
+            log_likelihoods = np.stack(log_likelihoods, axis=0)  # Shape: (num_classes, num_samples)
+            max_log_likelihoods = np.max(log_likelihoods, axis=0)  # Shape: (num_samples,)
+
+            # Log-sum-exp computation
+            lls = max_log_likelihoods + np.log(np.sum(np.exp(log_likelihoods - max_log_likelihoods), axis=0))
+
+            return lls
 
     def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
         """

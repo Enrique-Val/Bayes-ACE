@@ -33,7 +33,7 @@ def get_naive_structure(df: pd.DataFrame, type):
 
 def check_bayesace(bayesian_network, dataset: pd.DataFrame, penalty, n_vertex, log_likelihood_threshold, acc_thresh):
     np.random.seed(0)
-    bayesace = BayesACE(density_estimator=bayesian_network, features=df.columns[:-1], n_vertex=n_vertex, chunks=2,
+    bayesace = BayesACE(density_estimator=bayesian_network, features=df.columns[:-1], n_vertices=n_vertex, chunks=2,
                         penalty=penalty,
                         pop_size=50, log_likelihood_threshold=log_likelihood_threshold, posterior_probability_threshold=acc_thresh,
                         generations=5, verbose=False)

@@ -48,10 +48,10 @@ def cross_validate_bn(dataset: pd.DataFrame, kfold_object: KFold, outliers: floa
         logl_std_i = tmp.std()
         bn_results_i.append(logl_i)
         bn_results_i.append(logl_std_i)
-        predictions = network.predict_proba(X_test.values, output="pandas")
-        brier_i = brier_score(y_test.values, predictions)
+        predictions = network.predict_proba(X_test.to_numpy(), output="pandas")
+        brier_i = brier_score(y_test.to_numpy(), predictions)
         bn_results_i.append(brier_i)
-        auc_i = auc(y_test.values, predictions)
+        auc_i = auc(y_test.to_numpy(), predictions)
         bn_results_i.append(auc_i)
         bn_results_i.append(time_i)
         bn_results.append(bn_results_i)
@@ -164,9 +164,9 @@ def get_metrics(model: ConditionalDE, df_test: pd.DataFrame):
     logl_data = model.logl(X_test, y_test)
     logl = logl_data.mean()
     logl_std = logl_data.std()
-    predictions = model.predict_proba(X_test.values, output="pandas")
-    brier = brier_score(y_test.values, predictions)
-    auc_res = auc(y_test.values, predictions)
+    predictions = model.predict_proba(X_test.to_numpy(), output="pandas")
+    brier = brier_score(y_test.to_numpy(), predictions)
+    auc_res = auc(y_test.to_numpy(), predictions)
     return {"Logl": logl, "LoglStd": logl_std, "Brier": brier, "AUC": auc_res}
 
 
@@ -562,11 +562,11 @@ if __name__ == "__main__":
         tmp = gt_model.logl(resampled_X, resampled_y)
         resampled_dataset_metrics[0] = tmp.mean()
         resampled_dataset_metrics[2] = tmp.std()
-        predictions = gt_model.predict_proba(resampled_X.values, output="pandas")
-        resampled_dataset_metrics[4] = brier_score(resampled_y.values, predictions)
-        resampled_dataset_metrics[6] = auc(resampled_y.values, predictions)
+        predictions = gt_model.predict_proba(resampled_X.to_numpy(), output="pandas")
+        resampled_dataset_metrics[4] = brier_score(resampled_y.to_numpy(), predictions)
+        resampled_dataset_metrics[6] = auc(resampled_y.to_numpy(), predictions)
         resampled_dataset_metrics = list(resampled_dataset_metrics)
-        resampled_dataset_metrics.append(results_df["GT_RD"].values[-1])
+        resampled_dataset_metrics.append(results_df["GT_RD"].to_numpy()[-1])
         results_df["GT_SD"] = resampled_dataset_metrics
 
         # Validate Gaussian network

@@ -47,8 +47,8 @@ class BestPathFinder(Problem):
                          xl=xl,
                          xu=xu, **kwargs)
         self.class_var_name = density_estimator.get_class_var_name()
-        self.x_og = instance.drop(self.class_var_name, axis=1).values
-        self.y_og = instance[self.class_var_name].values[0]
+        self.x_og = instance.drop(self.class_var_name, axis=1).to_numpy()
+        self.y_og = instance[self.class_var_name].to_numpy()[0]
         self.target_label = target_label
         assert self.y_og != self.target_label
         self.n_vertices = n_vertices
@@ -167,7 +167,7 @@ class BayesACE(ACE):
         elif self.initialization == "guided":
             paths_sample = []
             for i in initial_sample:
-                paths_sample.append(np.linspace(instance.drop(self.class_var_name, axis=1).values, i, self.n_vertices + 2).flatten())
+                paths_sample.append(np.linspace(instance.drop(self.class_var_name, axis=1).to_numpy(), i, self.n_vertices + 2).flatten())
             paths_sample = np.array(paths_sample)
             paths_sample = paths_sample[:, self.n_features:]
             return paths_sample
@@ -237,7 +237,7 @@ class BayesACE(ACE):
 
     def create_ACEResult(self, instance: pd.DataFrame, cfx: np.ndarray):
         instance_X = instance.drop(self.class_var_name, axis=1)
-        total_path = np.resize(np.append(instance_X.values[0], cfx),
+        total_path = np.resize(np.append(instance_X.to_numpy()[0], cfx),
                                new_shape=(self.n_vertices + 2, self.n_features))
         path_to_ret = pd.DataFrame(data=total_path,
                                    columns=self.features)

@@ -162,14 +162,14 @@ class FACE(ACE):
 
         self.graph = build_weighted_graph(dataset, epsilon=self.epsilon, weight_function=self.weight_function,
                                           weight_args = self.weight_args, parallelize=self.parallelize)
-        self.y_pred = self.density_estimator.predict_proba(self.dataset.values, output="pandas")
+        self.y_pred = self.density_estimator.predict_proba(self.dataset.to_numpy(), output="pandas")
         self.k = k
 
     def add_point_to_graph(self, instance: pd.DataFrame):
         assert (instance.columns == self.dataset.columns).all()
         self.graph.add_node(self.dataset.shape[0])
         mat = self.dataset.to_numpy()
-        new_point = instance.values[0]
+        new_point = instance.to_numpy()[0]
 
         if self.parallelize :
             pool = mp.Pool(n_processes)

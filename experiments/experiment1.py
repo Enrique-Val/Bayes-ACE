@@ -28,7 +28,7 @@ def worker(instance: pd.DataFrame, density_estimator_path, gt_estimator_path, n_
 
 def get_counterfactual(instance: pd.DataFrame, density_estimator: ConditionalDE, gt_estimator, n_vertices, ace_params):
     class_var_name = density_estimator.get_class_var_name()
-    target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
+    target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].to_numpy()[0])
     t0 = time.time()
     alg = BayesACE(density_estimator=density_estimator, features=instance.columns[:-1],
                    n_vertices=n_vertices, **ace_params)
@@ -37,7 +37,7 @@ def get_counterfactual(instance: pd.DataFrame, density_estimator: ConditionalDE,
     if result.counterfactual is None:
         return np.inf, np.inf, tf
     else:
-        path_to_compute = path(result.path.values, chunks=chunks)
+        path_to_compute = path(result.path.to_numpy(), chunks=chunks)
         pll = path_likelihood_length(
             pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
             density_estimator=gt_estimator, penalty=penalty)
@@ -84,7 +84,8 @@ if __name__ == "__main__":
 
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals)
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_counterfactuals, gt_estimator)
+    df_total = pd.concat([df_train, df_counterfactuals])
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_total, df_total, gt_estimator)
     log_likelihood_threshold = mu_gt + likelihood_threshold_sigma * std_gt
     post_prob_threshold = min(mae_gt + post_prob_threshold_sigma * std_mae_gt, 0.99)
     # Check if there are instances with this threshold in the training set

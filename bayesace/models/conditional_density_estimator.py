@@ -21,10 +21,11 @@ class ConditionalDE(ABC):
         self.n_dims = X.shape[1]
 
         # Estimate the class distribution with frequentist methods
-        class_labels = np.unique(y.values)
+        class_labels = np.unique(y.to_numpy())
         self.class_distribution = {label: len(y[y == label]) / len(y) for label in class_labels}
 
         self.class_var_name = y.name if isinstance(y, pd.Series) else "class"
+
 
     def get_class_labels(self):
         return list(self.class_distribution.keys()).copy()
@@ -86,8 +87,8 @@ class ConditionalDE(ABC):
         return np.e ** self.logl(X, y)
 
 
-def logl_from_likelihood(likelihood):
+'''def logl_from_likelihood(likelihood):
     logl = np.empty(shape=len(likelihood))
     logl[likelihood > 0] = np.log(likelihood[likelihood > 0])
     logl[likelihood <= 0] = -np.inf
-    return logl
+    return logl'''

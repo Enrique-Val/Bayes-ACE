@@ -57,20 +57,23 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     return df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path
 
 
-def get_constraints(df_train, df_counterfactuals, gt_estimator: ConditionalNF, eps=0.01):
+def get_constraints(df_total, df_estimation, gt_estimator: ConditionalDE, eps=0.01):
     assert eps >= 0, "Epsilon must be greater or equal to 0"
-    df_total = pd.concat([df_train, df_counterfactuals]).reset_index(drop=True)
     class_var_name = gt_estimator.get_class_var_name()
-    xl = df_total.drop(columns=[class_var_name]).min().values - eps
-    xu = df_total.drop(columns=[class_var_name]).max().values + eps
+    xl = df_total.drop(columns=[class_var_name]).min().to_numpy() - eps
+    xu = df_total.drop(columns=[class_var_name]).max().to_numpy() + eps
     sampling_range = (xl, xu)
 
-    X = df_total.drop(columns=[class_var_name])
-    y = df_total[class_var_name]
-    logl_train_with_class = gt_estimator.logl(X, y)
+    # Get the mean logl and posterior probability of the samples withing the distribution of the model
+    X = df_estimation.drop(columns=[class_var_name])
+    y = df_estimation[class_var_name]
     logl_train_without_class = gt_estimator.logl(X)
-    post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
-
+    # Print a warning if there are instances that are infinite
+    if np.isinf(logl_train_without_class).sum() > 0:
+        print("There are instances with infinite log-likelihood")
+    logl_train_without_class = logl_train_without_class[~np.isinf(logl_train_without_class)]
+    # Convert y from series to numpy array
+    post_prob_train = gt_estimator.posterior_probability(X, y.to_numpy())
     return sampling_range, logl_train_without_class.mean(), logl_train_without_class.std(), post_prob_train.mean(), post_prob_train.std()
 
 
@@ -91,7 +94,7 @@ def check_enough_instances(df_train, gt_estimator: ConditionalDE, log_likelihood
 def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator: ConditionalDE, penalty, chunks, l0_epsilon=0.1):
     print("Instance", instance.index[0])
     class_var_name = gt_estimator.get_class_var_name()
-    target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].values[0])
+    target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].to_numpy()[0])
     t0 = time.time()
     result: list[ACEResult] | ACEResult = algorithm.run(instance, target_label=target_label)
     tf = time.time() - t0
@@ -108,35 +111,35 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         path_l0 = np.zeros(shape=len(result))
         for i, _ in enumerate(result):
             if isinstance(result[i], ACEResult) :
-                path_to_compute = path(result[i].path.values, chunks=chunks)
+                path_to_compute = path(result[i].path.to_numpy(), chunks=chunks)
                 path_length_gt = path_likelihood_length(
                     pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
                     density_estimator=gt_estimator, penalty=penalty)
                 path_lengths_gt[i] = path_length_gt
-                path_l0[i] = total_l0_path(result[i].path.values, l0_epsilon)
-                cfx_array[i] = result[i].counterfactual.values
+                path_l0[i] = total_l0_path(result[i].path.to_numpy(), l0_epsilon)
+                cfx_array[i] = result[i].counterfactual.to_numpy()
             else :
                 raise TypeError("List do not contain exclusively ACEResult objects")
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
         real_logl = gt_estimator.logl(cfx_df)
         real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
-        path_l2 = np.linalg.norm(cfx_array - instance.drop(columns=class_var_name).values.flatten(), axis=1)
+        path_l2 = np.linalg.norm(cfx_array - instance.drop(columns=class_var_name).to_numpy().flatten(), axis=1)
         return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp
     elif isinstance(result, ACEResult):
         if result.counterfactual is None:
             print("Counterfactual for:", instance.index[0], "not found")
             return np.inf, np.inf, np.inf, tf, None, -np.inf, 0
-        path_to_compute = path(result.path.values, chunks=chunks)
+        path_to_compute = path(result.path.to_numpy(), chunks=chunks)
         path_length_gt = path_likelihood_length(
             pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
             density_estimator=gt_estimator, penalty=penalty)
-        cfx_df = pd.DataFrame([result.counterfactual.values], columns=instance.columns[:-1])
+        cfx_df = pd.DataFrame([result.counterfactual.to_numpy()], columns=instance.columns[:-1])
         real_logl = gt_estimator.logl(cfx_df)
         real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
-        path_l2 = np.linalg.norm(result.counterfactual.values - instance.drop(columns=class_var_name).values.flatten())
-        path_l0 = total_l0_path(result.path.values, l0_epsilon)
+        path_l2 = np.linalg.norm(result.counterfactual.to_numpy() - instance.drop(columns=class_var_name).to_numpy().flatten())
+        path_l0 = total_l0_path(result.path.to_numpy(), l0_epsilon)
         print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)
-        return path_length_gt, path_l0, path_l2, tf, result.counterfactual.values, real_logl, real_pp
+        return path_length_gt, path_l0, path_l2, tf, result.counterfactual.to_numpy(), real_logl, real_pp
     else:
         raise TypeError("Result is not list nor ACEResult")
 

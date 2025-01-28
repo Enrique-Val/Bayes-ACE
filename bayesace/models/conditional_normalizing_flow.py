@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from bayesace.models.conditional_density_estimator import ConditionalDE, logl_from_likelihood
+from bayesace.models.conditional_density_estimator import ConditionalDE
 
 
 class NanLogProb(Exception):
@@ -26,7 +26,7 @@ class ConditionalNF(ConditionalDE):
             class_column[dataset[self.class_var_name] == label] = i
         dataset[self.class_var_name] = class_column
         #dataset = dataset.astype(float)
-        dataset_numpy = dataset.values
+        dataset_numpy = dataset.to_numpy()
 
         # Train validation split
         train_dataset, val_dataset = np.split(dataset_numpy,
@@ -55,7 +55,7 @@ class ConditionalNF(ConditionalDE):
     def logl(self, X: pd.DataFrame, y=None) -> np.ndarray:
         if y is not None:
             if isinstance(y, pd.Series):
-                y = y.values
+                y = y.to_numpy()
             data = X.copy()
             data[self.class_var_name] = y
             data[self.class_var_name] = data[self.class_var_name].astype('category')
@@ -67,13 +67,26 @@ class ConditionalNF(ConditionalDE):
             for i, label in enumerate(class_labels):
                 class_column[data[self.class_var_name] == label] = i
 
-            return self.logl_array(data.drop(columns=self.class_var_name).values, class_column)
+            return self.logl_array(data.drop(columns=self.class_var_name).to_numpy(), class_column)
         else:
-            X = X.values
+            '''X = X.values
             lls = np.zeros(X.shape[0])
             for i in range(len(self.class_distribution.keys())):
                 lls = lls + np.e ** self.logl_array(X, np.repeat(i, X.shape[0]))
-            return logl_from_likelihood(lls)
+            return logl_from_likelihood(lls)'''
+            X = X.to_numpy()
+            log_likelihoods = []  # Store log-likelihoods for each class
+            for i in range(len(self.class_distribution.keys())):
+                log_likelihoods.append(self.logl_array(X, np.repeat(i, X.shape[0])))
+
+            # Stack log-likelihoods and apply the log-sum-exp trick
+            log_likelihoods = np.stack(log_likelihoods, axis=0)  # Shape: (num_classes, num_samples)
+            max_log_likelihoods = np.max(log_likelihoods, axis=0)  # Shape: (num_samples,)
+
+            # Log-sum-exp computation
+            lls = max_log_likelihoods + np.log(np.sum(np.exp(log_likelihoods - max_log_likelihoods), axis=0))
+
+            return lls
 
     '''
     # If the class variable is passed, remove it

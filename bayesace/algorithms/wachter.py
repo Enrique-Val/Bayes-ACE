@@ -26,8 +26,8 @@ class WachterCounterfactual(Algorithm):
         assert (columns_without_class == self.features).all()
 
         # Extract the features and labels from the dataset
-        self.dataset_features = dataset[self.features].values
-        self.dataset_labels = dataset[self.class_var_name].values
+        self.dataset_features = dataset[self.features].to_numpy()
+        self.dataset_labels = dataset[self.class_var_name].to_numpy()
 
         # Compute the median absolute deviation for each feature
         self.feature_mad = median_absolute_deviation(self.dataset_features, axis=0)
@@ -79,10 +79,10 @@ class WachterCounterfactual(Algorithm):
         assert (columns_without_class == self.features).all()
 
         # Ensure the instance class does not already match the target label
-        assert (instance[self.class_var_name].values[0] != target_label)
+        assert (instance[self.class_var_name].to_numpy()[0] != target_label)
 
         # Convert the instance to a NumPy array for efficient calculation
-        original_instance = instance[self.features].values.flatten()
+        original_instance = instance[self.features].to_numpy().flatten()
 
         # Filter for instances that match the target label
         target_indices = np.where(self.dataset_labels == target_label)[0]
@@ -119,7 +119,7 @@ class WachterCounterfactual(Algorithm):
         # The path will just contain the original and cfx instance
         vertices = pd.DataFrame([original_instance, best_counterfactual], columns=self.features)
 
-        full_path = path(vertices.values, chunks=20)
+        full_path = path(vertices.to_numpy(), chunks=20)
         path_df = pd.DataFrame(full_path, columns=vertices.columns)
         distance = path_likelihood_length(path_df, density_estimator=self.density_estimator, penalty=1)
 

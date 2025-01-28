@@ -26,7 +26,7 @@ class ACEResult():
 
     def __repr__(self):
         return "BayesACEResult(counterfactual=" + str(
-            self.counterfactual.values) + ", path=pandas.DataFrame(), distance=" + str(self.distance) + ")"
+            self.counterfactual.to_numpy()) + ", path=pandas.DataFrame(), distance=" + str(self.distance) + ")"
 
 
 class Algorithm(ABC):
@@ -39,7 +39,7 @@ class Algorithm(ABC):
 
     @abstractmethod
     def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
-        assert (instance["class"].values[0] != target_label)
+        assert (instance["class"].to_numpy()[0] != target_label)
         return ACEResult(None, pd.DataFrame(), np.nan)
 
 
@@ -59,7 +59,7 @@ class ACE(Algorithm):
 
     @abstractmethod
     def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
-        assert (instance[self.class_var_name].values[0] != target_label)
+        assert (instance[self.class_var_name].to_numpy()[0] != target_label)
         return ACEResult(None, pd.DataFrame(), np.nan)
 
     def set_log_likelihood_threshold(self, log_likelihood_threshold):

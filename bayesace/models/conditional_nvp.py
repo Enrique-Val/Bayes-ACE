@@ -151,7 +151,7 @@ class ConditionalNVP(ConditionalNF):
         self.n_flows = n_flows
         dataset = X.copy()
         if isinstance(y, pd.Series):
-            y = y.values
+            y = y.to_numpy()
         dataset[self.class_var_name] = y
         train_loader, val_loader = self.get_loaders(dataset, batch_size)
 
