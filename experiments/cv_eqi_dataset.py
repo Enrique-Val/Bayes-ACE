@@ -274,12 +274,12 @@ if __name__ == "__main__":
 
     # Hard code parameter space
     param_space_nf = [
-        Real(5e-5, 1e-3, name='lr'),
+        Real(5e-5, 5e-4, name='lr'),
         Real(1e-4, 1e-1, name='weight_decay'),
         Integer(2, 10, name='hidden_units'),
         Integer(1, 5, name='layers'),
-        Integer(1, 20, name='n_flows'),
-        Real(0.01, 0.5, name='sam_noise', prior='log-uniform')
+        Integer(1, 10, name='n_flows'),
+        Real(0.05, 0.5, name='sam_noise', prior='log-uniform')
     ]
 
     best_nf, metrics, result_gp = get_best_normalizing_flow(data_train_scaled, kfold_object=kf, n_iter=args.n_iter,

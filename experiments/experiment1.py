@@ -69,7 +69,7 @@ if __name__ == "__main__":
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
-    n_counterfactuals = 20
+    n_counterfactuals = 10
 
     # Other hard-coded params
     pop_size = 100

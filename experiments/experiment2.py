@@ -56,7 +56,7 @@ if __name__ == "__main__":
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
-    n_counterfactuals = 15
+    n_counterfactuals = 10
     eps = np.inf
     n_train_size = 1000
     n_generations = 1000
