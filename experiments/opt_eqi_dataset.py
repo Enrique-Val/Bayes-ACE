@@ -17,14 +17,14 @@ from experiments.utils import get_constraints, check_enough_instances
 if __name__ == "__main__":
     # ALGORITHM PARAMETERS The likelihood parameter is relative. I.e. the likelihood threshold will be the mean logl
     # for that class plus "likelihood_threshold_sigma" sigmas of the logl std
-    likelihood_threshold_sigma = -0.5
-    post_prob_threshold_sigma = -0.5
+    likelihood_threshold_sigma = -0.25
+    post_prob_threshold_sigma = -0.25
     vertices_list = [0,1]
     penalty_range = (1,5)
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
-    n_counterfactuals = 15
+    n_counterfactuals = 10
 
     #Other hardcoded params
     pop_size = 100
