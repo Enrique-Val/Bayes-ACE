@@ -79,7 +79,7 @@ class ConditionalKDE(ConditionalDE):
                 lls += np.exp(self.logl(X, np.repeat(i, X.shape[0])))
             return logl_from_likelihood(lls)'''
             log_likelihoods = []  # Store log-likelihoods for each class
-            for i in range(len(self.class_distribution.keys())):
+            for i in self.class_distribution.keys():
                 log_likelihoods.append(self.logl(X, np.repeat(i, X.shape[0])))
 
             # Stack log-likelihoods and apply the log-sum-exp trick
