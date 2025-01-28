@@ -81,9 +81,8 @@ def check_enough_instances(df_train, gt_estimator: ConditionalDE, log_likelihood
     class_var_name = gt_estimator.get_class_var_name()
     X_train = df_train.drop(columns=class_var_name)
     y_train = df_train[class_var_name]
-    logl_train_with_class = gt_estimator.logl(X_train, y_train)
     logl_train_without_class = gt_estimator.logl(X_train)
-    post_prob_train = np.exp(logl_train_with_class - logl_train_without_class)
+    post_prob_train = gt_estimator.posterior_probability(X_train, y_train.to_numpy())
     is_plausible = logl_train_without_class > log_likelihood_threshold
     is_accurate = post_prob_train > post_prob_threshold
     if (is_accurate & is_plausible).sum() < min_instances:

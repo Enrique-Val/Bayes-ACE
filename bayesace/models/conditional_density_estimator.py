@@ -22,7 +22,7 @@ class ConditionalDE(ABC):
 
         # Estimate the class distribution with frequentist methods
         class_labels = np.unique(y.to_numpy())
-        self.class_distribution = {label: len(y[y == label]) / len(y) for label in class_labels}
+        self.class_distribution = {str(label): len(y[y == label]) / len(y) for label in class_labels}
 
         self.class_var_name = y.name if isinstance(y, pd.Series) else "class"
 

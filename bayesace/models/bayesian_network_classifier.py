@@ -95,7 +95,7 @@ class BayesianNetworkClassifier(ConditionalDE):
                 y = y.to_numpy()
             data = X.copy()
             data[self.class_var_name] = y
-            data[self.class_var_name] = data[self.class_var_name].astype('category')
+            data[self.class_var_name] = data[self.class_var_name].astype('string').astype('category')
             data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
             return self.bayesian_network.logl(data)
         else:
@@ -110,7 +110,7 @@ class BayesianNetworkClassifier(ConditionalDE):
                     "Likelihood of some points in the space is higher than 1.")
             return logl_from_likelihood(likelihood_val)'''
             log_likelihoods = []  # Store log-likelihoods for each class
-            for i in range(len(self.class_distribution.keys())):
+            for i in self.get_class_distribution().keys():
                 log_likelihoods.append(self.logl(X, np.repeat(i, X.shape[0])))
 
             # Stack log-likelihoods and apply the log-sum-exp trick
