@@ -12,7 +12,7 @@ import re
 from experiments.utils import friedman_posthoc
 
 # Path to dataset root
-root_dir = "../results/exp_eqi/data_processed/opt_results"
+root_dir = "../results/exp_cv_2/"
 
 # Wilcoxon test alternative hypothesis
 wx_alt = ["two-sided", "greater", "less"]
@@ -20,22 +20,23 @@ wx_alt = ["two-sided", "greater", "less"]
 # Get all the values for penalty, dataset_id, models and n_vertex
 def load_data(root_dir):
     file_pattern = re.compile(r"results_data(\d+)_(.+)\.csv")
-    #results = {"clg" : {}, "nf" : {}, "gt" : {}}
-    results = {}
+    results = {"clg" : {}, "nf" : {}, "gt" : {}}
     # Get datasets ids
-    for file in os.listdir(root_dir):
-        file_path = os.path.join(root_dir, file)
-        if not os.path.isdir(file_path):
-            try :
-                dataset_id = file_pattern.match(file).group(1)
-                model_str = file_pattern.match(file).group(2)
-                data = pd.read_csv(file_path, index_col=0)
-                # Substitute nan with large number
-                data = data.fillna(1e300)
-                results[model_str] = {}
-                results[model_str][dataset_id] = data
-            except:
-                continue
+    for id_folder in os.listdir(root_dir):
+        if os.path.isdir(os.path.join(root_dir, id_folder)):
+            opt_path = os.path.join(root_dir, id_folder, "opt_results")
+            for file in os.listdir(opt_path):
+                file_path = os.path.join(opt_path, file)
+                if not os.path.isdir(file_path):
+                    try :
+                        dataset_id = file_pattern.match(file).group(1)
+                        model_str = file_pattern.match(file).group(2)
+                        data = pd.read_csv(file_path, index_col=0)
+                        # Substitute nan with large number
+                        data = data.fillna(1e300)
+                        results[model_str][dataset_id] = data
+                    except:
+                        continue
     return results
 
 
@@ -83,7 +84,7 @@ if __name__ == "__main__":
 
         # Perform the BH test for every loaded dataset
         for dataset_id in data_model_dict.keys():
-            data:pd.DataFrame = data_model_dict[dataset_id]
+            data: pd.DataFrame = data_model_dict[dataset_id]
             # Compute the ranks
             avg_rank = data.rank(axis=1, pct=True).mean()
 
@@ -103,6 +104,9 @@ if __name__ == "__main__":
             plt.clf()
 
             # Get the best column of data according to the ranking
+            # First, check if all are equal
+            if test_results["summary_ranks"].nunique() == 1:
+                continue
             best_params_str = test_results["summary_ranks"].idxmin()
             best_params = eval(best_params_str)
 

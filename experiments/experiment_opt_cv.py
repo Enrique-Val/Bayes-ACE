@@ -118,7 +118,7 @@ if __name__ == "__main__":
     pop_size = 100
     param_grid = {
         'eta_crossover': [10, 15, 20],  # Example range for crossover eta
-        'eta_mutation': [10, 20, 30],  # Example range for mutation eta
+        'eta_mutation': [30, 40, 50],  # Example range for mutation eta
         'selection_type': ["tourn", "ran"]  # Example range for selection type
         # Types of selection methods
     }
