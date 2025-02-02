@@ -12,7 +12,7 @@ import re
 from experiments.utils import friedman_posthoc
 
 # Path to dataset root
-root_dir = "../results/exp_opt/"
+root_dir = "../results/exp_eqi/data_processed/opt_results"
 
 # Wilcoxon test alternative hypothesis
 wx_alt = ["two-sided", "greater", "less"]
@@ -20,7 +20,8 @@ wx_alt = ["two-sided", "greater", "less"]
 # Get all the values for penalty, dataset_id, models and n_vertex
 def load_data(root_dir):
     file_pattern = re.compile(r"results_data(\d+)_(.+)\.csv")
-    results = {"clg" : {}, "nf" : {}, "gt" : {}}
+    #results = {"clg" : {}, "nf" : {}, "gt" : {}}
+    results = {}
     # Get datasets ids
     for file in os.listdir(root_dir):
         file_path = os.path.join(root_dir, file)
@@ -31,6 +32,7 @@ def load_data(root_dir):
                 data = pd.read_csv(file_path, index_col=0)
                 # Substitute nan with large number
                 data = data.fillna(1e300)
+                results[model_str] = {}
                 results[model_str][dataset_id] = data
             except:
                 continue
@@ -43,10 +45,12 @@ if __name__ == "__main__":
     data_dict = load_data(root_dir)
 
     # Create plot subdir if it does not exist
-    if not os.path.exists(root_dir + "plots"):
-        os.makedirs(root_dir + "plots")
+    plots_path = os.path.join(root_dir, "plots")
+    if not os.path.exists(plots_path):
+        os.makedirs(plots_path)
 
     for model_str in data_dict.keys():
+        print("Analyzing model: ", model_str)
         data_model_dict = data_dict[model_str]
 
         # Best param dataset
@@ -62,7 +66,7 @@ if __name__ == "__main__":
         test_results = friedman_posthoc(best_data, correct="bergmann")
         sp.critical_difference_diagram(test_results["summary_ranks"], test_results["p_adjusted"].clip(lower=1e-8))
         plt.title(f"Data: Combined")
-        plt.savefig(fname=root_dir+"plots/combined.png", bbox_inches="tight")
+        plt.savefig(fname=os.path.join(plots_path,"combined.png"), bbox_inches="tight")
         plt.show(bbox_inches="tight")
         # Clear plt
         plt.clf()
@@ -93,7 +97,7 @@ if __name__ == "__main__":
             sp.critical_difference_diagram(test_results["summary_ranks"], test_results["p_adjusted"].clip(lower=1e-8))
             plt.title(f"Data: {dataset_id}")
             #sp.sign_plot(test_results["p_values"])
-            plt.savefig(fname=root_dir+"plots/"+str(dataset_id)+".png", bbox_inches="tight")
+            plt.savefig(fname=os.path.join(plots_path,str(dataset_id)+".png"), bbox_inches="tight")
             plt.show()
             #Clear plt
             plt.clf()
@@ -106,4 +110,5 @@ if __name__ == "__main__":
             best_params_df.loc[dataset_id] = best_params
 
         # Save the best params dataframe
-        best_params_df.to_csv(root_dir+"best_params_"+model_str+".csv")
+        file_path = os.path.join(root_dir, "best_params_"+model_str+".csv")
+        best_params_df.to_csv(file_path)

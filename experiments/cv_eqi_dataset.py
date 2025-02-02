@@ -202,7 +202,18 @@ if __name__ == "__main__":
     data, data_metadata, var_types, features, eqis = read_eqi_dataset(delete_features=True)
     whitelist, blacklist = get_bn_restrictions(features, eqis, var_types)
 
+    # Save the metadata
+    data_metadata.to_csv(os.path.join(args.dir_name,"data_processed", "metadata.csv"))
+
     data_train, data_test = train_test_split(data, test_size=0.2, random_state=0)
+    # If Los Angeles (6037) or Northwest Arctic (2188) are in train, put them in test, at the beginning
+    manual_change = True
+    if manual_change:
+        move_list = [6037, 2188, 36061]
+        data_move = data_train[data_train.index.isin(move_list)]
+        data_train = data_train[~data_train.index.isin(move_list)]
+        data_test = pd.concat([data_move, data_test])
+
     scaler = StandardScaler()
     data_train_scaled = data_train.copy()
     data_train_scaled[features + eqis] = scaler.fit_transform(data_train[features + eqis])
