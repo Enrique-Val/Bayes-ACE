@@ -23,7 +23,7 @@ def load_data(root_dir):
     results = {"clg" : {}, "nf" : {}, "gt" : {}}
     # Get datasets ids
     for id_folder in os.listdir(root_dir):
-        if os.path.isdir(os.path.join(root_dir, id_folder)):
+        if os.path.isdir(os.path.join(root_dir, id_folder)) and id_folder != "plots":
             opt_path = os.path.join(root_dir, id_folder, "opt_results")
             for file in os.listdir(opt_path):
                 file_path = os.path.join(opt_path, file)
@@ -99,7 +99,7 @@ if __name__ == "__main__":
             plt.title(f"Data: {dataset_id}")
             #sp.sign_plot(test_results["p_values"])
             plt.savefig(fname=os.path.join(plots_path,str(dataset_id)+".png"), bbox_inches="tight")
-            plt.show()
+            #plt.show()
             #Clear plt
             plt.clf()
 

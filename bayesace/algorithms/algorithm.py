@@ -8,7 +8,7 @@ from bayesace import ConditionalDE
 
 
 class ACEResult():
-    def __init__(self, counterfactual: pd.Series, path: pd.DataFrame, distance: float):
+    def __init__(self, counterfactual: pd.Series | None, path: pd.DataFrame, distance: float):
         self.counterfactual = counterfactual
         self.path = path
         self.distance = distance
@@ -30,32 +30,14 @@ class ACEResult():
 
 
 class Algorithm(ABC):
-    def __init__(self, density_estimator: ConditionalDE, features):
+    def __init__(self, density_estimator: ConditionalDE, features, log_likelihood_threshold=-np.inf,
+                 posterior_probability_threshold=0.5):
         self.density_estimator: ConditionalDE = density_estimator
         self.class_var_name = density_estimator.get_class_var_name()
         self.features = features
         self.n_features = len(self.features)
-
-
-    @abstractmethod
-    def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
-        assert (instance["class"].to_numpy()[0] != target_label)
-        return ACEResult(None, pd.DataFrame(), np.nan)
-
-
-class ACE(Algorithm):
-    def __init__(self, density_estimator: ConditionalDE, features, chunks, log_likelihood_threshold=-np.inf,
-                 posterior_probability_threshold=0.5,penalty=1,
-                 seed=0, verbose=True, parallelize=False):
-        super().__init__(density_estimator, features)
-        self.penalty = penalty
-        self.chunks = chunks
         self.log_likelihood_threshold = log_likelihood_threshold
         self.posterior_probability_threshold = posterior_probability_threshold
-        self.seed = seed
-        random.seed(self.seed)
-        self.verbose = verbose
-        self.parallelize = parallelize
 
     @abstractmethod
     def run(self, instance: pd.DataFrame | pd.Series, target_label) -> ACEResult:
@@ -72,4 +54,17 @@ class ACE(Algorithm):
         self.posterior_probability_threshold = posterior_probability_threshold
         return old_posterior_probability_threshold
 
+
+class ACE(Algorithm):
+    def __init__(self, density_estimator: ConditionalDE, features, chunks, log_likelihood_threshold=-np.inf,
+                 posterior_probability_threshold=0.5,penalty=1,
+                 seed=0, verbose=True, parallelize=False):
+        super().__init__(density_estimator, features, log_likelihood_threshold=log_likelihood_threshold,
+                         posterior_probability_threshold=posterior_probability_threshold)
+        self.chunks = chunks
+        self.penalty = penalty
+        self.seed = seed
+        random.seed(self.seed)
+        self.verbose = verbose
+        self.parallelize = parallelize
 

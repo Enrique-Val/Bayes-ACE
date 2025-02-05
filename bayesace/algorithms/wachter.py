@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from bayesace import median_absolute_deviation, path_likelihood_length, path, ConditionalDE
+from bayesace import median_absolute_deviation, ConditionalDE
 from bayesace.algorithms.algorithm import Algorithm, ACEResult
 
 
@@ -16,10 +16,9 @@ class WachterCounterfactual(Algorithm):
             features: List of feature names to be considered for counterfactual search.
             target_proximity_weight: Weight for proximity in the loss function.
         """
-        super().__init__(density_estimator, features)
+        super().__init__(density_estimator, features, log_likelihood_threshold=log_likelihood_threshold,
+                         posterior_probability_threshold=posterior_probability_threshold)
         self.target_proximity_weight = target_proximity_weight
-        self.log_likelihood_threshold = log_likelihood_threshold
-        self.posterior_probability_threshold = posterior_probability_threshold
 
         # Ensure that the dataset features match the expected features and their order
         columns_without_class = [col for col in dataset.columns if col != self.class_var_name]
@@ -31,7 +30,6 @@ class WachterCounterfactual(Algorithm):
 
         # Compute the median absolute deviation for each feature
         self.feature_mad = median_absolute_deviation(self.dataset_features, axis=0)
-
 
     def _proximity_loss(self, candidates_cf, original_instance):
         """
@@ -89,12 +87,12 @@ class WachterCounterfactual(Algorithm):
 
         if target_indices.size == 0:
             print("No instances in the dataset match the target label.")
-            return ACEResult(counterfactual=pd.DataFrame(), path=pd.DataFrame(), distance=np.nan)
+            return ACEResult(counterfactual=None, path=instance[self.features], distance=np.nan)
         # Retrieve the features of the matching instances
         candidate_cfs = self.dataset_features[target_indices]
 
         # Get likelihood and probability of the class
-        logl = self.density_estimator.logl(pd.DataFrame(candidate_cfs,columns=self.features), target_label)
+        logl = self.density_estimator.logl(pd.DataFrame(candidate_cfs,columns=self.features), np.repeat(target_label, candidate_cfs.shape[0]))
         post_prob = self.density_estimator.posterior_probability(pd.DataFrame(candidate_cfs,columns=self.features),
                                                                  target_label)
 
@@ -119,8 +117,4 @@ class WachterCounterfactual(Algorithm):
         # The path will just contain the original and cfx instance
         vertices = pd.DataFrame([original_instance, best_counterfactual], columns=self.features)
 
-        full_path = path(vertices.to_numpy(), chunks=20)
-        path_df = pd.DataFrame(full_path, columns=vertices.columns)
-        distance = path_likelihood_length(path_df, density_estimator=self.density_estimator, penalty=1)
-
-        return ACEResult(counterfactual=counterfactual_df, path=vertices, distance=distance)
+        return ACEResult(counterfactual=counterfactual_df, path=vertices, distance=proximity_losses[best_idx])

@@ -172,7 +172,7 @@ class BayesACE(ACE):
             paths_sample = paths_sample[:, self.n_features:]
             return paths_sample
 
-    def __init__(self, density_estimator, features, n_vertices, chunks=20,
+    def __init__(self, density_estimator, features, n_vertices, chunks,
                  opt_algorithm: Type[GeneticAlgorithm] = NSGA2,
                  opt_algorithm_params: dict = None,
                  generations: int = 1000,

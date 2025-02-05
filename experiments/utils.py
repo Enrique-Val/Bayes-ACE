@@ -20,10 +20,10 @@ import pybnesian as pb
 import platform
 
 
-def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int) -> tuple[
+def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int, seed:int = 0) -> tuple[
     pd.DataFrame, pd.DataFrame, ConditionalNF, str, pb.CLGNetwork, str, ConditionalNF, str]:
     # Split the dataset into train and test. Test only contains the n_counterfactuals counterfactuals to be evaluated
-    df_train = pd.read_csv(results_cv_dir + 'resampleddata_' + str(dataset_id) + '.csv',
+    df_train = pd.read_csv(os.path.join(results_cv_dir, 'resampleddata_' + str(dataset_id) + '.csv'),
                            index_col=0)
     class_var_name = df_train.columns[-1]
     # Transform the class into a categorical variable
@@ -32,7 +32,7 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     df_train[class_var_name] = class_processed
 
     # Load the pickled gt density estimator from the correct folder
-    gt_estimator_path = results_cv_dir + 'gt_' + str(dataset_id) + '.pkl'
+    gt_estimator_path = os.path.join(results_cv_dir, 'gt_' + str(dataset_id) + '.pkl')
     gt_estimator: ConditionalNF = pickle.load(
         open(gt_estimator_path, 'rb'))
 
@@ -40,14 +40,14 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 
     # Generate a test sample
     torch.manual_seed(0)
-    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=0)
+    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=seed)
 
     # Open the Bayesian network (conditional linear Gaussian)
-    clg_network_path = results_cv_dir + 'clg_' + str(dataset_id) + '.pkl'
+    clg_network_path = os.path.join(results_cv_dir, 'clg_' + str(dataset_id) + '.pkl')
     clg_network = pickle.load(open(clg_network_path, 'rb'))
 
     # Open the NF
-    nf_path = results_cv_dir + 'nf_' + str(dataset_id) + '.pkl'
+    nf_path = os.path.join(results_cv_dir, 'nf_' + str(dataset_id) + '.pkl')
     normalizing_flow = pickle.load(open(nf_path, 'rb'))
 
     # Name the index column

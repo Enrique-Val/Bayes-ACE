@@ -23,7 +23,7 @@ def compute_weight(point_i, point_j, epsilon, weight_function, *args):
 
 def epsilon_weight(point1, point2, distance, epsilon, f_tilde):
     d = len(point1)
-    if np.isin(epsilon):
+    if np.isinf(epsilon):
         return distance
     return f_tilde(epsilon ** d / distance) * distance
 
@@ -132,7 +132,7 @@ class FACE(ACE):
         super().__init__(density_estimator, features, chunks, log_likelihood_threshold=log_likelihood_threshold,
                          posterior_probability_threshold=posterior_probability_threshold, penalty=penalty, seed=seed, verbose=verbose,
                          parallelize=parallelize)
-        self.dataset = dataset
+        self.dataset = dataset.reset_index(drop=True)
         self.epsilon = distance_threshold
         self.graph_type = graph_type
 
@@ -160,7 +160,7 @@ class FACE(ACE):
         else:
             raise AttributeError("Invalid graph_type. Expected 'epsilon', 'kde', 'knn', or 'integral'.")
 
-        self.graph = build_weighted_graph(dataset, epsilon=self.epsilon, weight_function=self.weight_function,
+        self.graph = build_weighted_graph(self.dataset, epsilon=self.epsilon, weight_function=self.weight_function,
                                           weight_args = self.weight_args, parallelize=self.parallelize)
         self.y_pred = self.density_estimator.predict_proba(self.dataset.to_numpy(), output="pandas")
         self.k = k
