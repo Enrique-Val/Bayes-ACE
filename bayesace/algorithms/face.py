@@ -21,16 +21,24 @@ def compute_weight(point_i, point_j, epsilon, weight_function, *args):
     return None
 
 
-def epsilon_weight(point1, point2, distance, epsilon, f_tilde):
+def epsilon_weight(point1, point2, distance, epsilon, f_tilde, penalty=1):
     d = len(point1)
     if np.isinf(epsilon):
         return distance
-    return f_tilde(epsilon ** d / distance) * distance
+    ft = f_tilde(epsilon ** d / distance)
+    if penalty % 2 == 0 and ft < 0:
+        ft = -ft**penalty
+    else :
+        ft = ft**penalty
+    return ft * distance
 
 
-def kde_weight(point1, point2, distance, density_estimator : ConditionalDE, f_tilde, variables):
+def kde_weight(point1, point2, distance, density_estimator : ConditionalDE, f_tilde, variables, penalty=1):
     if f_tilde == neg_log:
-        return -density_estimator.logl(pd.DataFrame([point1 + point2], columns=variables) / 2, y=None) * distance
+        weight = -density_estimator.logl(pd.DataFrame([point1 + point2], columns=variables) / 2, y=None)
+        if penalty % 2 == 0 and weight < 0:
+            return -weight**penalty * distance
+        return weight**penalty * distance
     return f_tilde(density_estimator.likelihood(pd.DataFrame([point1 + point2], columns=variables) / 2)) * distance
 
 
@@ -40,9 +48,10 @@ def knn_weight(point1, point2, distance, k, n_instances, d, f_tilde):
     return f_tilde(r / distance) * distance
 
 
-def integral_weight(point1, point2, distance, density_estimator, variables, chunks):
+def integral_weight(point1, point2, distance, density_estimator, variables, chunks, penalty=1):
+    print("penalty",penalty)
     path_ij = pd.DataFrame(data=np.linspace(point1, point2, chunks), columns=variables)
-    return path_likelihood_length(path_ij, density_estimator, penalty=1)
+    return path_likelihood_length(path_ij, density_estimator, penalty=penalty)
 
 
 def build_weighted_graph(dataframe: pd.DataFrame, epsilon, weight_function, weight_args=None, parallelize=False):
@@ -147,16 +156,16 @@ class FACE(ACE):
         # Determine the appropriate weight function and arguments based on the graph type
         if graph_type == "epsilon":
             self.weight_function = epsilon_weight
-            self.weight_args = [self.epsilon, self.f_tilde]
+            self.weight_args = [self.epsilon, self.f_tilde,penalty]
         elif graph_type == "kde":
             self.weight_function = kde_weight
-            self.weight_args = [density_estimator, self.f_tilde, dataset.columns]
+            self.weight_args = [density_estimator, self.f_tilde, dataset.columns,penalty]
         elif graph_type == "knn":
             self.weight_function = knn_weight
             self.weight_args = [k, dataset.shape[0], dataset.shape[1], self.f_tilde]
         elif graph_type == "integral":
             self.weight_function = integral_weight
-            self.weight_args = [density_estimator, features, chunks]
+            self.weight_args = [density_estimator, features, chunks,penalty]
         else:
             raise AttributeError("Invalid graph_type. Expected 'epsilon', 'kde', 'knn', or 'integral'.")
 

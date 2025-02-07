@@ -36,12 +36,10 @@ def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=44120, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=44089, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
-    parser.add_argument('--results_dir', nargs='?', default='./results/exp_2/', type=str)
-    parser.add_argument('--multiobjective', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--penalty', nargs='?', default=1, type=int)
+    parser.add_argument('--results_dir', nargs='?', default='./results/exp_pen/', type=str)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -59,26 +57,27 @@ if __name__ == "__main__":
     # Number of counterfactuals
     n_counterfactuals = 10
     eps = np.inf
-    n_train_size = 1000
+    n_train_size = 500
     n_generations = 500
 
     # Activate for multiple objectives
     multi_objective = args.multiobjective
 
-    dummy = False
+    dummy = True
     if dummy:
         chunks = 3
         n_counterfactuals = 2
         likelihood_dev_list = likelihood_dev_list[-1:]
         accuracy_threshold_list = post_prob_dev_list[-1:]
-        n_train_size = 10
+        n_train_size = 10*2
         n_vertices = n_vertices[:1]
-        n_generations = 10
+        n_generations = 5*2
         verbose = True
         parallelize = False
 
     # Folder for storing the results
     results_dir = os.path.join(args.results_dir, str(dataset_id), str(args.penalty))
+    results_dir_general = os.path.join(args.results_dir, str(dataset_id))
 
     random.seed(0)
 
@@ -88,12 +87,8 @@ if __name__ == "__main__":
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals, seed=42)
     df_total = pd.concat([df_train, df_counterfactuals])
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_total, df_total, gt_estimator)
     df_train = df_train.head(n_train_size)
-
-    # Names of the models
-    models = [normalizing_flow, clg_network]
-    models_str = ["nf", "clg", "gt"]
+    max_dist = np.sum((df_total - df_total[:, None]) ** 2, axis=2).max()
 
     # Name of the class variable
     class_var_name = gt_estimator.get_class_var_name()
@@ -108,9 +103,13 @@ if __name__ == "__main__":
     algorithm_str_list = []
     algorithms_paths = []
 
+    # List of penalty values
+    penalty_list = [1, 5, 10, 15, 20]
+    epsilon_list = [0.1, 0.5, 1, 2, 5]
+
 
     # Check if a certain file exists
-    if os.path.exists(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv')):
+    if os.path.exists(os.path.join(results_dir_general, 'construction_time_' + str(dataset_id) + '.csv')):
         construction_time_df = pd.read_csv(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv'),
                                              index_col=0)
         # Convert to series
