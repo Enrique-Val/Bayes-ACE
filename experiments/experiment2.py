@@ -119,7 +119,7 @@ if __name__ == "__main__":
         results_cv_dir, dataset_id, n_counterfactuals, seed=42)
 
     df_total = pd.concat([df_train, df_counterfactuals])
-    #sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_total, df_total, gt_estimator)
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_total, df_total, gt_estimator)
     df_train = df_train.head(n_train_size)
 
     # Names of the models
