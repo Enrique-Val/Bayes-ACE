@@ -34,6 +34,35 @@ def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
     return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
 
 
+def build_FACE_worker(density_estimator, graph_type, alg_name, df_train, class_var_name, chunks, eps, penalty, algorithm_dir, dummy):
+    """Function executed in parallel."""
+    t0 = time.time()
+    alg = FACE(
+        density_estimator=density_estimator,
+        features=df_train.columns[:-1],
+        chunks=chunks,
+        dataset=df_train.drop(class_var_name, axis=1),
+        distance_threshold=eps,
+        graph_type=graph_type,
+        f_tilde=None,
+        seed=0,
+        verbose=False,  # Avoid excessive logging in parallel execution
+        log_likelihood_threshold=0.00,
+        posterior_probability_threshold=0.00,
+        penalty=penalty,
+        parallelize=False
+    )
+    tf = time.time() - t0
+
+    # Save the algorithm if not in dummy mode
+    alg_path = os.path.join(algorithm_dir, alg_name + ".pkl")
+    if not dummy:
+        with open(alg_path, 'wb') as f:
+            pickle.dump(alg, f)
+
+    return alg, alg_name, alg_path, tf  # Return results for post-processing
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=44120, type=int)
@@ -132,17 +161,50 @@ if __name__ == "__main__":
                 pickle.dump(alg, open(os.path.join(algorithm_dir, alg_name + ".pkl"), 'wb'))
             construction_time_list.append(tf)
 
-        for density_estimator, graph_type, alg_name in zip([gt_estimator, normalizing_flow, normalizing_flow],
-                                                           ["integral", "kde", "epsilon"],
-                                                           [FACE_BASELINE, FACE_KDE, FACE_EPS]):
-            t0 = time.time()
-            alg = FACE(density_estimator=density_estimator, features=df_train.columns[:-1], chunks=chunks,
-                       dataset=df_train.drop(class_var_name, axis=1),
-                       distance_threshold=eps, graph_type=graph_type, f_tilde=None, seed=0, verbose=verbose,
-                       log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, penalty=penalty,
-                       parallelize=parallelize)
-            tf = time.time() - t0
-            add_algorithm(alg, alg_name, tf)
+        if not parallelize :
+            for model_str, model, model_path in zip(models_str, [normalizing_flow, clg_network, gt_estimator],
+                                                    [nf_path, clg_network_path, gt_estimator_path]):
+                t0 = time.time()
+                alg = FACE(
+                    density_estimator=model,
+                    features=df_train.columns[:-1],
+                    chunks=chunks,
+                    dataset=df_train.drop(class_var_name, axis=1),
+                    distance_threshold=eps,
+                    graph_type="integral",
+                    f_tilde=None,
+                    seed=0,
+                    verbose=False,  # Avoid excessive logging in parallel execution
+                    log_likelihood_threshold=0.00,
+                    posterior_probability_threshold=0.00,
+                    penalty=penalty,
+                    parallelize=parallelize
+                )
+                tf = time.time() - t0
+                alg_name = FACE_BASELINE + "_" + model_str
+                add_algorithm(alg, alg_name, tf)
+        else:
+
+            # Define tasks
+            tasks = [
+                (gt_estimator, "integral", FACE_BASELINE, df_train, class_var_name, chunks, eps, penalty,
+                 algorithm_dir, dummy),
+                (normalizing_flow, "kde", FACE_KDE, df_train, class_var_name, chunks, eps, penalty,
+                 algorithm_dir, dummy),
+                (normalizing_flow, "epsilon", FACE_EPS, df_train, class_var_name, chunks, eps, penalty,
+                 algorithm_dir, dummy)
+            ]
+
+            # Run in parallel using multiprocessing
+            with mp.Pool(processes=len(tasks)) as pool:
+                results = pool.starmap(build_FACE_worker, tasks)
+
+            # Collect results
+            for alg, alg_name, alg_path, tf in results:
+                algorithms.append(alg)
+                algorithm_str_list.append(alg_name)
+                algorithms_paths.append(alg_path)
+                construction_time_list.append(tf)
 
         t0 = time.time()
         alg = WachterCounterfactual(density_estimator=gt_estimator, features=df_train.columns[:-1],
