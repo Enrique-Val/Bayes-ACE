@@ -34,8 +34,9 @@ def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
     return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
 
 
-def build_FACE_worker(density_estimator, graph_type, alg_name, df_train, class_var_name, chunks, eps, penalty, algorithm_dir, dummy):
+def build_FACE_worker(density_estimator_path, graph_type, alg_name, df_train, class_var_name, chunks, eps, penalty, algorithm_dir, dummy):
     """Function executed in parallel."""
+    density_estimator = pickle.load(open(density_estimator_path, 'rb'))
     t0 = time.time()
     alg = FACE(
         density_estimator=density_estimator,
@@ -116,8 +117,9 @@ if __name__ == "__main__":
     results_opt_cv_dir = os.path.join(results_cv_dir, 'opt_results')
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals, seed=42)
+
     df_total = pd.concat([df_train, df_counterfactuals])
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_total, df_total, gt_estimator)
+    #sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_total, df_total, gt_estimator)
     df_train = df_train.head(n_train_size)
 
     # Names of the models
@@ -161,9 +163,10 @@ if __name__ == "__main__":
                 pickle.dump(alg, open(os.path.join(algorithm_dir, alg_name + ".pkl"), 'wb'))
             construction_time_list.append(tf)
 
-        if not parallelize :
-            for model_str, model, model_path in zip(models_str, [normalizing_flow, clg_network, gt_estimator],
-                                                    [nf_path, clg_network_path, gt_estimator_path]):
+        if not parallelize:
+            print("Start")
+            for graph_type, model, alg_name in zip(["integral", "kde", "epsilon"], [gt_estimator, normalizing_flow, normalizing_flow],
+                                                    [FACE_BASELINE, FACE_KDE, FACE_EPS]):
                 t0 = time.time()
                 alg = FACE(
                     density_estimator=model,
@@ -171,27 +174,27 @@ if __name__ == "__main__":
                     chunks=chunks,
                     dataset=df_train.drop(class_var_name, axis=1),
                     distance_threshold=eps,
-                    graph_type="integral",
+                    graph_type=graph_type,
                     f_tilde=None,
                     seed=0,
                     verbose=False,  # Avoid excessive logging in parallel execution
                     log_likelihood_threshold=0.00,
                     posterior_probability_threshold=0.00,
                     penalty=penalty,
-                    parallelize=parallelize
+                    parallelize=False
                 )
                 tf = time.time() - t0
-                alg_name = FACE_BASELINE + "_" + model_str
+                print(alg_name, tf)
                 add_algorithm(alg, alg_name, tf)
         else:
 
             # Define tasks
             tasks = [
-                (gt_estimator, "integral", FACE_BASELINE, df_train, class_var_name, chunks, eps, penalty,
+                (gt_estimator_path, "integral", FACE_BASELINE, df_train, class_var_name, chunks, eps, penalty,
                  algorithm_dir, dummy),
-                (normalizing_flow, "kde", FACE_KDE, df_train, class_var_name, chunks, eps, penalty,
+                (nf_path, "kde", FACE_KDE, df_train, class_var_name, chunks, eps, penalty,
                  algorithm_dir, dummy),
-                (normalizing_flow, "epsilon", FACE_EPS, df_train, class_var_name, chunks, eps, penalty,
+                (nf_path, "epsilon", FACE_EPS, df_train, class_var_name, chunks, eps, penalty,
                  algorithm_dir, dummy)
             ]
 

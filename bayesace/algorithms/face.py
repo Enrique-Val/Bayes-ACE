@@ -49,7 +49,6 @@ def knn_weight(point1, point2, distance, k, n_instances, d, f_tilde):
 
 
 def integral_weight(point1, point2, distance, density_estimator, variables, chunks, penalty=1):
-    print("penalty",penalty)
     path_ij = pd.DataFrame(data=np.linspace(point1, point2, chunks), columns=variables)
     return path_likelihood_length(path_ij, density_estimator, penalty=penalty)
 

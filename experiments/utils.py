@@ -33,8 +33,10 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 
     # Load the pickled gt density estimator from the correct folder
     gt_estimator_path = os.path.join(results_cv_dir, 'gt_' + str(dataset_id) + '.pkl')
+    t0 = time.time()
     gt_estimator: ConditionalNF = pickle.load(
         open(gt_estimator_path, 'rb'))
+    print("Time to load the model gt", type(gt_estimator), time.time() - t0)
 
     assert class_var_name == gt_estimator.get_class_var_name(), "Class variable name does not match"
 
@@ -44,11 +46,15 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 
     # Open the Bayesian network (conditional linear Gaussian)
     clg_network_path = os.path.join(results_cv_dir, 'clg_' + str(dataset_id) + '.pkl')
+    t0 = time.time()
     clg_network = pickle.load(open(clg_network_path, 'rb'))
+    print("Time to load the model clg", type(clg_network), time.time() - t0)
 
     # Open the NF
     nf_path = os.path.join(results_cv_dir, 'nf_' + str(dataset_id) + '.pkl')
+    t0 = time.time()
     normalizing_flow = pickle.load(open(nf_path, 'rb'))
+    print("Time to load the model nf", type(normalizing_flow), time.time() - t0)
 
     # Name the index column
     df_train.index.name = dataset_id
