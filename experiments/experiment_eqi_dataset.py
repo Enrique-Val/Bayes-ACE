@@ -181,6 +181,7 @@ if __name__ == "__main__":
         else :
             diff_df = df_counterfactuals_res - df_counterfactuals[df_counterfactuals.columns[:-1]]
             diff_df.to_csv(os.path.join(results_dir, f"diff_{algorithm}_{penalty}.csv"))
-            diff_df_unscaled = scaler.inverse_transform(diff_df)
+            diff_df_unscaled = diff_df.copy()
+            diff_df_unscaled[:] = scaler.inverse_transform(diff_df)
             diff_df_unscaled.to_csv(os.path.join(results_dir, f"diffunscaled_{algorithm}_{penalty}.csv"))
             distances.to_csv(os.path.join(results_dir, f"distances_{algorithm}_{penalty}.csv"))
