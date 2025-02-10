@@ -152,3 +152,10 @@ class BayesianNetworkClassifier(ConditionalDE):
 
     def sample(self, n_samples, seed=None) -> pd.DataFrame:
         return self.bayesian_network.sample(n_samples, ordered=True, seed=seed).to_pandas()
+
+    def fitted(self):
+        return self.bayesian_network.fitted()
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.bayesian_network.include_cpd = True
