@@ -17,7 +17,9 @@ def worker(alg, instance) :
     result = alg.run(instance, target_label=target_label)
     return result
 
-if __name__ == "__main__" :
+
+if __name__ == "__main__":
+    mp.set_start_method('spawn', force=True)
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_eqi/", type=str)

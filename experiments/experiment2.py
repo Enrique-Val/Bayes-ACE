@@ -65,6 +65,7 @@ def build_FACE_worker(density_estimator_path, graph_type, alg_name, df_train, cl
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn', force=True)
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=44120, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
