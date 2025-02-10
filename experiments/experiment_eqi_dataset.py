@@ -34,7 +34,7 @@ if __name__ == "__main__":
     # Hard code some parameters
     vertices_list = [0, 1, 2]
     n_counterfactuals = 80
-    sigma = -0.25
+    sigma = -0.5
     chunks = 20
     graph_size = 1000
     verbose = False
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     df_counterfactuals = df_test[class_int < 5].head(n_counterfactuals)
 
     # The constraints will be defined by the performance of the normalizing flow model on unseen data
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_test, models["nf"])
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(pd.concat([df_train, df_test]), df_test, models["nf"])
     print("Constraints: ", mu_gt, std_gt, mae_gt, std_mae_gt)
     logl_threshold = mu_gt + sigma * std_gt
     pp_threshold = min(mae_gt + sigma * std_mae_gt, 0.99)
@@ -128,8 +128,8 @@ if __name__ == "__main__":
             opt_algorithm_params = get_best_opt_params(model="bn_restricted_lim_arcs", dataset_id="EQI", dir=data_dir)
             opt_algorithm_params["pop_size"] = 100
             alg = BayesACE(density_estimator=models["bn_restricted_lim_arcs"], features=df_train.columns[:-1],
-                           n_vertices=vertices, generations=n_gen, opt_algorithm=NSGA2,
-                           opt_algorithm_params={"pop_size": 100}, seed=0, chunks=chunks, penalty=penalty,
+                           n_vertices=vertices, generations=n_gen, opt_algorithm=NSGA2, sampling_range=sampling_range,
+                           opt_algorithm_params=opt_algorithm_params, seed=0, chunks=chunks, penalty=penalty,
                            posterior_probability_threshold=pp_threshold, log_likelihood_threshold=logl_threshold,
                            parallelize=False, verbose=verbose)
             algorithms["bayesace_"+str(vertices)] = alg
