@@ -200,8 +200,8 @@ def friedman_posthoc(data, correct="bergmann") -> dict[str, pd.DataFrame | pd.Se
     return bh_posthoc
 
 
-def get_best_opt_params(model: str, dataset_id: int, dir: str):
-    assert model in ["nf", "clg", "gt"], "Model must be one of 'nf', 'clg' or 'gt'"
+def get_best_opt_params(model: str, dataset_id, dir: str):
+    #assert model in ["nf", "clg", "gt"], "Model must be one of 'nf', 'clg' or 'gt'"
     file_in_dir = os.path.join(dir, "best_params_" + model + ".csv")
     best_params = pd.read_csv(file_in_dir, index_col=0)
     try:

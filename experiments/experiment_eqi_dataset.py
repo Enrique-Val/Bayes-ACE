@@ -8,7 +8,7 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 
 from bayesace.algorithms.bayesace_algorithm import BayesACE
 from bayesace.algorithms.face import FACE
-from experiments.utils import get_constraints
+from experiments.utils import get_constraints, get_best_opt_params
 import multiprocessing as mp
 
 def worker(alg, instance) :
@@ -32,10 +32,22 @@ if __name__ == "__main__":
     penalty = args.penalty
 
     # Hard code some parameters
-    vertices_list = [0, 1, 2, 3]
+    vertices_list = [0, 1, 2]
     n_counterfactuals = 20
     sigma = -0.25
     chunks = 20
+    graph_size = 1000
+    verbose = False
+    n_gen = 500
+
+    # dummy mode
+    if args.dummy:
+        n_counterfactuals = 2
+        vertices_list = [0]
+        chunks = 3
+        graph_size = 10
+        verbose = True
+        n_gen = 5
 
     # Load all the models and store their paths
     models = {}
@@ -84,38 +96,46 @@ if __name__ == "__main__":
 
 
     # First, a FACE instance using the normalizing flow model
-    if os.path.exists(algorithms_paths["face"]):
+    if os.path.exists(algorithms_paths["face"]) and not args.dummy:
         with open(algorithms_paths["face"], "rb") as f:
             algorithms["face"] = pickle.load(f)
     else:
         alg = FACE(density_estimator=models["nf"], features=df_train.columns[:-1], chunks=chunks,
-                   dataset=df_train.drop(class_var_name, axis=1).head(1000),
+                   dataset=df_train.drop(class_var_name, axis=1).head(graph_size),
                    distance_threshold=np.inf, graph_type="kde", f_tilde=None, seed=0,
                    log_likelihood_threshold=logl_threshold, posterior_probability_threshold=pp_threshold,
-                   penalty=penalty, parallelize=False)
+                   penalty=penalty, parallelize=False, verbose=verbose)
         algorithms["face"] = alg
-        pickle.dump(alg, open(algorithms_paths["face"], "wb"))
+        print("Trained FACE")
+        if not args.dummy:
+            pickle.dump(alg, open(algorithms_paths["face"], "wb"))
 
     for vertices in vertices_list:
-        if os.path.exists(algorithms_paths["bayesace_"+str(vertices)]):
+        if os.path.exists(algorithms_paths["bayesace_"+str(vertices)]) and not args.dummy:
             with open(algorithms_paths["bayesace_"+str(vertices)], "rb") as f:
                 algorithms["bayesace_"+str(vertices)] = pickle.load(f)
         else:
-            alg = BayesACE(density_estimator=models[models["bn_unrestricted_lim_arcs"]], features=df_train.columns[:-1], n_vertices=vertices,
-                           generations=100, opt_algorithm=NSGA2, opt_algorithm_params={"pop_size": 100}, seed=0, chunks=chunks,
-                           penalty=penalty, verbose=True, posterior_probability_threshold=0.90, log_likelihood_threshold=-150,
-                           parallelize=False)
+            # Load the opt_algortihm params
+            opt_algorithm_params = get_best_opt_params(model="bn_restricted_lim_arcs", dataset_id="EQI", dir=data_dir)
+            opt_algorithm_params["pop_size"] = 100
+            alg = BayesACE(density_estimator=models["bn_restricted_lim_arcs"], features=df_train.columns[:-1],
+                           n_vertices=vertices, generations=n_gen, opt_algorithm=NSGA2,
+                           opt_algorithm_params={"pop_size": 100}, seed=0, chunks=chunks, penalty=penalty,
+                           posterior_probability_threshold=pp_threshold, log_likelihood_threshold=logl_threshold,
+                           parallelize=False, verbose=verbose)
             algorithms["bayesace_"+str(vertices)] = alg
-            pickle.dump(alg, open(algorithms_paths["bayesace_"+str(vertices)], "wb"))
+            if not args.dummy:
+                pickle.dump(alg, open(algorithms_paths["bayesace_"+str(vertices)], "wb"))
 
     results_dir = os.path.join(args.dir_name, "results")
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
 
     # Save the set of counterfactuals
-    df_counterfactuals.to_csv(os.path.join(results_dir, f"cf_{penalty}.csv"))
-    df_counterfactuals_unscaled = scaler.inverse_transform(df_counterfactuals)
-    df_counterfactuals_unscaled.to_csv(os.path.join(results_dir, f"cfunscaled_{penalty}.csv"))
+    if not args.dummy:
+        df_counterfactuals.to_csv(os.path.join(results_dir, f"cf_{penalty}.csv"))
+        df_counterfactuals_unscaled = scaler.inverse_transform(df_counterfactuals)
+        df_counterfactuals_unscaled.to_csv(os.path.join(results_dir, f"cfunscaled_{penalty}.csv"))
 
     # Run the experiments on the test data
     for algorithm in algorithms.keys():
@@ -146,8 +166,11 @@ if __name__ == "__main__":
                 distances.iloc[i] = np.nan
 
         # Save the results
-        diff_df = df_counterfactuals_res - df_counterfactuals[df_counterfactuals.columns[:-1]]
-        diff_df.to_csv(os.path.join(results_dir, f"diff_{algorithm}_{penalty}.csv"))
-        diff_df_unscaled = scaler.inverse_transform(diff_df)
-        diff_df_unscaled.to_csv(os.path.join(results_dir, f"diffunscaled_{algorithm}_{penalty}.csv"))
-        distances.to_csv(os.path.join(results_dir, f"distances_{algorithm}_{penalty}.csv"))
+        if args.dummy:
+            print("Analysis for dummy mode with", algorithm)
+        else :
+            diff_df = df_counterfactuals_res - df_counterfactuals[df_counterfactuals.columns[:-1]]
+            diff_df.to_csv(os.path.join(results_dir, f"diff_{algorithm}_{penalty}.csv"))
+            diff_df_unscaled = scaler.inverse_transform(diff_df)
+            diff_df_unscaled.to_csv(os.path.join(results_dir, f"diffunscaled_{algorithm}_{penalty}.csv"))
+            distances.to_csv(os.path.join(results_dir, f"distances_{algorithm}_{penalty}.csv"))
