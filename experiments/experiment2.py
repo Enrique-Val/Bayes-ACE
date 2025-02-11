@@ -8,6 +8,8 @@ import argparse
 import pandas as pd
 import torch
 from pymoo.algorithms.moo.nsga2 import NSGA2
+
+from bayesace.algorithms.algorithm import Algorithm
 from bayesace.algorithms.wachter import WachterCounterfactual
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
@@ -27,9 +29,11 @@ WACHTER = "wachter"
 BAYESACE = "bayesace"
 
 
-def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
+def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks, logl_threshold, pp_threshold):
     torch.set_num_threads(1)
-    algorithm = pickle.load(open(algorithm_path, 'rb'))
+    algorithm: Algorithm = pickle.load(open(algorithm_path, 'rb'))
+    algorithm.set_log_likelihood_threshold(logl_threshold)
+    algorithm.set_posterior_probability_threshold(pp_threshold)
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
     return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
 
@@ -262,15 +266,18 @@ if __name__ == "__main__":
         for i in metrics:
             results_dfs[i].index.name = dataset_id
         # Set the proper likelihood  and accuracy thresholds
-        for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
-            algorithm.set_log_likelihood_threshold(mu_gt + likelihood_dev * std_gt)
-            algorithm.set_posterior_probability_threshold(min(mae_gt + std_mae_gt * post_prob_dev, 0.99))
+        logl_threshold = mu_gt + likelihood_dev * std_gt
+        pp_threshold = min(mae_gt + std_mae_gt * post_prob_dev, 0.99)
+        for algorithm in algorithms:
+            algorithm.set_log_likelihood_threshold(logl_threshold)
+            algorithm.set_posterior_probability_threshold(pp_threshold)
 
         if parallelize:
             pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals*len(algorithms_paths)))
             results = pool.starmap(worker, [
-                    (df_counterfactuals.iloc[[i]], tmp_file_str, gt_estimator_path,
-                     penalty, chunks) for i,tmp_file_str in product(range(n_counterfactuals), algorithms_paths)])
+                    (df_counterfactuals.iloc[[i]], alg_path, gt_estimator_path,
+                     penalty, chunks, logl_threshold, pp_threshold)
+                     for i,alg_path in product(range(n_counterfactuals), algorithms_paths)])
             pool.close()
             pool.join()
         else:
