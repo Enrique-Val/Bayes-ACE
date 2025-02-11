@@ -34,7 +34,7 @@ if __name__ == "__main__":
     # Hard code some parameters
     vertices_list = [0, 1, 2]
     n_counterfactuals = 80
-    sigma = -0.5
+    sigma = -0.25
     chunks = 20
     graph_size = 1000
     verbose = False
@@ -79,14 +79,14 @@ if __name__ == "__main__":
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(pd.concat([df_train, df_test]), df_test, models["nf"])
     print("Constraints: ", mu_gt, std_gt, mae_gt, std_mae_gt)
     logl_threshold = mu_gt + sigma * std_gt
-    pp_threshold = min(mae_gt + sigma * std_mae_gt, 0.99)
+    pp_threshold = 0.7
 
     manual_change = True
     if manual_change :
         # Append at the beginning of the counterfactuals California and Northwest territories and New York
         move_list = [6037, 2188, 36061]
         data_move = df_train[df_train.index.isin(move_list)]
-        df_train = df_train[df_train.index.isin(move_list)]
+        df_train = df_train[~df_train.index.isin(move_list)]
         df_counterfactuals = pd.concat([data_move, df_counterfactuals])
         df_test = pd.concat([data_move, df_test])
 
@@ -143,9 +143,6 @@ if __name__ == "__main__":
     # Save the set of counterfactuals
     if not args.dummy:
         df_counterfactuals.to_csv(os.path.join(results_dir, f"cf_{penalty}.csv"))
-        df_counterfactuals_unscaled = df_counterfactuals.copy()
-        df_counterfactuals_unscaled[df_counterfactuals.columns[:-1]] = scaler.inverse_transform(df_counterfactuals[df_counterfactuals.columns[:-1]])
-        df_counterfactuals_unscaled.to_csv(os.path.join(results_dir, f"cfunscaled_{penalty}.csv"))
 
     # Run the experiments on the test data
     for algorithm in algorithms.keys():
@@ -181,7 +178,10 @@ if __name__ == "__main__":
         else :
             diff_df = df_counterfactuals_res - df_counterfactuals[df_counterfactuals.columns[:-1]]
             diff_df.to_csv(os.path.join(results_dir, f"diff_{algorithm}_{penalty}.csv"))
-            diff_df_unscaled = diff_df.copy()
-            diff_df_unscaled[:] = scaler.inverse_transform(diff_df)
-            diff_df_unscaled.to_csv(os.path.join(results_dir, f"diffunscaled_{algorithm}_{penalty}.csv"))
             distances.to_csv(os.path.join(results_dir, f"distances_{algorithm}_{penalty}.csv"))
+            results_i_dir = os.path.join(results_dir, f"{algorithm}_{penalty}")
+            if not os.path.exists(results_i_dir):
+                os.makedirs(results_i_dir)
+            for i,result in enumerate(results):
+                pickle.dump(result, open(os.path.join(results_i_dir, f"{i}.pkl"), "wb"))
+
