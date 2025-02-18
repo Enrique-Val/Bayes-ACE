@@ -73,7 +73,7 @@ if __name__ == "__main__":
     df_test[df_test.columns[:-1]] = scaler.transform(df_test[df_test.columns[:-1]])
     # Select only the instances whose target class is below 5 (improvable EQI)
     class_int = df_train[class_var_name].astype(int)
-    df_counterfactuals = df_train[class_int < 5].head(n_counterfactuals)
+    df_counterfactuals = df_train[class_int > 1].head(n_counterfactuals)
 
     # The constraints will be defined by the performance of the normalizing flow model on unseen data
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_train, df_test, model_nf)

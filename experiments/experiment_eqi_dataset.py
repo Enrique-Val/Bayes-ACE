@@ -72,9 +72,9 @@ if __name__ == "__main__":
     df_test[class_var_name] = df_test[class_var_name].astype('string').astype('category')
     df_test[df_test.columns[:-1]] = scaler.transform(df_test[df_test.columns[:-1]])
 
-    # Select only the instances whose target class is below 5 (improvable EQI)
+    # Select only the instances whose target class is above 1 (improvable EQI)
     class_int = df_test[class_var_name].astype(int)
-    df_counterfactuals = df_test[class_int < 5].head(n_counterfactuals)
+    df_counterfactuals = df_test[class_int > 1].head(n_counterfactuals)
 
     # The constraints will be defined by the performance of the normalizing flow model on unseen data
     sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(pd.concat([df_train, df_test]), df_test, models["nf"])
@@ -84,8 +84,8 @@ if __name__ == "__main__":
 
     manual_change = True
     if manual_change :
-        # Append at the beginning of the counterfactuals California and Northwest territories and New York
-        move_list = [6037, 2188, 36061]
+        # Append at the beginning of the counterfactuals California, Los Conejos (Colorado) and New York
+        move_list = [6037, 8021, 36061]
         data_move = df_train[df_train.index.isin(move_list)]
         df_train = df_train[~df_train.index.isin(move_list)]
         df_counterfactuals = pd.concat([data_move, df_counterfactuals])
@@ -170,7 +170,7 @@ if __name__ == "__main__":
             results = []
             for i in range(len(df_counterfactuals.index)):
                 instance = df_counterfactuals.iloc[[i]]
-                target_label = str(int(instance[class_var_name].to_numpy()[0])+2)
+                target_label = str(int(instance[class_var_name].to_numpy()[0])-2)
                 result = alg.run(instance, target_label=target_label)
                 results.append(result)
         else:
