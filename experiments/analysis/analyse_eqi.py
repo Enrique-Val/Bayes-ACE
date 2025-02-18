@@ -2,11 +2,14 @@ import json
 import os
 import pickle
 
+import networkx as nx
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
+import pybnesian as pb
 
+from bayesace import path_likelihood_length
 from experiments.utils import friedman_posthoc
 
 # Experiments:
@@ -38,10 +41,66 @@ if __name__ == "__main__":
     with open(os.path.join(model_dir, "bn_restricted_lim_arcs.pkl"), "rb") as f:
         bn = pickle.load(f)
 
+    betas = {}
+    var_edges = {}
+    for node in bn.bayesian_network.nodes():
+        cpd = bn.bayesian_network.cpd(node)
+        if "EQI" in node and "EQI" != node:
+            node_name = node.split("_")[0]
+            betas[node_name] = {}
+            if len(cpd.evidence()) > 0:
+                print(cpd)
+                parents = cpd.evidence()
+                parents.remove("EQI")
+                parents = ["EQI"] + parents
+                parents = [parent.split("_")[0] for parent in parents]
+                coefs_df = pd.DataFrame(columns=parents, index=range(7))
+                for i in range(7):
+                    cpd_i = cpd.conditional_factor(pb.Assignment({"EQI" : str(i)}))
+                    coefs_df.loc[i] = cpd_i.beta
+                # Compute differential of the first column
+                coefs_df["EQI"] = coefs_df["EQI"].diff()
+                betas[node_name] = coefs_df.mean(axis=0).to_dict()
+        elif "EQI" != node:
+            for i,parent in enumerate(cpd.evidence()):
+                var_edges[(parent, node)] = cpd.beta[i+1]
+                print(parent, "->", node, cpd.beta[i+1])
+
+    print(betas)
+    edge_list = []
+    edge_weights = []
+    for i in betas.keys():
+        for j in betas[i].keys():
+            edge_list.append((j,i))
+            edge_weights.append(betas[i][j])
+
+    graph = nx.DiGraph()
+    # Colour in green positive arcs, in red negative arcs. Strenght of the colour depends on the absolute value of the coefficient
+    edge_colors = []
+    for weight in edge_weights:
+        if weight > 0:
+            edge_colors.append("green")
+        else:
+            edge_colors.append("red")
+    edge_weights = [abs(weight)*6 for weight in edge_weights]
+    for edge, weight, color in zip(edge_list, edge_weights, edge_colors):
+        graph.add_edges_from([edge], weight=weight, color=color)
+    pos = nx.drawing.nx_agraph.graphviz_layout(graph, prog="dot")
+    edge_weights = list(nx.get_edge_attributes(graph, "weight").values())
+    edge_colors = list(nx.get_edge_attributes(graph, "color").values())
+    nx.draw(graph, pos, with_labels=True, width = edge_weights, edge_color = edge_colors, node_size=1000,
+            font_size=8, font_weight="bold")
+    plt.show()
+
+
     # Print CPDs that include the characters "EQI"
     for node in bn.bayesian_network.nodes() :
         if "EQI" in node :
             print(bn.bayesian_network.cpd(node))
+
+    # Load the normalizing flow model
+    with open(os.path.join(model_dir, "nf.pkl"), "rb") as f:
+        nf = pickle.load(f)
 
     vertices_list = [0, 1, 2]
     penalty_list = [1,5,10,15]
@@ -52,8 +111,8 @@ if __name__ == "__main__":
     differences = {}
     distances = {}
 
-    alg_names = ["face"] + ["bayesace_"+str(i) for i in vertices_list]
-    new_alg_names = ["FACE"] + [f"BayesACE {i} vertices" for i in vertices_list]
+    alg_names = ["face"] + ["wachter"] + ["bayesace_"+str(i) for i in vertices_list]
+    new_alg_names = ["FACE"] + ["Wachter"] + [f"BayesACE {i} vertices" for i in vertices_list]
 
     for penalty in penalty_list:
         penalty_dir = os.path.join(plots_dir, "penalty_" + str(penalty))
@@ -65,7 +124,7 @@ if __name__ == "__main__":
         distances[penalty] = {}
 
         alg_names_penalty = [f"{alg_name}_{penalty}" for alg_name in alg_names]
-        bayesace_names_penalty = alg_names_penalty[1:]
+        bayesace_names_penalty = alg_names_penalty[2:]
         bayesace_distances = {}
         for alg_name in bayesace_names_penalty:
             bayesace_distances[alg_name] = pd.read_csv(os.path.join(results_dir, "distances_"+alg_name+".csv"), index_col=0).to_numpy()[0]
@@ -76,7 +135,7 @@ if __name__ == "__main__":
 
         # Select the one with the lowest ranking
         best_alg = f_bh_result["summary_ranks"].idxmin()
-        selected_algs = alg_names_penalty[:1] + [best_alg]
+        selected_algs = alg_names_penalty[:2] + [best_alg]
 
         name_map = {}
 
@@ -85,21 +144,21 @@ if __name__ == "__main__":
                 continue
             name_map[alg_name] = new_alg_name
             alg_path = os.path.join(algorithms_dir, alg_name + ".pkl")
-            algorithms[penalty][new_alg_name] = pickle.load(open(alg_path, "rb"))
+            #algorithms[penalty][new_alg_name] = pickle.load(open(alg_path, "rb"))
             differences[penalty][new_alg_name] = pd.read_csv(os.path.join(results_dir, "diff_"+alg_name+".csv"), index_col=0)
             distances[penalty][new_alg_name] = pd.read_csv(os.path.join(results_dir, "distances_"+alg_name+".csv"), index_col=0)
             results_bank_dir = os.path.join(results_dir, alg_name)
             results_bank[penalty][new_alg_name] = {}
-            '''for i in range(len(os.listdir(results_bank_dir))):
+            for i in range(len(os.listdir(results_bank_dir))):
                 file_i = str(i) + ".pkl"
                 instance_path = os.path.join(results_bank_dir, file_i)
-                results_bank[penalty][new_alg_name][i] = pickle.load(open(instance_path, "rb"))'''
+                results_bank[penalty][new_alg_name][i] = pickle.load(open(instance_path, "rb"))
         # Add as a new key the difference between the best BayesACE and FACE
         differences[penalty]["BayesACE - FACE"] = (differences[penalty][name_map[best_alg]] - differences[penalty][name_map["face_"+str(penalty)]]).abs()
         distances[penalty]["BayesACE - FACE"] = (distances[penalty][name_map[best_alg]] - distances[penalty][name_map["face_"+str(penalty)]]).abs()
 
     generic_exp = False
-    if generic_exp :
+    if generic_exp:
         # Do an experiment for each penalty
         for alg_i in range(3):
             fig, ax = plt.subplots(2, 2, figsize=(10, 10))
@@ -136,7 +195,7 @@ if __name__ == "__main__":
                 fig_vars.suptitle("Algorithm " + str(new_alg_name) + " with penalty " + str(penalty))
                 fig_vars.savefig(os.path.join(penalty_dir, new_alg_name+"_variables.pdf"))
                 fig_vars.clf()
-            fig.suptitle("Algorithm " + str(new_alg_name))
+            fig.suptitle("Algorithm " + str(alg_i))
             fig.savefig(os.path.join(plots_dir, "eqi.pdf"))
             plt.close()
 
@@ -196,7 +255,7 @@ if __name__ == "__main__":
         index_i = differences[1]["FACE"].index[i]
         county_name = metadata.loc[index_i]["County_Name"]
         print("Analysis county", county_name)
-        for penalty in [5,15]:
+        for penalty in [1,5,10,15]:
             print("\tPenalty", penalty)
             for new_alg_name in differences[penalty].keys():
                 if new_alg_name == "BayesACE - FACE":
@@ -208,6 +267,11 @@ if __name__ == "__main__":
                 diff_i = diff_i[-5:]
                 print("\t\t\tDifferences")
                 print(diff_i)
+                print("Sum of differences", diff_i.abs().sum())
+                # Compute sum of differences over the neural net
+                results_bank_i = results_bank[penalty][new_alg_name][i]
+                pll = path_likelihood_length(path=results_bank_i.path.reset_index(drop=True), density_estimator=nf, penalty=penalty)
+                print("Path likelihood length", pll**(1/penalty))
         print()
         print()
 
