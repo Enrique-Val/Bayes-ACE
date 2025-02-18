@@ -8,6 +8,7 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 
 from bayesace.algorithms.bayesace_algorithm import BayesACE
 from bayesace.algorithms.face import FACE
+from bayesace.algorithms.wachter import WachterCounterfactual
 from experiments.utils import get_constraints, get_best_opt_params
 import multiprocessing as mp
 
@@ -19,7 +20,7 @@ def worker(alg, instance) :
 
 
 if __name__ == "__main__":
-    mp.set_start_method('spawn', force=True)
+    mp.set_start_method('fork', force=True)
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_eqi/", type=str)
@@ -32,8 +33,8 @@ if __name__ == "__main__":
     penalty = args.penalty
 
     # Hard code some parameters
-    vertices_list = [0, 1, 2]
-    n_counterfactuals = 80
+    vertices_list = [0, 1, 2, 3]
+    n_counterfactuals = 150
     sigma = -0.25
     chunks = 20
     graph_size = 1000
@@ -99,6 +100,7 @@ if __name__ == "__main__":
     if not os.path.exists(algorithm_dir):
         os.makedirs(algorithm_dir)
 
+    algorithms_paths["wachter"] = os.path.join(algorithm_dir, f"wachter.pkl")
     algorithms_paths["face"] = os.path.join(algorithm_dir, f"face_{penalty}.pkl")
     for vertices in vertices_list:
         algorithms_paths["bayesace_"+str(vertices)] = os.path.join(algorithm_dir, f"bayesace_{vertices}_{penalty}.pkl")
@@ -118,6 +120,20 @@ if __name__ == "__main__":
         print("Trained FACE")
         if not args.dummy:
             pickle.dump(alg, open(algorithms_paths["face"], "wb"))
+
+    # Second, a Wachter instance using the normalizing flow model
+    if os.path.exists(algorithms_paths["wachter"]) and not args.dummy:
+        with open(algorithms_paths["wachter"], "rb") as f:
+            algorithms["wachter"] = pickle.load(f)
+    else:
+        alg = WachterCounterfactual(density_estimator=models["nf"], features=df_train.columns[:-1],
+                                    dataset=df_train,
+                                    log_likelihood_threshold=logl_threshold, posterior_probability_threshold=pp_threshold,
+                                    )
+        algorithms["wachter"] = alg
+        if not args.dummy and False:
+            pickle.dump(alg, open(algorithms_paths["wachter"], "wb"))
+
 
     for vertices in vertices_list:
         if os.path.exists(algorithms_paths["bayesace_"+str(vertices)]) and not args.dummy:
@@ -150,7 +166,7 @@ if __name__ == "__main__":
         df_counterfactuals_res = df_counterfactuals.drop(class_var_name, axis=1)
         distances = pd.Series(index=df_counterfactuals_res.index)
         alg = algorithms[algorithm]
-        if not args.parallelize:
+        if not args.parallelize or algorithm == "face" or algorithm == "wachter":
             results = []
             for i in range(len(df_counterfactuals.index)):
                 instance = df_counterfactuals.iloc[[i]]

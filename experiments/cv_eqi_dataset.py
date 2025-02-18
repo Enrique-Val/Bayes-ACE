@@ -200,6 +200,8 @@ if __name__ == "__main__":
         max_indegree = 1
 
     data, data_metadata, var_types, features, eqis = read_eqi_dataset(delete_features=True)
+    pickle.dump(var_types, open(os.path.join(args.dir_name, "data_processed", "var_types.pkl"), "wb"))
+    data_metadata.to_csv(os.path.join(args.dir_name, "data_processed", "metadata.csv"))
     whitelist, blacklist = get_bn_restrictions(features, eqis, var_types)
 
     # Save the metadata
@@ -207,7 +209,7 @@ if __name__ == "__main__":
 
     data_train, data_test = train_test_split(data, test_size=0.2, random_state=0)
     # If Los Angeles (6037) or Northwest Arctic (2188) are in train, put them in test, at the beginning
-    manual_change = True
+    manual_change = False
     if manual_change:
         move_list = [6037, 2188, 36061]
         data_move = data_train[data_train.index.isin(move_list)]

@@ -92,7 +92,7 @@ if __name__ == "__main__":
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
-    n_counterfactuals = 10
+    n_counterfactuals = 15
     eps = np.inf
     n_train_size = 1000
     n_generations = 500
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     if not os.path.exists(results_dir + 'paths/'):
         os.makedirs(results_dir + 'paths/')
 
-    for likelihood_dev, post_prob_dev in zip(likelihood_dev_list, post_prob_dev_list):
+    for likelihood_dev, post_prob_dev in product(likelihood_dev_list, post_prob_dev_list):
         print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", post_prob_dev)
         # Result storage
         results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}

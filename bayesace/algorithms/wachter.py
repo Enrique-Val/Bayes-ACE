@@ -30,6 +30,8 @@ class WachterCounterfactual(Algorithm):
 
         # Compute the median absolute deviation for each feature
         self.feature_mad = median_absolute_deviation(self.dataset_features, axis=0)
+        # Sum a small value to avoid division by zero
+        self.feature_mad += 1e-4
 
     def _proximity_loss(self, candidates_cf, original_instance):
         """

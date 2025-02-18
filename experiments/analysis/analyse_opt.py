@@ -25,16 +25,24 @@ def load_data(root_dir):
     for id_folder in os.listdir(root_dir):
         if os.path.isdir(os.path.join(root_dir, id_folder)) and id_folder != "plots":
             opt_path = os.path.join(root_dir, id_folder, "opt_results")
-            for file in os.listdir(opt_path):
+            opt_path2 = os.path.join(root_dir, id_folder, "opt_results40-60")
+            if not os.path.exists(opt_path2) :
+                continue
+            for file in os.listdir(opt_path2):
                 file_path = os.path.join(opt_path, file)
+                file_path2 = os.path.join(opt_path2, file)
                 if not os.path.isdir(file_path):
                     try :
                         dataset_id = file_pattern.match(file).group(1)
                         model_str = file_pattern.match(file).group(2)
                         data = pd.read_csv(file_path, index_col=0)
+                        data2 = pd.read_csv(file_path2, index_col=0)
+                        # Concatenate the data horizontally
+                        data = pd.concat([data, data2], axis=1)
                         # Substitute nan with large number
                         data = data.fillna(1e300)
                         results[model_str][dataset_id] = data
+                        print("Loaded data for dataset: " , dataset_id, data.columns, " model: ", model_str)
                     except:
                         continue
     return results
@@ -45,12 +53,12 @@ if __name__ == "__main__":
     # Load the data
     data_dict = load_data(root_dir)
 
-    # Create plot subdir if it does not exist
-    plots_path = os.path.join(root_dir, "plots")
-    if not os.path.exists(plots_path):
-        os.makedirs(plots_path)
-
     for model_str in data_dict.keys():
+        # Create plot subdir if it does not exist
+        plots_path = os.path.join(root_dir, "plots", model_str)
+        if not os.path.exists(plots_path):
+            os.makedirs(plots_path)
+
         print("Analyzing model: ", model_str)
         data_model_dict = data_dict[model_str]
 
@@ -73,11 +81,12 @@ if __name__ == "__main__":
         plt.clf()
 
         # Create a dataframe to store best params per dataset
-        best_params_df = pd.DataFrame(columns=["eta_crossover", "eta_mutation", "selection_type"], index=["default"]+list(data_model_dict.keys()))
+        best_params_df = pd.DataFrame(columns=["eta_crossover", "eta_mutation", "selection_type"])
 
         # Store the best params for the combined dataset
         best_params_str = test_results["summary_ranks"].idxmin()
         best_params = eval(best_params_str)
+        print("Best params for combined dataset: ", best_params)
 
         # Store the best params
         best_params_df.loc["default"] = best_params
