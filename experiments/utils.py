@@ -148,7 +148,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
     else:
         raise TypeError("Result is not list nor ACEResult")
 
-def friedman_posthoc(data, correct="bergmann") -> dict[str, pd.DataFrame | pd.Series]:
+def friedman_posthoc(data, correct="bergmann", eps = 1e-5) -> dict[str, pd.DataFrame | pd.Series]:
     '''
     Perform the Friedman test and the Bermann-Hommel post-hoc test using the scmamp package in R
 
@@ -195,7 +195,9 @@ def friedman_posthoc(data, correct="bergmann") -> dict[str, pd.DataFrame | pd.Se
     bh_posthoc["summary_ranks"] = data.rank("columns").mean(axis=0)
     bh_posthoc["p_values"] = pd.DataFrame(bh_posthoc_scmamp[1], index=data.columns, columns=data.columns).fillna(1.0)
     bh_posthoc["p_adjusted"] = (pd.DataFrame(bh_posthoc_scmamp[2], index=data.columns, columns=data.columns)).fillna(
-        1.0) + 0.0001
+        1.0)
+    # If there are values smaller than eps, set them to eps
+    bh_posthoc["p_adjusted"] = bh_posthoc["p_adjusted"].clip(lower=eps)
 
     return bh_posthoc
 
