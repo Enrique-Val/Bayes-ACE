@@ -217,3 +217,17 @@ def get_best_opt_params(model: str, dataset_id, dir: str):
     selection_type = TournamentSelection(
         func_comp=binary_tournament) if selection_type == "tourn" else RandomSelection()
     return {"crossover": SBX(eta=eta_c, prob=0.9), "mutation": PM(eta=eta_m), "selection": selection_type}
+
+
+def close_factors(number):
+    '''
+    find the closest pair of factors for a given number
+    '''
+    factor1 = 0
+    factor2 = number
+    while factor1 + 1 <= factor2:
+        factor1 += 1
+        if number % factor1 == 0:
+            factor2 = number // factor1
+
+    return factor1, factor2

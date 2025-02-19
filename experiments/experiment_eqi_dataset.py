@@ -14,7 +14,7 @@ import multiprocessing as mp
 
 def worker(alg, instance) :
     class_var_name = alg.density_estimator.get_class_var_name()
-    target_label = str(int(instance[class_var_name].to_numpy()[0]) + 2)
+    target_label = str(int(instance[class_var_name].to_numpy()[0]) - 2)
     result = alg.run(instance, target_label=target_label)
     return result
 

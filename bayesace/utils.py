@@ -50,6 +50,15 @@ def delta_distance(x_cfx, x_og, eps=0.1):
     return sum(map(lambda i: i > eps, abs_distance[0]))
 
 
+def square_diff(y_true: np.ndarray, y_pred: pd.DataFrame):
+    assert len(y_pred.columns) == 2
+    encoder = OneHotEncoder(sparse_output=False)
+    y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
+    class_labels = encoder.categories_[0]
+    y_bin = y_true_coded[:, 0]
+    y_pred = y_pred[class_labels[0]]
+    return (y_bin - y_pred.values) ** 2
+
 def brier_score(y_true: np.ndarray, y_pred: pd.DataFrame) -> float:
     encoder = OneHotEncoder(sparse_output=False)
     y_true_coded = encoder.fit_transform(y_true.reshape(-1, 1))
