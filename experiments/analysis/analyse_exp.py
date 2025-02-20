@@ -1,18 +1,15 @@
 import os
-import time
 from collections import defaultdict
 from itertools import product
 
 import numpy as np
 import pandas as pd
-from mpl_toolkits.axes_grid1.axes_divider import make_axes_area_auto_adjustable
-from scipy.stats import friedmanchisquare, wilcoxon
 import scikit_posthocs as sp
 import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
-from experiments.utils import friedman_posthoc
+from experiments.utils import friedman_posthoc, close_factors
 
 from experiments.experiment2 import FACE_BASELINE, FACE_KDE, FACE_EPS, WACHTER, BAYESACE
 
@@ -201,6 +198,31 @@ def aggregate_data(data_dict, values_dict, segregate=None):
             data_dict_new[combination_segregate] = pd.concat(tmp_list).reset_index(drop=True)
     return data_dict_new
 
+def plot_segregate(segregate, join_in_plot, values_dict, data_new, metric, joint_plots, box_plot=True) :
+    if len(segregate) == 0:
+        # Name of the dir is the product of the segregate list
+        if not os.path.exists(joint_plots):
+            os.makedirs(joint_plots)
+        create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint_plots, box_plot=box_plot)
+    else:
+        # Name of the dir is the product of the segregate list
+        if not os.path.exists(joint_plots):
+            os.makedirs(joint_plots)
+        for i in product(*[values_dict[j] for j in segregate]):
+            create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint_plots, comb=i,
+                           box_plot=box_plot)
+
+def get_palette(new_algs):
+    palette = {}
+    for method in new_algs:
+        if "BayesACE" in method:
+            palette[method] = "blue"
+        elif "FACE" in method or "Wachter" in method:
+            palette[method] = "orange"
+        elif "DAACE" in method:
+            palette[method] = "purple"
+    return palette
+
 
 def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint_plots, comb=None, box_plot=True):
     p_values_dir = os.path.join(joint_plots, "p_values")
@@ -208,7 +230,9 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
         os.makedirs(p_values_dir)
     if len(join_in_plot) == 1:
         n_figs = np.prod([len(values_dict[i]) for i in join_in_plot])
+        print(n_figs)
         n_rows, n_cols = close_factors(n_figs)
+        print(n_rows, n_cols)
     elif len(join_in_plot) == 2:
         n_rows = len(values_dict[join_in_plot[0]])
         n_cols = len(values_dict[join_in_plot[1]])
@@ -222,6 +246,15 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
         figures_str = ["cdd"]
     #fig_sp, ax_sp = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(10, 10))
     for i, plot_jointly in enumerate(product(*[values_dict[j] for j in join_in_plot])):
+        if n_cols > 1 :
+            ax_i = ax[i // n_cols, i % n_cols]
+            if box_plot:
+                ax_box_i = ax_box[i // n_cols, i % n_cols]
+        else :
+            ax_i = ax[i]
+            if box_plot:
+                ax_box_i = ax_box[i]
+
         if comb is not None:
             key_i = tuple(comb) + tuple(plot_jointly)
         else :
@@ -230,19 +263,17 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
         # List of the renamed algorithms
         new_algs = fbh["p_adjusted"].columns
         # Create the color palette for the algorithms
-        palette = {}
-        for method in new_algs:
-            if "BayesACE" in method:
-                palette[method] = "blue"
-            elif "FACE" in method or "Wachter" in method:
-                palette[method] = "orange"
-            elif "DAACE" in method:
-                palette[method] = "purple"
+        palette = get_palette(new_algs)
         sp.critical_difference_diagram(fbh["summary_ranks"], fbh["p_adjusted"],
                                        label_fmt_left="{label}", label_fmt_right="{label}",
-                                       ax=ax[i // n_cols, i % n_cols], color_palette=palette)
-        fbh["p_adjusted"].to_csv(os.path.join(p_values_dir, " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]) + ".csv"))
-        ax[i // n_cols, i % n_cols].set_title(
+                                       ax=ax_i, color_palette=palette)
+        p_values_subdir = "."
+        if len(segregate) > 0:
+            p_values_subdir = "_".join([segregate[k]+"-"+comb[k] for k in range(len(segregate))])
+        if not os.path.exists(os.path.join(p_values_dir, p_values_subdir)):
+            os.makedirs(os.path.join(p_values_dir, p_values_subdir))
+        fbh["p_adjusted"].to_csv(os.path.join(p_values_dir, p_values_subdir, " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]) + ".csv"))
+        ax_i.set_title(
             " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]))
         if box_plot:
             # For the boxplot, normalize by dividing by the value of FACE GT
@@ -252,24 +283,69 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
 
             data_box = data_box.drop(columns=["FACE GT", "Wachter"])
             # Reorganize order. First, Wachter, then FACE, then DAACE, then BAYESACE
-            sns.boxplot(data=data_box, ax=ax_box[i // n_cols, i % n_cols], showfliers=False, palette=palette)
-            ax_box[i // n_cols, i % n_cols].set_title(
+            sns.boxplot(data=data_box, ax=ax_box_i, showfliers=False, palette=palette)
+            ax_box_i.set_title(
                 " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]))
             # Tilt the x-axis labels
-            for tick in ax_box[i // n_cols, i % n_cols].get_xticklabels():
+            for tick in ax_box_i.get_xticklabels():
                 tick.set_rotation(45)
     # Set the title
     for curr_fig, fig_str in zip(figures, figures_str):
         if len(segregate) == 0 :
             curr_fig.suptitle(metric + " " + " ".join(segregate))
             curr_fig.tight_layout()
-            curr_fig.savefig(os.path.join(joint_plots, "total_" + fig_str +".pdf"))
+            curr_fig.savefig(os.path.join(joint_plots, "total_" + fig_str+ "_segg_"+ "-".join(join_in_plot) +".pdf"))
         else :
             joint_comb_eq = " ".join([segregate[k] + " = " + comb[k] for k in range(len(segregate))])
             joint_comb = "_".join([segregate[k] + "-" + comb[k] for k in range(len(segregate))])
             curr_fig.suptitle(metric + " " + joint_comb_eq)
             curr_fig.tight_layout()
-            curr_fig.savefig(os.path.join(joint_plots, joint_comb + "_"+fig_str+".pdf"))
+            curr_fig.savefig(os.path.join(joint_plots, joint_comb + "_"+fig_str+ "_segg_"+ "-".join(join_in_plot) + ".pdf"))
+
+def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_dir):
+    if len(segregate) > 0:
+        subplot_dir = os.path.join(plot_dir, metric, "_".join(segregate))
+    else:
+        subplot_dir = os.path.join(plot_dir, metric, "joint")
+    data_new = aggregate_data(data_dict[metric], values_dict, segregate)
+    data_new_dist = aggregate_data(data_dict["distance"], values_dict, segregate)
+    data_new = remove_redundant(data_new, data_new_dist)
+    # Rename algorithms
+    for key in data_new.keys():
+        if len(segregate) > 0:
+            title = "Metric: "+ metric + "    " + " , ".join([segregate[k] + " = " + key[k] for k in range(len(segregate))])
+            file_name = "Metric_" + metric + "_".join([segregate[k] + "-" + key[k] for k in range(len(segregate))])
+        else:
+            title = "Metric: " + metric
+            file_name = "Metric_" + metric
+        fig = plt.figure()
+        ax = fig.gca()
+        fig_box = plt.figure()
+        ax_box = fig_box.gca()
+        data_new[key] = data_new[key].rename(mapper=new_names, axis=1, inplace=False)
+        fbh = friedman_posthoc(data_new[key])
+        # List of the renamed algorithms
+        new_algs = fbh["p_adjusted"].columns
+        # Create the color palette for the algorithms
+        palette = get_palette(new_algs)
+        sp.critical_difference_diagram(fbh["summary_ranks"], fbh["p_adjusted"],
+                                       label_fmt_left="{label}", label_fmt_right="{label}",
+                                       color_palette=palette, ax=ax)
+        fig.suptitle(", ".join([segregate[k] + " = " + key[k] for k in range(len(segregate))]))
+        fig.savefig(os.path.join(subplot_dir, file_name + ".pdf"), bbox_inches='tight')
+        # For the boxplot, normalize by dividing by the value of FACE GT
+        data_box = data_new[key].copy()
+        for col in data_box.columns:
+            data_box[col] = data_box[col] / data_box["FACE GT"]
+
+        data_box = data_box.drop(columns=["FACE GT", "Wachter"])
+        # Reorganize order. First, Wachter, then FACE, then DAACE, then BAYESACE
+        sns.boxplot(data=data_box, ax=ax_box, showfliers=False, palette=palette)
+        fig_box.suptitle(", ".join([segregate[k] + " = " + key[k] for k in range(len(segregate))]))
+        fig_box.savefig(os.path.join(subplot_dir, file_name + "_box.pdf"), bbox_inches='tight')
+
+
+
 
 # Run the main function when the script is executed
 if __name__ == "__main__":
@@ -292,21 +368,14 @@ if __name__ == "__main__":
 
     # Subplot, 2x4 for each metric
     fig, axs = plt.subplots(4, 2, figsize=(12, 12))
-
+    
     for i, metric in enumerate(metrics):
         print(i, metric)
         # Perform BH test for the metric distances globally
         friedman_bh_results = perform_bh_param(data_dict, values_dict, metric, segregate=["Penalty"])[("1",)]
         # Create the color palette for the algorithms
         new_algs = friedman_bh_results["p_adjusted"].columns
-        palette = {}
-        for method in new_algs:
-            if "BayesACE" in method:
-                palette[method] = "blue"
-            elif "FACE" in method or "Wachter" in method:
-                palette[method] = "orange"
-            elif "DAACE" in method:
-                palette[method] = "purple"
+        palette = get_palette(new_algs)
         sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"],
                                        ax=axs[i // 2, i % 2],
                                        label_fmt_left="{label}", label_fmt_right="{label}",
@@ -319,7 +388,7 @@ if __name__ == "__main__":
     # Plots for each metric, putting al models together
     plots_dir = os.path.join(root_dir, "plots","vertices")
     segregate_list = [[], ["Penalty"], ["Data ID"], ["Data ID", "Penalty"]]
-    join_in_plot = ["Log-likelihood", "Post probability"]
+    join_in_plot = ["Post probability"]
     for metric in ["distance", "distance_to_face_baseline"]:
         for segregate in segregate_list:
             data_new = aggregate_data(data_dict[metric], values_dict, segregate + join_in_plot)
@@ -332,24 +401,13 @@ if __name__ == "__main__":
                 for key in data_new_model.keys():
                     data_new_model[key] = data_new_model[key].rename(mapper=new_names, axis=1, inplace=False)
 
-                if len(segregate) == 0:
-                    # Name of the dir is the product of the segregate list
-                    joint_plots = os.path.join(plots_dir, metric, model)
-                    if not os.path.exists(joint_plots):
-                        os.makedirs(joint_plots)
-                    create_subplot(segregate, join_in_plot, values_dict, data_new_model, metric, joint_plots, box_plot=False)
-                else:
-                    # Name of the dir is the product of the segregate list
-                    joint_plots = os.path.join(plots_dir, metric,model, "_".join(segregate))
-                    if not os.path.exists(joint_plots):
-                        os.makedirs(joint_plots)
-                    for i in product(*[values_dict[j] for j in segregate]):
-                        create_subplot(segregate, join_in_plot, values_dict, data_new_model, metric, joint_plots, comb=i,box_plot=False)
+                joint_plots = os.path.join(plots_dir, metric, model)
+                plot_segregate(segregate, join_in_plot, values_dict, data_new_model, metric, joint_plots, box_plot=False)
 
     # Plots for each metric, putting al models together
     plots_dir = os.path.join(root_dir, "plots")
-    segregate_list = [[], ["Data ID"], ["Penalty"], ["Data ID", "Penalty"]]
-    join_in_plot = ["Log-likelihood", "Post probability"]
+    segregate_list = [[], ["Penalty"]]
+    join_in_plot = ["Data ID"]
     for metric in metrics:
         for segregate in segregate_list:
             data_new = aggregate_data(data_dict[metric], values_dict, segregate+join_in_plot)
@@ -359,19 +417,41 @@ if __name__ == "__main__":
             for key in data_new.keys():
                 data_new[key] = data_new[key].rename(mapper=new_names, axis=1, inplace=False)
 
-
-            if len(segregate) == 0:
-                # Name of the dir is the product of the segregate list
-                joint_plots = os.path.join(plots_dir, metric)
-                if not os.path.exists(joint_plots):
-                    os.makedirs(joint_plots)
-                create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint_plots)
-            else:
-                # Name of the dir is the product of the segregate list
-                joint_plots = os.path.join(plots_dir, metric, "_".join(segregate))
-                if not os.path.exists(joint_plots):
-                    os.makedirs(joint_plots)
-                for i in product(*[values_dict[j] for j in segregate]):
-                    create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint_plots, comb=i)
+            joint_plots = os.path.join(plots_dir, metric)
+            joint_plots = os.path.join(joint_plots, "_".join(segregate + join_in_plot),
+                                       "joint_" + "_".join(join_in_plot))
 
 
+    plots_dir = os.path.join(root_dir, "plots")
+    # Now, do it the opposite way. We want to plot all the metrics together for each segregate
+    metric_plots_dir = os.path.join(plots_dir, "metrics")
+    segregate_list = [["Data ID", "Penalty","Log-likelihood"]]
+    #  ["Penalty"], ["Data ID"], ["Log-likelihood"], ["Data ID", "Penalty"], ["Data ID", "Log-likelihood"],
+    #                       ["Penalty","Log-likelihood"],
+    for segregate in segregate_list:
+
+        metric_plots_subdir = os.path.join(metric_plots_dir, "_".join(segregate))
+        if not os.path.exists(metric_plots_subdir):
+            os.makedirs(metric_plots_subdir)
+        # Get a combination of the segregate values
+        for comb in product(*[values_dict[key] for key in segregate]):
+            fig, ax = plt.subplots(4, 2, figsize=(12, 12))
+            for i, metric in enumerate(metrics):
+                data_new = aggregate_data(data_dict[metric], values_dict, segregate)
+                data_new_dist = aggregate_data(data_dict["distance"], values_dict, segregate)
+                data_comb = remove_redundant(data_new, data_new_dist)[comb]
+                # Rename algorithms
+                data_comb = data_comb.rename(mapper=new_names, axis=1, inplace=False)
+                # Perform BH test for the metric distances globally
+                friedman_bh_results = friedman_posthoc(data_comb)
+                # Create the color palette for the algorithms
+                new_algs = friedman_bh_results["p_adjusted"].columns
+                palette = get_palette(new_algs)
+                sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"],
+                                               ax=ax[i // 2, i % 2],
+                                               label_fmt_left="{label}", label_fmt_right="{label}",
+                                               color_palette=palette)
+                ax[i // 2, i % 2].set_title(f"Metric: {metric}")
+            fig.tight_layout()
+            segregate_str = "_".join([segregate[k] + "-" + comb[k] for k in range(len(segregate))])
+            fig.savefig(os.path.join(metric_plots_subdir, segregate_str + ".pdf"), bbox_inches='tight')
