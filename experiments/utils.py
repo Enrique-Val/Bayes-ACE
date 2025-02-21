@@ -114,6 +114,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         cfx_array = np.empty(shape=(len(result), len(instance.columns) - 1))
         path_lengths_gt = np.zeros(shape=len(result))
         path_l0 = np.zeros(shape=len(result))
+        n_vertices_used = np.zeros(shape=len(result))
         for i, _ in enumerate(result):
             if isinstance(result[i], ACEResult) :
                 path_to_compute = path(result[i].path.to_numpy(), chunks=chunks)
@@ -123,13 +124,14 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
                 path_lengths_gt[i] = path_length_gt
                 path_l0[i] = total_l0_path(result[i].path.to_numpy(), l0_epsilon)
                 cfx_array[i] = result[i].counterfactual.to_numpy()
+                n_vertices_used[i] = result[i].path.shape[0]-2
             else :
                 raise TypeError("List do not contain exclusively ACEResult objects")
         cfx_df = pd.DataFrame(cfx_array, columns=instance.columns[:-1])
         real_logl = gt_estimator.logl(cfx_df)
         real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
         path_l2 = np.linalg.norm(cfx_array - instance.drop(columns=class_var_name).to_numpy().flatten(), axis=1)
-        return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp
+        return path_lengths_gt, path_l0, path_l2, tf, cfx_array, real_logl, real_pp, n_vertices_used
     elif isinstance(result, ACEResult):
         if result.counterfactual is None:
             print("Counterfactual for:", instance.index[0], "not found")
@@ -144,7 +146,7 @@ def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_esti
         path_l2 = np.linalg.norm(result.counterfactual.to_numpy() - instance.drop(columns=class_var_name).to_numpy().flatten())
         path_l0 = total_l0_path(result.path.to_numpy(), l0_epsilon)
         print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)
-        return path_length_gt, path_l0, path_l2, tf, result.counterfactual.to_numpy(), real_logl, real_pp
+        return path_length_gt, path_l0, path_l2, tf, result.counterfactual.to_numpy(), real_logl, real_pp, result.path.shape[0]-2
     else:
         raise TypeError("Result is not list nor ACEResult")
 

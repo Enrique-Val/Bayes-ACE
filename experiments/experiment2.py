@@ -152,6 +152,9 @@ if __name__ == "__main__":
         # Convert to series
         construction_time_df = construction_time_df.squeeze()
         for alg_name in os.listdir(algorithm_dir):
+            alg = pickle.load(open(os.path.join(algorithm_dir, alg_name), 'rb'))
+            if BAYESACE in alg_name:
+                alg.multi_objective = multi_objective
             algorithms.append(pickle.load(open(os.path.join(algorithm_dir, alg_name), 'rb')))
             algorithm_str_list.append(alg_name.split(".")[0])
             algorithms_paths.append(os.path.join(algorithm_dir, alg_name))
@@ -252,11 +255,11 @@ if __name__ == "__main__":
             construction_time_df.to_csv(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv'))
 
     metrics = ["distance", "path_l0", "distance_l2", "counterfactual", "time", "time_w_construct",
-               "distance_to_face_baseline", "real_logl", "real_pp"]
+               "distance_to_face_baseline", "real_logl", "real_pp", "n_vertices"]
 
-    # Folder in case we want to store every result:
+    '''# Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
-        os.makedirs(results_dir + 'paths/')
+        os.makedirs(results_dir + 'paths/')'''
 
     for likelihood_dev, post_prob_dev in product(likelihood_dev_list, post_prob_dev_list):
         print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", post_prob_dev)
@@ -287,7 +290,7 @@ if __name__ == "__main__":
                 results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
                                                                  chunks))
         for i, (instance_i, algorithm_str) in enumerate(product(range(n_counterfactuals), algorithm_str_list)):
-            path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
+            path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp, n_vertices_used = results[i]
             # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
             if multi_objective and algorithm_str.startswith(BAYESACE) and not counterfactual is None:
                 # First, if the no baseline counterfactual was found, then we just return the one with lower distance
@@ -314,6 +317,7 @@ if __name__ == "__main__":
                 counterfactual = counterfactual[index]
                 real_logl = real_logl[index]
                 real_pp = real_pp[index]
+                n_vertices_used = n_vertices_used[index]
             results_dfs["distance"].loc[instance_i, algorithm_str] = path_length_gt
             results_dfs["path_l0"].loc[instance_i, algorithm_str] = path_l0
             results_dfs["distance_l2"].loc[instance_i, algorithm_str] = path_l2
@@ -323,6 +327,7 @@ if __name__ == "__main__":
                 algorithm_str]
             results_dfs["real_logl"].loc[instance_i, algorithm_str] = real_logl
             results_dfs["real_pp"].loc[instance_i, algorithm_str] = real_pp
+            results_dfs["n_vertices"].loc[instance_i, algorithm_str] = n_vertices_used
 
         # Prior to save the result, compute the distance between the counterfactual found by the first
         # FACE and the ones found by the other algorithms
