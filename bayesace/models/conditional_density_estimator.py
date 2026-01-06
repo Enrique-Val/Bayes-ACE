@@ -7,7 +7,6 @@ class ConditionalDE(ABC):
         self.class_distribution = {}  # Generalized class priors
         self.columns = None  # Feature columns
         self.n_dims = 0  # Number of dimensions
-        self.classes = []  # Ordered class labels
         self.trained = False
         self.class_var_name = None
 
@@ -21,7 +20,8 @@ class ConditionalDE(ABC):
         self.n_dims = X.shape[1]
 
         # Estimate the class distribution with frequentist methods
-        class_labels = np.unique(y.to_numpy())
+        y_vals = y.to_numpy() if isinstance(y, pd.Series) else y
+        class_labels = np.unique(y_vals)
         self.class_distribution = {str(label): len(y[y == label]) / len(y) for label in class_labels}
 
         self.class_var_name = y.name if isinstance(y, pd.Series) else "class"
@@ -36,7 +36,7 @@ class ConditionalDE(ABC):
         """
         posterior_probs = self.predict_proba(X)
         predicted_indices = np.argmax(posterior_probs, axis=1)
-        return np.array(self.classes)[predicted_indices]
+        return np.array(self.get_class_labels())[predicted_indices]
 
     @abstractmethod
     def predict_proba(self, X: np.ndarray, output = "numpy") -> np.ndarray | pd.DataFrame:
@@ -53,14 +53,27 @@ class ConditionalDE(ABC):
         else:
             assert len(y) == len(X.index)
             assert isinstance(y, np.ndarray)
-        prob = np.e ** self.logl(X, y)
-        ll = np.e ** self.logl(X)
+        # Get Log Likelihoods
+        log_joint = self.logl(X, y)  # log P(X, y)
+        log_marginal = self.logl(X)  # log P(X)
+
         to_ret = np.empty(shape=len(X.index))
-        # If the likelihood is 0, then classification is done with uniform probability
-        to_ret[ll <= 0] = 1 / len(class_labels)
-        to_ret[ll > 0] = prob[ll > 0] / ll[ll > 0]
-        # if not (ll > 0).any():
-        #    warnings("The instance with features "+str(x_cfx.iloc[0])+" and class " + str(y_og))
+
+        # Avoid division by zero and underflow by subtracting logs first
+        # P(y|X) = exp( log P(X,y) - log P(X) )
+
+        # Mask where marginal probability is effectively zero (-inf logl) or nan
+        # to avoid NaN from (-inf) - (-inf)
+        valid_mask = np.isfinite(log_marginal)
+
+        # For valid points: exp(joint - marginal)
+        to_ret[valid_mask] = np.exp(log_joint[valid_mask] - log_marginal[valid_mask])
+
+        # For invalid points (where P(X)=0), fall back to uniform distribution
+        # or 0, depending on your theoretical preference.
+        # Your original code used uniform:
+        to_ret[~valid_mask] = 1.0 / len(class_labels)
+
         return to_ret
 
     @abstractmethod
@@ -81,14 +94,12 @@ class ConditionalDE(ABC):
 
     @abstractmethod
     def logl(self, X, y=None) -> np.ndarray:
+        """
+        Must return:
+        - If y is provided: log P(X, y)  (Joint Log-Likelihood)
+        - If y is None:     log P(X)     (Marginal Log-Likelihood)
+        """
         pass
 
     def likelihood(self, X: pd.DataFrame, y: pd.Series | np.ndarray = None) -> np.ndarray:
         return np.e ** self.logl(X, y)
-
-
-'''def logl_from_likelihood(likelihood):
-    logl = np.empty(shape=len(likelihood))
-    logl[likelihood > 0] = np.log(likelihood[likelihood > 0])
-    logl[likelihood <= 0] = -np.inf
-    return logl'''
