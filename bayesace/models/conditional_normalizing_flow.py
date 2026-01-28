@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import torch
+from sympy.physics.quantum.matrixutils import to_numpy
 
 from bayesace.models.conditional_density_estimator import ConditionalDE
 
@@ -17,6 +18,15 @@ class ConditionalNF(ConditionalDE):
         self.device = torch.device("cuda" if torch.cuda.is_available() and gpu_acceleration else "cpu")
         self.trained = False
         self.verbose = verbose
+        self.probs_tensor = None
+
+    def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray):
+        super().fit(X, y)
+        self.probs_tensor = torch.tensor(
+            list(self.class_distribution.values()),
+            device=self.device,
+            dtype=torch.float32
+        )
 
     def get_loaders(self, dataset, batch_size, proportion=0.8):
         dataset = dataset.copy()
@@ -52,67 +62,105 @@ class ConditionalNF(ConditionalDE):
         # To be implemented by specific classes, depending on the implementation of the conditional distribution
         pass
 
-    def logl(self, X: pd.DataFrame, y=None) -> np.ndarray:
+    def logl_tensor(self, X: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        # To be implemented by specific classes, depending on the implementation of the conditional distribution
+        pass
+
+    def logl(self, X: pd.DataFrame | np.ndarray | torch.Tensor, y : pd.DataFrame | np.ndarray | torch.Tensor=None,
+             return_type = "tensor", torch_dtype = torch.float32) -> np.ndarray | torch.Tensor:
+        if isinstance(X, pd.DataFrame):
+            X = X.to_numpy()
+        if isinstance(X, np.ndarray):
+            X = torch.from_numpy(X).to(self.device, dtype=torch_dtype)
         if y is not None:
             if isinstance(y, pd.Series):
+                # Convert to numpy
                 y = y.to_numpy()
-            data = X.copy()
-            data[self.class_var_name] = y
-            data[self.class_var_name] = data[self.class_var_name].astype('category')
-            data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
-            class_labels = list(self.class_distribution.keys())
+            if isinstance(y, np.ndarray):
+                # Convert to torch tensor. But first, convert from categorical strings to numerical for compatibility with torch
+                class_labels = list(self.class_distribution.keys())
+                class_column = np.zeros(y.shape[0], dtype=int)
+                for i, label in enumerate(class_labels):
+                    class_column[y == label] = i
+                # Convert to torch tensor, use default dtype as defined
+                y = torch.from_numpy(class_column).to(self.device, dtype=torch_dtype)
 
-            # Transform dataset to numpy and cast class from string to numerical
-            class_column = np.zeros(data.shape[0], dtype=int)
-            for i, label in enumerate(class_labels):
-                class_column[data[self.class_var_name] == label] = i
-
-            return self.logl_array(data.drop(columns=self.class_var_name).to_numpy(), class_column)
+            if return_type == "numpy":
+                return self.logl_tensor(X, y).detach().cpu().numpy()
+            return self.logl_tensor(X,y)
         else:
-            '''X = X.values
-            lls = np.zeros(X.shape[0])
-            for i in range(len(self.class_distribution.keys())):
-                lls = lls + np.e ** self.logl_array(X, np.repeat(i, X.shape[0]))
-            return logl_from_likelihood(lls)'''
-            X = X.to_numpy()
-            log_likelihoods = []  # Store log-likelihoods for each class
-            for i in range(len(self.class_distribution.keys())):
-                log_likelihoods.append(self.logl_array(X, np.repeat(i, X.shape[0])))
+            # --- Optimized Tensor Else Block ---
+            log_likelihoods = []
+            num_samples = X.shape[0]
+            num_classes = len(self.class_distribution)
 
-            # Stack log-likelihoods and apply the log-sum-exp trick
-            log_likelihoods = np.stack(log_likelihoods, axis=0)  # Shape: (num_classes, num_samples)
-            max_log_likelihoods = np.max(log_likelihoods, axis=0)  # Shape: (num_samples,)
+            # 1. Iterate over classes using Tensor operations
+            for i in range(num_classes):
+                # Create a tensor filled with the current class index 'i'
+                # We use the same device/dtype as X to avoid transfer overhead
+                y_class = torch.full((num_samples,), i, device=self.device, dtype=torch_dtype)
 
-            # Log-sum-exp computation
-            lls = max_log_likelihoods + np.log(np.sum(np.exp(log_likelihoods - max_log_likelihoods), axis=0))
+                # Compute log-likelihood using the tensor-optimized method
+                log_likelihoods.append(self.logl_tensor(X, y_class))
 
+            # 2. Stack results: Shape becomes (num_classes, num_samples)
+            log_likelihoods_tensor = torch.stack(log_likelihoods, dim=0)
+
+            # 3. Log-Sum-Exp (Marginalize over classes)
+            # torch.logsumexp applies the max/exp/sum/log trick efficiently and stably
+            lls = torch.logsumexp(log_likelihoods_tensor, dim=0)
+
+            if return_type == "numpy":
+                return lls.detach().cpu().numpy()
             return lls
 
-    '''
-    # If the class variable is passed, remove it
-    if class_var_name in data.columns:
-        data = data.values[:, :-1].astype(float)
-    else:
-        data = data.values
-    logl = self.logl_array(data, np.repeat(0, data.shape[0]))
-    for i in range(len(self.class_dist.keys())-1):
-        logl = logl + np.log(1+np.e ** (self.logl_array(data, np.repeat(i+1, data.shape[0]))-logl))
-    return logl'''
+    def predict_proba(self, X: pd.DataFrame | np.ndarray | torch.Tensor, output="tensor",
+                      torch_dtype=torch.float32) -> np.ndarray | pd.DataFrame | torch.Tensor:
+        # 1. Standardize Input to Tensor
+        if isinstance(X, pd.DataFrame):
+            X = X.to_numpy()
+        if isinstance(X, np.ndarray):
+            X = torch.from_numpy(X).to(self.device, dtype=torch_dtype)
+        elif isinstance(X, torch.Tensor):
+            X = X.to(self.device, dtype=torch_dtype)
 
-    def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
-        # We want to get P(Y|x), which will be computed as P(Y|x) = P(x,Y) / P(x)
-        p_xY = np.zeros((len(self.class_distribution.keys()), X.shape[0]))
-        p_x = np.zeros(X.shape[0])
+        # 2. Compute Log-Likelihoods (Logits)
+        # We calculate log P(x, Y) for every class Y
+        log_likelihoods = []
+        num_samples = X.shape[0]
+        num_classes = len(self.class_distribution)
+        class_keys = list(self.class_distribution.keys())
 
-        for i, _ in enumerate(self.class_distribution.keys()):
-            p_xY[i] = np.e ** self.logl_array(X, np.array([i] * len(X)))
-            p_x = p_x + p_xY[i]
-        zero_l = np.where(p_x == 0)
-        p_x[p_x == 0] = 1
-        for i in zero_l:
-            p_xY[:, i] = 1 / len(self.class_distribution.keys())
+        for i in range(num_classes):
+            # Create a target tensor filled with class index 'i'
+            y_class = torch.full((num_samples,), i, device=self.device, dtype=torch_dtype)
+            log_likelihoods.append(self.logl_tensor(X, y_class))
 
-        p_Y_given_x = p_xY.transpose() / p_x[:, None]
+        # Stack to shape: (num_classes, num_samples)
+        logits = torch.stack(log_likelihoods, dim=0)
+
+        # 3. Compute Probabilities via Softmax
+        # P(Y|x) = exp(log P(x,Y)) / sum(exp(log P(x,Y)))
+        # torch.softmax is numerically stable (handles overflow/underflow automatically)
+        probs = torch.softmax(logits, dim=0)
+
+        # Transpose to shape (num_samples, num_classes)
+        probs = probs.transpose(0, 1)
+
+        # 4. Handle Edge Cases (If all logits are -inf, softmax returns NaN)
+        # This replicates the original logic: zero_l = np.where(p_x == 0) -> uniform dist
+        if torch.isnan(probs).any():
+            nan_mask = torch.isnan(probs).any(dim=1)
+            probs[nan_mask] = 1.0 / num_classes
+
+        # 5. Output Formatting
+        if output == "tensor":
+            return probs
+
+        # Move to CPU for Numpy/Pandas
+        probs_np = probs.detach().cpu().numpy()
+
         if output == "pandas":
-            return pd.DataFrame(p_Y_given_x, columns=self.class_distribution.keys())
-        return p_Y_given_x
+            return pd.DataFrame(probs_np, columns=class_keys)
+
+        return probs_np

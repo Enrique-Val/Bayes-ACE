@@ -102,4 +102,4 @@ class ConditionalDE(ABC):
         pass
 
     def likelihood(self, X: pd.DataFrame, y: pd.Series | np.ndarray = None) -> np.ndarray:
-        return np.e ** self.logl(X, y)
+        return np.exp(self.logl(X, y))

@@ -318,6 +318,13 @@ class ConditionalNVP(ConditionalNF):
         return (self.dist_x_given_class.log_prob(X_tensor, y_tensor).cpu().detach().numpy() + np.log(
             np.array([list(self.class_distribution.values())[i] for i in y])))
 
+    def logl_tensor(self, X: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        # Use 'y' as indices to grab the matching probabilities instantly
+        prior_probs = self.probs_tensor[y.long()]
+
+        # Calculate log likelihood
+        return self.dist_x_given_class.log_prob(X, y.reshape((-1,1))) + torch.log(prior_probs)
+
     def __getstate__(self):
         state = self.__dict__.copy()
         # Save the module's state_dict separately
