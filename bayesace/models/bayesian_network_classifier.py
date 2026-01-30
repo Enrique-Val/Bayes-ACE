@@ -2,8 +2,10 @@ import pandas as pd
 import pybnesian as pb
 import multiprocessing as mp
 import numpy as np
+import torch
 
 from bayesace import ConditionalDE
+from bayesace.models.autodiff_proxies.gbn_classifier import serialize_clg, CLGTorch
 
 class PybnesianParallelizationError(Exception):
     pass
@@ -39,6 +41,7 @@ class BayesianNetworkClassifier(ConditionalDE):
         self.bayesian_network: pb.BayesianNetwork = None
         self.class_var_name = None
         self.network_type: str = network_type
+        self.torch_proxy: CLGTorch = None
 
     def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray, initial_structure="naive",
             training_params=None):
@@ -50,10 +53,15 @@ class BayesianNetworkClassifier(ConditionalDE):
         dataset = X.copy()
         dataset[self.class_var_name] = y
         bn: pb.BayesianNetwork = None
+        dataset[self.class_var_name] = dataset[self.class_var_name].astype('string').astype('category')
         if self.network_type == "CLG":
-            bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.CLGNetwork, initial_structure),
-                       operators=["arcs"], **training_params)
-            bn = copy_structure(bn)
+            # MMHC algorithm with Mutual Information test and BIC score
+            test = pb.MutualInformation(df=dataset)
+            score = pb.BIC(df=dataset)
+            training_params["score"] = score
+            est = pb.MMHC()
+            bn = est.estimate(hypot_test=test, operators=pb.ArcOperatorSet(), bn_type=pb.CLGNetworkType(), **training_params)
+            # print("PC Arcs:", pc_bn.arcs())
         elif self.network_type == "SP":
             # est = MMHC()
             # test = pb.MutualInformation(data, True)
@@ -81,7 +89,13 @@ class BayesianNetworkClassifier(ConditionalDE):
         self.bayesian_network = bn
         self.trained = True
 
-    def logl(self, X: pd.DataFrame, y: pd.Series | np.ndarray = None):
+        # If CLG or Gaussian, create a Torch proxy
+        if self.network_type in ["CLG", "Gaussian"]:
+            params = serialize_clg(self.bayesian_network)
+            self.torch_proxy = CLGTorch(*params, continuous_variables=self.columns)
+
+
+    def logl(self, X: pd.DataFrame | torch.Tensor, y: pd.Series | np.ndarray = None) -> np.ndarray | torch.Tensor:
         """
         Compute the log-likelihood for the given data.
         Parameters:
@@ -91,26 +105,26 @@ class BayesianNetworkClassifier(ConditionalDE):
         - Log-likelihood
         """
         if y is not None:
-            if y is pd.Series:
+            if isinstance(y, pd.Series):
                 y = y.to_numpy()
+            # Get the index of the class variable y value for each sample
+            if isinstance(X, torch.Tensor):
+                assert self.torch_proxy is not None, "Torch proxy not initialized."
+                class_labels = self.get_class_labels()
+                y_idx = np.array([class_labels.index(label) for label in y])
+                return self.torch_proxy.get_log_joint(X)[y_idx]
+
             data = X.copy()
             data[self.class_var_name] = y
-            data[self.class_var_name] = data[self.class_var_name].astype('string').astype('category')
+            data[self.class_var_name] = data[self.class_var_name].astype('str').astype('category')
             data[self.class_var_name] = data[self.class_var_name].cat.set_categories(self.get_class_labels())
             return self.bayesian_network.logl(data)
         else:
-            '''class_cpd = self.bayesian_network.cpd(self.class_var_name)
-            class_values = class_cpd.variable_values()
-            n_samples = X.shape[0]
-            likelihood_val = 0.0
-            for v in class_values:
-                likelihood_val = likelihood_val + np.e ** self.logl(X, np.repeat(v, n_samples))
-            if (likelihood_val > 1).any():
-                Warning(
-                    "Likelihood of some points in the space is higher than 1.")
-            return logl_from_likelihood(likelihood_val)'''
+            if isinstance(X, torch.Tensor):
+                assert self.torch_proxy is not None, "Torch proxy not initialized."
+                return self.torch_proxy(X)
             log_likelihoods = []  # Store log-likelihoods for each class
-            for i in self.get_class_distribution().keys():
+            for i in self.get_class_labels():
                 log_likelihoods.append(self.logl(X, np.repeat(i, X.shape[0])))
 
             # Stack log-likelihoods and apply the log-sum-exp trick
@@ -122,7 +136,7 @@ class BayesianNetworkClassifier(ConditionalDE):
 
             return lls
 
-    def predict_proba(self, X: np.ndarray, output="numpy") -> np.ndarray | pd.DataFrame:
+    def predict_proba(self, X: np.ndarray | torch.Tensor, output="numpy") -> np.ndarray | pd.DataFrame | torch.Tensor:
         """
         Compute posterior probabilities P(Y|X).
         Parameters:
@@ -130,19 +144,32 @@ class BayesianNetworkClassifier(ConditionalDE):
         Returns:
         - Posterior probabilities as a 2D array of shape (n_samples, n_classes).
         """
+        if isinstance(X, torch.Tensor):
+            return self.torch_proxy.predict_proba(X)
         # Get the possible class labels from the CPD
         class_cpd = self.bayesian_network.cpd(self.class_var_name)
         class_values = class_cpd.variable_values()
         X_df = pd.DataFrame(X, columns=self.columns)
-        P_xY = np.zeros((X.shape[0], len(class_values)))
+        log_P_xY  = np.zeros((X.shape[0], len(class_values)))
         for i, class_value in enumerate(class_values):
             X_df[self.class_var_name] = pd.Categorical([class_value] * X.shape[0], categories=class_values)
-            P_xY[:, i] = np.e ** self.bayesian_network.logl(X_df)
-        P_x = np.sum(P_xY, axis=1)
-        P_x_given_Y = P_xY
-        P_x_given_Y[P_x == 0] = 1 / len(class_values)
-        P_x[P_x == 0] = 1
-        P_Y_given_x = P_x_given_Y / P_x[:, None]
+            log_P_xY[:, i] = self.bayesian_network.logl(X_df)
+
+        # Use log-sum-exp trick for numerical stability
+        max_log_P_xY = np.max(log_P_xY, axis=1, keepdims=True)
+        with np.errstate(under="ignore"):
+            log_P_x = max_log_P_xY + np.log(np.sum(np.e ** (log_P_xY - max_log_P_xY), axis=1, keepdims=True))
+
+        log_P_Y_given_x = log_P_xY - log_P_x
+        P_Y_given_x = np.exp(log_P_Y_given_x)
+
+        # 4. Handle numerical edge cases (if P(X) was -inf, posterior is NaN)
+        nan_rows = np.isnan(P_Y_given_x).any(axis=1)
+
+        if nan_rows.any():
+            # THIS IS YOUR FALLBACK:
+            P_Y_given_x[nan_rows] = 1.0 / len(self.get_class_labels())
+
         if output == "pandas":
             return pd.DataFrame(P_Y_given_x, columns=class_values)
         return P_Y_given_x
