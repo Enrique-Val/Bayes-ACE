@@ -8,6 +8,8 @@ import argparse
 import pandas as pd
 import torch
 from pymoo.algorithms.moo.nsga2 import NSGA2
+
+from bayesace.algorithms.algorithm import Algorithm
 from bayesace.algorithms.wachter import WachterCounterfactual
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
@@ -27,19 +29,54 @@ WACHTER = "wachter"
 BAYESACE = "bayesace"
 
 
-def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks):
+def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks, logl_threshold, pp_threshold):
     torch.set_num_threads(1)
-    algorithm = pickle.load(open(algorithm_path, 'rb'))
+    algorithm: Algorithm = pickle.load(open(algorithm_path, 'rb'))
+    algorithm.set_log_likelihood_threshold(logl_threshold)
+    algorithm.set_posterior_probability_threshold(pp_threshold)
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
     return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
 
 
+def build_FACE_worker(density_estimator_path, graph_type, alg_name, df_train, class_var_name, chunks, eps, penalty, algorithm_dir, dummy):
+    """Function executed in parallel."""
+    density_estimator = pickle.load(open(density_estimator_path, 'rb'))
+    t0 = time.time()
+    alg = FACE(
+        density_estimator=density_estimator,
+        features=df_train.columns[:-1],
+        chunks=chunks,
+        dataset=df_train.drop(class_var_name, axis=1),
+        distance_threshold=eps,
+        graph_type=graph_type,
+        f_tilde=None,
+        seed=0,
+        verbose=False,  # Avoid excessive logging in parallel execution
+        log_likelihood_threshold=0.00,
+        posterior_probability_threshold=0.00,
+        penalty=penalty,
+        parallelize=False
+    )
+    tf = time.time() - t0
+
+    # Save the algorithm if not in dummy mode
+    alg_path = os.path.join(algorithm_dir, alg_name + ".pkl")
+    if not dummy:
+        with open(alg_path, 'wb') as f:
+            pickle.dump(alg, f)
+
+    return alg, alg_name, alg_path, tf  # Return results for post-processing
+
+
 if __name__ == "__main__":
+    mp.set_start_method('spawn', force=True)
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=44089, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=44120, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
-    parser.add_argument('--results_dir', nargs='?', default='./results/exp_pen/', type=str)
+    parser.add_argument('--results_dir', nargs='?', default='./results/exp_2/', type=str)
+    parser.add_argument('--multiobjective', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--penalty', nargs='?', default=1, type=int)
     args = parser.parse_args()
 
     dataset_id = args.dataset_id
@@ -55,29 +92,28 @@ if __name__ == "__main__":
     # Number of points for approximating integrals:
     chunks = 20
     # Number of counterfactuals
-    n_counterfactuals = 10
+    n_counterfactuals = 15
     eps = np.inf
-    n_train_size = 500
+    n_train_size = 1000
     n_generations = 500
 
     # Activate for multiple objectives
     multi_objective = args.multiobjective
 
-    dummy = True
+    dummy = False
     if dummy:
         chunks = 3
         n_counterfactuals = 2
         likelihood_dev_list = likelihood_dev_list[-1:]
         accuracy_threshold_list = post_prob_dev_list[-1:]
-        n_train_size = 10*2
+        n_train_size = 10
         n_vertices = n_vertices[:1]
-        n_generations = 5*2
+        n_generations = 10
         verbose = True
         parallelize = False
 
     # Folder for storing the results
     results_dir = os.path.join(args.results_dir, str(dataset_id), str(args.penalty))
-    results_dir_general = os.path.join(args.results_dir, str(dataset_id))
 
     random.seed(0)
 
@@ -86,9 +122,14 @@ if __name__ == "__main__":
     results_opt_cv_dir = os.path.join(results_cv_dir, 'opt_results')
     df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path = setup_experiment(
         results_cv_dir, dataset_id, n_counterfactuals, seed=42)
+
     df_total = pd.concat([df_train, df_counterfactuals])
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(df_total, df_total, gt_estimator)
     df_train = df_train.head(n_train_size)
-    max_dist = np.sum((df_total - df_total[:, None]) ** 2, axis=2).max()
+
+    # Names of the models
+    models = [normalizing_flow, clg_network]
+    models_str = ["nf", "clg", "gt"]
 
     # Name of the class variable
     class_var_name = gt_estimator.get_class_var_name()
@@ -103,18 +144,17 @@ if __name__ == "__main__":
     algorithm_str_list = []
     algorithms_paths = []
 
-    # List of penalty values
-    penalty_list = [1, 5, 10, 15, 20]
-    epsilon_list = [0.1, 0.5, 1, 2, 5]
-
 
     # Check if a certain file exists
-    if os.path.exists(os.path.join(results_dir_general, 'construction_time_' + str(dataset_id) + '.csv')):
+    if os.path.exists(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv')):
         construction_time_df = pd.read_csv(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv'),
                                              index_col=0)
         # Convert to series
         construction_time_df = construction_time_df.squeeze()
         for alg_name in os.listdir(algorithm_dir):
+            alg = pickle.load(open(os.path.join(algorithm_dir, alg_name), 'rb'))
+            if BAYESACE in alg_name:
+                alg.multi_objective = multi_objective
             algorithms.append(pickle.load(open(os.path.join(algorithm_dir, alg_name), 'rb')))
             algorithm_str_list.append(alg_name.split(".")[0])
             algorithms_paths.append(os.path.join(algorithm_dir, alg_name))
@@ -131,17 +171,51 @@ if __name__ == "__main__":
                 pickle.dump(alg, open(os.path.join(algorithm_dir, alg_name + ".pkl"), 'wb'))
             construction_time_list.append(tf)
 
-        for density_estimator, graph_type, alg_name in zip([gt_estimator, normalizing_flow, normalizing_flow],
-                                                           ["integral", "kde", "epsilon"],
-                                                           [FACE_BASELINE, FACE_KDE, FACE_EPS]):
-            t0 = time.time()
-            alg = FACE(density_estimator=density_estimator, features=df_train.columns[:-1], chunks=chunks,
-                       dataset=df_train.drop(class_var_name, axis=1),
-                       distance_threshold=eps, graph_type=graph_type, f_tilde=None, seed=0, verbose=verbose,
-                       log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, penalty=penalty,
-                       parallelize=parallelize)
-            tf = time.time() - t0
-            add_algorithm(alg, alg_name, tf)
+        if not parallelize:
+            print("Start")
+            for graph_type, model, alg_name in zip(["integral", "kde", "epsilon"], [gt_estimator, normalizing_flow, normalizing_flow],
+                                                    [FACE_BASELINE, FACE_KDE, FACE_EPS]):
+                t0 = time.time()
+                alg = FACE(
+                    density_estimator=model,
+                    features=df_train.columns[:-1],
+                    chunks=chunks,
+                    dataset=df_train.drop(class_var_name, axis=1),
+                    distance_threshold=eps,
+                    graph_type=graph_type,
+                    f_tilde=None,
+                    seed=0,
+                    verbose=False,  # Avoid excessive logging in parallel execution
+                    log_likelihood_threshold=0.00,
+                    posterior_probability_threshold=0.00,
+                    penalty=penalty,
+                    parallelize=False
+                )
+                tf = time.time() - t0
+                print(alg_name, tf)
+                add_algorithm(alg, alg_name, tf)
+        else:
+
+            # Define tasks
+            tasks = [
+                (gt_estimator_path, "integral", FACE_BASELINE, df_train, class_var_name, chunks, eps, penalty,
+                 algorithm_dir, dummy),
+                (nf_path, "kde", FACE_KDE, df_train, class_var_name, chunks, eps, penalty,
+                 algorithm_dir, dummy),
+                (nf_path, "epsilon", FACE_EPS, df_train, class_var_name, chunks, eps, penalty,
+                 algorithm_dir, dummy)
+            ]
+
+            # Run in parallel using multiprocessing
+            with mp.Pool(processes=len(tasks)) as pool:
+                results = pool.starmap(build_FACE_worker, tasks)
+
+            # Collect results
+            for alg, alg_name, alg_path, tf in results:
+                algorithms.append(alg)
+                algorithm_str_list.append(alg_name)
+                algorithms_paths.append(alg_path)
+                construction_time_list.append(tf)
 
         t0 = time.time()
         alg = WachterCounterfactual(density_estimator=gt_estimator, features=df_train.columns[:-1],
@@ -181,13 +255,13 @@ if __name__ == "__main__":
             construction_time_df.to_csv(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv'))
 
     metrics = ["distance", "path_l0", "distance_l2", "counterfactual", "time", "time_w_construct",
-               "distance_to_face_baseline", "real_logl", "real_pp"]
+               "distance_to_face_baseline", "real_logl", "real_pp", "n_vertices"]
 
-    # Folder in case we want to store every result:
+    '''# Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
-        os.makedirs(results_dir + 'paths/')
+        os.makedirs(results_dir + 'paths/')'''
 
-    for likelihood_dev, post_prob_dev in zip(likelihood_dev_list, post_prob_dev_list):
+    for likelihood_dev, post_prob_dev in product(likelihood_dev_list, post_prob_dev_list):
         print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", post_prob_dev)
         # Result storage
         results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
@@ -195,15 +269,18 @@ if __name__ == "__main__":
         for i in metrics:
             results_dfs[i].index.name = dataset_id
         # Set the proper likelihood  and accuracy thresholds
-        for algorithm, algorithm_str in zip(algorithms, algorithm_str_list):
-            algorithm.set_log_likelihood_threshold(mu_gt + likelihood_dev * std_gt)
-            algorithm.set_posterior_probability_threshold(min(mae_gt + std_mae_gt * post_prob_dev, 0.99))
+        logl_threshold = mu_gt + likelihood_dev * std_gt
+        pp_threshold = min(mae_gt + std_mae_gt * post_prob_dev, 0.99)
+        for algorithm in algorithms:
+            algorithm.set_log_likelihood_threshold(logl_threshold)
+            algorithm.set_posterior_probability_threshold(pp_threshold)
 
         if parallelize:
             pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals*len(algorithms_paths)))
             results = pool.starmap(worker, [
-                    (df_counterfactuals.iloc[[i]], tmp_file_str, gt_estimator_path,
-                     penalty, chunks) for i,tmp_file_str in product(range(n_counterfactuals), algorithms_paths)])
+                    (df_counterfactuals.iloc[[i]], alg_path, gt_estimator_path,
+                     penalty, chunks, logl_threshold, pp_threshold)
+                     for i,alg_path in product(range(n_counterfactuals), algorithms_paths)])
             pool.close()
             pool.join()
         else:
@@ -213,7 +290,7 @@ if __name__ == "__main__":
                 results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
                                                                  chunks))
         for i, (instance_i, algorithm_str) in enumerate(product(range(n_counterfactuals), algorithm_str_list)):
-            path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp = results[i]
+            path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp, n_vertices_used = results[i]
             # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
             if multi_objective and algorithm_str.startswith(BAYESACE) and not counterfactual is None:
                 # First, if the no baseline counterfactual was found, then we just return the one with lower distance
@@ -240,6 +317,7 @@ if __name__ == "__main__":
                 counterfactual = counterfactual[index]
                 real_logl = real_logl[index]
                 real_pp = real_pp[index]
+                n_vertices_used = n_vertices_used[index]
             results_dfs["distance"].loc[instance_i, algorithm_str] = path_length_gt
             results_dfs["path_l0"].loc[instance_i, algorithm_str] = path_l0
             results_dfs["distance_l2"].loc[instance_i, algorithm_str] = path_l2
@@ -249,6 +327,7 @@ if __name__ == "__main__":
                 algorithm_str]
             results_dfs["real_logl"].loc[instance_i, algorithm_str] = real_logl
             results_dfs["real_pp"].loc[instance_i, algorithm_str] = real_pp
+            results_dfs["n_vertices"].loc[instance_i, algorithm_str] = n_vertices_used
 
         # Prior to save the result, compute the distance between the counterfactual found by the first
         # FACE and the ones found by the other algorithms
