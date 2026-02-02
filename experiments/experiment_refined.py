@@ -38,36 +38,6 @@ def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks, logl_th
     return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
 
 
-def build_FACE_worker(density_estimator_path, graph_type, alg_name, df_train, class_var_name, chunks, eps, penalty, algorithm_dir, dummy):
-    """Function executed in parallel."""
-    density_estimator = pickle.load(open(density_estimator_path, 'rb'))
-    t0 = time.time()
-    alg = FACE(
-        density_estimator=density_estimator,
-        features=df_train.columns[:-1],
-        chunks=chunks,
-        dataset=df_train.drop(class_var_name, axis=1),
-        distance_threshold=eps,
-        graph_type=graph_type,
-        f_tilde=None,
-        seed=0,
-        verbose=False,  # Avoid excessive logging in parallel execution
-        log_likelihood_threshold=0.00,
-        posterior_probability_threshold=0.00,
-        penalty=penalty,
-        parallelize=False
-    )
-    tf = time.time() - t0
-
-    # Save the algorithm if not in dummy mode
-    alg_path = os.path.join(algorithm_dir, alg_name + ".pkl")
-    if not dummy:
-        with open(alg_path, 'wb') as f:
-            pickle.dump(alg, f)
-
-    return alg, alg_name, alg_path, tf  # Return results for post-processing
-
-
 if __name__ == "__main__":
     mp.set_start_method('spawn', force=True)
     parser = argparse.ArgumentParser(description="Arguments")
@@ -75,7 +45,6 @@ if __name__ == "__main__":
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
     parser.add_argument('--results_dir', nargs='?', default='./results/exp_2/', type=str)
-    parser.add_argument('--multiobjective', action=argparse.BooleanOptionalAction)
     parser.add_argument('--penalty', nargs='?', default=1, type=int)
     args = parser.parse_args()
 
@@ -95,10 +64,7 @@ if __name__ == "__main__":
     n_counterfactuals = 15
     eps = np.inf
     n_train_size = 1000
-    n_generations = 500
 
-    # Activate for multiple objectives
-    multi_objective = args.multiobjective
 
     dummy = False
     if dummy:
@@ -152,9 +118,10 @@ if __name__ == "__main__":
         # Convert to series
         construction_time_df = construction_time_df.squeeze()
         for alg_name in os.listdir(algorithm_dir):
+            if "face" in alg_name or "wachter" in alg_name:
+                # This algorithm worked in a similar way using non differentiability
+                continue
             alg = pickle.load(open(os.path.join(algorithm_dir, alg_name), 'rb'))
-            if BAYESACE in alg_name:
-                alg.multi_objective = multi_objective
             algorithms.append(pickle.load(open(os.path.join(algorithm_dir, alg_name), 'rb')))
             algorithm_str_list.append(alg_name.split(".")[0])
             algorithms_paths.append(os.path.join(algorithm_dir, alg_name))
@@ -171,58 +138,7 @@ if __name__ == "__main__":
                 pickle.dump(alg, open(os.path.join(algorithm_dir, alg_name + ".pkl"), 'wb'))
             construction_time_list.append(tf)
 
-        if not parallelize:
-            print("Start")
-            for graph_type, model, alg_name in zip(["integral", "kde", "epsilon"], [gt_estimator, normalizing_flow, normalizing_flow],
-                                                    [FACE_BASELINE, FACE_KDE, FACE_EPS]):
-                t0 = time.time()
-                alg = FACE(
-                    density_estimator=model,
-                    features=df_train.columns[:-1],
-                    chunks=chunks,
-                    dataset=df_train.drop(class_var_name, axis=1),
-                    distance_threshold=eps,
-                    graph_type=graph_type,
-                    f_tilde=None,
-                    seed=0,
-                    verbose=False,  # Avoid excessive logging in parallel execution
-                    log_likelihood_threshold=0.00,
-                    posterior_probability_threshold=0.00,
-                    penalty=penalty,
-                    parallelize=False
-                )
-                tf = time.time() - t0
-                print(alg_name, tf)
-                add_algorithm(alg, alg_name, tf)
-        else:
-
-            # Define tasks
-            tasks = [
-                (gt_estimator_path, "integral", FACE_BASELINE, df_train, class_var_name, chunks, eps, penalty,
-                 algorithm_dir, dummy),
-                (nf_path, "kde", FACE_KDE, df_train, class_var_name, chunks, eps, penalty,
-                 algorithm_dir, dummy),
-                (nf_path, "epsilon", FACE_EPS, df_train, class_var_name, chunks, eps, penalty,
-                 algorithm_dir, dummy)
-            ]
-
-            # Run in parallel using multiprocessing
-            with mp.Pool(processes=len(tasks)) as pool:
-                results = pool.starmap(build_FACE_worker, tasks)
-
-            # Collect results
-            for alg, alg_name, alg_path, tf in results:
-                algorithms.append(alg)
-                algorithm_str_list.append(alg_name)
-                algorithms_paths.append(alg_path)
-                construction_time_list.append(tf)
-
-        t0 = time.time()
-        alg = WachterCounterfactual(density_estimator=gt_estimator, features=df_train.columns[:-1],
-                                    log_likelihood_threshold=0.00, posterior_probability_threshold=0.00, dataset=df_train)
-        tf = time.time() - t0
-        add_algorithm(alg, WACHTER, tf)
-
+        print ("Start")
         # Create as many BayesACE (both with normalizing flow and CLG) as vertices
         for model_str, model, model_path in zip(models_str, [normalizing_flow, clg_network, gt_estimator],
                                                 [nf_path, clg_network_path, gt_estimator_path]):
@@ -230,6 +146,7 @@ if __name__ == "__main__":
             opt_algorithm_params["pop_size"] = 100
             for n_vertex in n_vertices:
                 t0 = time.time()
+                # TODO Swap to SGD
                 alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
                                n_vertices=n_vertex, chunks=chunks,
                                posterior_probability_threshold=0.00, log_likelihood_threshold=0.00,
@@ -238,14 +155,10 @@ if __name__ == "__main__":
                                seed=0, verbose=verbose, opt_algorithm=NSGA2,
                                opt_algorithm_params=opt_algorithm_params,
                                generations=n_generations,
-                               parallelize=parallelize,
-                               multi_objective=multi_objective)
+                               parallelize=parallelize)
                 tf = time.time() - t0
                 alg_name = BAYESACE + "_" + model_str + "_v" + str(n_vertex)
                 add_algorithm(alg, alg_name, tf)
-        # Set parallelism to False for each algorithm
-        for alg in algorithms:
-            alg.parallelize = False
 
         # Store the construction time. The dataset need to be identified.
         construction_time_df = pd.Series(construction_time_list, index=algorithm_str_list, name="construction_time")
@@ -292,6 +205,7 @@ if __name__ == "__main__":
         for i, (instance_i, algorithm_str) in enumerate(product(range(n_counterfactuals), algorithm_str_list)):
             path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp, n_vertices_used = results[i]
             # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
+            # TODO MAJOR Correction analysis
             if multi_objective and algorithm_str.startswith(BAYESACE) and not counterfactual is None:
                 # First, if the no baseline counterfactual was found, then we just return the one with lower distance
                 if results_dfs["counterfactual"].loc[instance_i, FACE_BASELINE] is None:

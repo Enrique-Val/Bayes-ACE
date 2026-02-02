@@ -5,15 +5,8 @@ from multiprocessing import shared_memory
 
 import torch
 from sklearn.model_selection import KFold
-from skopt import gp_minimize
-from skopt.plots import plot_convergence, plot_evaluations
-from skopt.space import Real, Integer, Dimension
-from skopt.utils import use_named_args
 
 from bayesace.models.bayesian_network_classifier import BayesianNetworkClassifier
-from bayesace.models.conditional_normalizing_flow import NanLogProb
-from bayesace.models.conditional_nvp import ConditionalNVP
-from bayesace.models.conditional_spline import ConditionalSpline
 from bayesace.models.conditional_kde import ConditionalKDE
 from bayesace.dataset.utils import get_data, preprocess_data, remove_outliers
 
@@ -232,8 +225,6 @@ if __name__ == "__main__":
     t_init = time.time()
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument("--dataset_id", nargs='?', default=44090, type=int)
-    parser.add_argument('--graphics', action=argparse.BooleanOptionalAction)
-    parser.add_argument("--type", choices=["NVP", "Spline"], default="NVP")
     parser.add_argument('--n_iter', nargs='?', default=50, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_cv_2/", type=str)
@@ -250,7 +241,6 @@ if __name__ == "__main__":
     max_cum_values = 3
 
     dataset_id = args.dataset_id
-    GRAPHIC = args.graphics
 
     directory_path = os.path.join(args.dir_name, str(dataset_id))
     if not os.path.exists(directory_path):
