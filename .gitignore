@@ -13,9 +13,13 @@ checkpoint_data*
 
 .ipynb_checkpoints/opt_testing-checkpoint.ipynb
 
-experiments/results/*
+experiments/results/exp_2/*
 
-results/e*
+experiments/results/exp_cv_2/plots/*
+
+experiments/results/exp_eqi/*
+
+experiments/results/images_tutorial/*
 
 bayesace/dataset/data/real_imf_categorical/
 
