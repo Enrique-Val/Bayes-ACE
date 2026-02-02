@@ -21,13 +21,13 @@ class ConditionalKDE(ConditionalDE):
         self.log_priors_: dict[any, float] = {}
 
     def fit(self, X: pd.DataFrame, y: Union[pd.Series, np.ndarray]):
-        super().fit(X, y)  # Sets self.classes_, self.class_distribution, etc.
+        super().fit(X, y) 
 
         X_np = X.to_numpy()
         y_np = y.to_numpy() if isinstance(y, pd.Series) else y
 
         # Convert class priors to log priors for numerical stability
-        for cls in self.classes_:
+        for cls in self.get_class_labels():
             # Store data as tensor on device
             X_cls = X_np[y_np == cls]
             self.X_train_[cls] = torch.tensor(X_cls, dtype=torch.float32, device=self.device)
@@ -115,7 +115,7 @@ class ConditionalKDE(ConditionalDE):
             # log P(X) = log sum_c exp( log P(X|c) + log P(c) )
             class_log_probs = []
 
-            for label in self.classes_:
+            for label in self.get_class_labels():
                 log_p_x_given_y = self._kde_log_prob(X_torch, label)
                 log_joint = log_p_x_given_y + self.log_priors_[label]
                 class_log_probs.append(log_joint)
@@ -147,7 +147,7 @@ class ConditionalKDE(ConditionalDE):
 
         # Calculate P(Y|X) = exp( log P(X|Y) + log P(Y) - log P(X) )
         probs_list = []
-        for cls in self.classes_:
+        for cls in self.get_class_labels():
             log_joint = self._kde_log_prob(X_torch, cls) + self.log_priors_[cls]
             # log P(Y|X)
             log_posterior = log_joint - log_marginal_torch
@@ -158,7 +158,7 @@ class ConditionalKDE(ConditionalDE):
         if output == "tensor":
             return probs
         elif output == "pandas":
-            return pd.DataFrame(probs.detach().cpu().numpy(), columns=self.classes_)
+            return pd.DataFrame(probs.detach().cpu().numpy(), columns=self.get_class_labels())
         elif output == "numpy" and not is_tensor:
             return probs.detach().cpu().numpy()
         return probs  # Return tensor
