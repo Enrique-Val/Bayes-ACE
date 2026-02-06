@@ -43,7 +43,7 @@ class BayesianNetworkClassifier(ConditionalDE):
         self.network_type: str = network_type
         self.torch_proxy: CLGTorch = None
 
-    def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray, initial_structure="naive",
+    def fit(self, X: pd.DataFrame, y: pd.Series | np.ndarray, initial_structure="naive", method="mmhc",
             training_params=None):
         super().fit(X, y)
         if training_params is None:
@@ -55,13 +55,18 @@ class BayesianNetworkClassifier(ConditionalDE):
         bn: pb.BayesianNetwork = None
         dataset[self.class_var_name] = dataset[self.class_var_name].astype('string').astype('category')
         if self.network_type == "CLG":
-            # MMHC algorithm with Mutual Information test and BIC score
-            test = pb.MutualInformation(df=dataset)
-            score = pb.BIC(df=dataset)
-            training_params["score"] = score
-            est = pb.MMHC()
-            bn = est.estimate(hypot_test=test, operators=pb.ArcOperatorSet(), bn_type=pb.CLGNetworkType(), **training_params)
-            # print("PC Arcs:", pc_bn.arcs())
+            if method == "mmhc":
+                # MMHC algorithm with Mutual Information test and BIC score
+                test = pb.MutualInformation(df=dataset, asymptotic_df = False)
+                score = pb.BIC(df=dataset)
+                training_params["score"] = score
+                est = pb.MMHC()
+                bn = est.estimate(hypot_test=test, operators=pb.ArcOperatorSet(), bn_type=pb.CLGNetworkType(), **training_params)
+                # print("PC Arcs:", pc_bn.arcs())
+            elif method == "hc":
+                bn = pb.hc(dataset, start=get_initial_structure(dataset, pb.CLGNetwork, initial_structure),
+                           operators=["arcs"], **training_params)
+                bn = copy_structure(bn)
         elif self.network_type == "SP":
             # est = MMHC()
             # test = pb.MutualInformation(data, True)
