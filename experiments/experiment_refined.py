@@ -1,3 +1,4 @@
+import ast
 import random
 import os
 
@@ -10,6 +11,7 @@ import torch
 from pymoo.algorithms.moo.nsga2 import NSGA2
 
 from bayesace.algorithms.algorithm import Algorithm
+from bayesace.algorithms.bayesace_autodiff import SGDACE
 from bayesace.algorithms.wachter import WachterCounterfactual
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
@@ -19,7 +21,8 @@ import time
 
 import multiprocessing as mp
 
-from experiments.utils import setup_experiment, get_constraints, get_counterfactual_from_algorithm, get_best_opt_params
+from experiments.utils import setup_experiment, get_constraints, get_counterfactual_from_algorithm, get_best_opt_params, \
+    get_counterfactual_from_SGD
 
 # Constant string
 FACE_BASELINE = "face_baseline"
@@ -28,20 +31,30 @@ FACE_EPS = "face_eps"
 WACHTER = "wachter"
 BAYESACE = "bayesace"
 
+lr_range = (1e-5, 1e-2)
+
+def parse_space_sep_array(s):
+    if isinstance(s, str):
+        # Remove brackets, split by whitespace, convert to float32
+        s = s.strip("[]").replace('\n', '')
+        # filter(None, ...) handles potential double spaces
+        return np.array(list(map(float, filter(None, s.split()))), dtype=np.float32)
+    return s
+
 
 def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks, logl_threshold, pp_threshold):
     torch.set_num_threads(1)
-    algorithm: Algorithm = pickle.load(open(algorithm_path, 'rb'))
+    algorithm: SGDACE = pickle.load(open(algorithm_path, 'rb'))
     algorithm.set_log_likelihood_threshold(logl_threshold)
     algorithm.set_posterior_probability_threshold(pp_threshold)
     gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
-    return get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty, chunks)
+    return get_counterfactual_from_SGD(instance, algorithm, gt_estimator, penalty, chunks, lr_range=lr_range)
 
 
 if __name__ == "__main__":
     mp.set_start_method('spawn', force=True)
     parser = argparse.ArgumentParser(description="Arguments")
-    parser.add_argument("--dataset_id", nargs='?', default=44120, type=int)
+    parser.add_argument("--dataset_id", nargs='?', default=44131, type=int)
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--cv_dir', nargs='?', default='./results/exp_cv_2/', type=str)
     parser.add_argument('--results_dir', nargs='?', default='./results/exp_2/', type=str)
@@ -59,11 +72,12 @@ if __name__ == "__main__":
     likelihood_dev_list = [-1, -0.5, 0]
     post_prob_dev_list = [-0.5, 0]
     # Number of points for approximating integrals:
-    chunks = 20
+    chunks = 10
     # Number of counterfactuals
     n_counterfactuals = 15
-    eps = np.inf
     n_train_size = 1000
+    iters = 50
+    max_epochs = 500
 
 
     dummy = False
@@ -71,12 +85,14 @@ if __name__ == "__main__":
         chunks = 3
         n_counterfactuals = 2
         likelihood_dev_list = likelihood_dev_list[-1:]
-        accuracy_threshold_list = post_prob_dev_list[-1:]
+        post_prob_dev_list = post_prob_dev_list[-1:]
         n_train_size = 10
         n_vertices = n_vertices[:1]
         n_generations = 10
         verbose = True
         parallelize = False
+        iters = 2
+        max_epochs=5
 
     # Folder for storing the results
     results_dir = os.path.join(args.results_dir, str(dataset_id), str(args.penalty))
@@ -112,7 +128,7 @@ if __name__ == "__main__":
 
 
     # Check if a certain file exists
-    if os.path.exists(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv')):
+    if os.path.exists(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv')) and False:
         construction_time_df = pd.read_csv(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv'),
                                              index_col=0)
         # Convert to series
@@ -142,20 +158,12 @@ if __name__ == "__main__":
         # Create as many BayesACE (both with normalizing flow and CLG) as vertices
         for model_str, model, model_path in zip(models_str, [normalizing_flow, clg_network, gt_estimator],
                                                 [nf_path, clg_network_path, gt_estimator_path]):
-            opt_algorithm_params = get_best_opt_params(model=model_str, dataset_id=dataset_id, dir=args.cv_dir)
-            opt_algorithm_params["pop_size"] = 100
             for n_vertex in n_vertices:
                 t0 = time.time()
-                # TODO Swap to SGD
-                alg = BayesACE(density_estimator=model, features=df_train.columns[:-1],
+                alg = SGDACE(density_estimator=model, features=df_train.columns[:-1],
                                n_vertices=n_vertex, chunks=chunks,
                                posterior_probability_threshold=0.00, log_likelihood_threshold=0.00,
-                               penalty=penalty, sampling_range=sampling_range,
-                               initialization="guided",
-                               seed=0, verbose=verbose, opt_algorithm=NSGA2,
-                               opt_algorithm_params=opt_algorithm_params,
-                               generations=n_generations,
-                               parallelize=parallelize)
+                               penalty=penalty, max_epochs=max_epochs)
                 tf = time.time() - t0
                 alg_name = BAYESACE + "_" + model_str + "_v" + str(n_vertex)
                 add_algorithm(alg, alg_name, tf)
@@ -168,7 +176,7 @@ if __name__ == "__main__":
             construction_time_df.to_csv(os.path.join(results_dir, 'construction_time_' + str(dataset_id) + '.csv'))
 
     metrics = ["distance", "path_l0", "distance_l2", "counterfactual", "time", "time_w_construct",
-               "distance_to_face_baseline", "real_logl", "real_pp", "n_vertices"]
+               "distance_to_face_baseline", "real_logl", "real_pp"]
 
     '''# Folder in case we want to store every result:
     if not os.path.exists(results_dir + 'paths/'):
@@ -177,10 +185,19 @@ if __name__ == "__main__":
     for likelihood_dev, post_prob_dev in product(likelihood_dev_list, post_prob_dev_list):
         print("Likelihood dev:", likelihood_dev, "    Accuracy threshold:", post_prob_dev)
         # Result storage
-        results_dfs = {i: pd.DataFrame(columns=algorithm_str_list, index=range(n_counterfactuals)) for i in metrics}
+        file_name = 'likelihood' + str(likelihood_dev) + '_pp' + str(post_prob_dev) + '.csv'
+        results_dfs = {}
         # Name the index column with the dataset id
         for i in metrics:
-            results_dfs[i].index.name = dataset_id
+            metric_path = os.path.join(results_dir, i)
+            if not os.path.exists(metric_path):
+                os.makedirs(metric_path)
+            results_dfs[i] = pd.read_csv(os.path.join(metric_path, file_name), index_col=0)
+            if i == "counterfactual":
+                for col in results_dfs[i].select_dtypes(include=['object']).columns:
+                    # Check first value to ensure it's an array-string before converting
+                    if results_dfs[i][col].astype(str).str.startswith('[').any():
+                        results_dfs[i][col] = results_dfs[i][col].apply(parse_space_sep_array)
         # Set the proper likelihood  and accuracy thresholds
         logl_threshold = mu_gt + likelihood_dev * std_gt
         pp_threshold = min(mae_gt + std_mae_gt * post_prob_dev, 0.99)
@@ -200,48 +217,21 @@ if __name__ == "__main__":
             results = []
             for i, algorithm in product(range(n_counterfactuals), algorithms):
                 instance = df_counterfactuals.iloc[[i]]
-                results.append(get_counterfactual_from_algorithm(instance, algorithm, gt_estimator, penalty,
-                                                                 chunks))
+                results.append(get_counterfactual_from_SGD(instance, algorithm, gt_estimator, penalty,
+                                                                 chunks, iters=iters, verbose = verbose, lr_range=lr_range))
         for i, (instance_i, algorithm_str) in enumerate(product(range(n_counterfactuals), algorithm_str_list)):
             path_length_gt, path_l0, path_l2, tf, counterfactual, real_logl, real_pp, n_vertices_used = results[i]
             # Check if we are dealing with multiobjective BayesACE by checking the number of outputs
-            # TODO MAJOR Correction analysis
-            if multi_objective and algorithm_str.startswith(BAYESACE) and not counterfactual is None:
-                # First, if the no baseline counterfactual was found, then we just return the one with lower distance
-                if results_dfs["counterfactual"].loc[instance_i, FACE_BASELINE] is None:
-                    index = np.argmin(path_length_gt)
-                else:
-                    # First we try to select the counterfactuals that surpasses in likelihood and posterior prob
-                    # to FACE baseline
-                    logl_baseline = results_dfs["real_logl"].loc[instance_i, FACE_BASELINE]
-                    pp_baseline = results_dfs["real_pp"].loc[instance_i, FACE_BASELINE]
-                    distance_baseline = results_dfs["distance"].loc[instance_i, FACE_BASELINE]
-                    mask = np.logical_and(real_logl > logl_baseline, real_pp > pp_baseline)
-
-                    if mask.any():
-                        path_length_gt[np.logical_not(mask)] = np.inf
-                        index = np.argmin(path_length_gt)
-                    # If none surpasses it take the one that is closer in terms of likelihood and posterior prob
-                    else:
-                        # Return path with minimum distance
-                        index = np.argmin(path_length_gt)
-                path_length_gt = path_length_gt[index]
-                path_l0 = path_l0[index]
-                path_l2 = path_l2[index]
-                counterfactual = counterfactual[index]
-                real_logl = real_logl[index]
-                real_pp = real_pp[index]
-                n_vertices_used = n_vertices_used[index]
             results_dfs["distance"].loc[instance_i, algorithm_str] = path_length_gt
             results_dfs["path_l0"].loc[instance_i, algorithm_str] = path_l0
             results_dfs["distance_l2"].loc[instance_i, algorithm_str] = path_l2
-            results_dfs["counterfactual"].loc[instance_i, algorithm_str] = counterfactual
+            results_dfs["counterfactual"].at[instance_i, algorithm_str] = counterfactual
             results_dfs["time"].loc[instance_i, algorithm_str] = tf
             results_dfs["time_w_construct"].loc[instance_i, algorithm_str] = tf + construction_time_df[
                 algorithm_str]
             results_dfs["real_logl"].loc[instance_i, algorithm_str] = real_logl
             results_dfs["real_pp"].loc[instance_i, algorithm_str] = real_pp
-            results_dfs["n_vertices"].loc[instance_i, algorithm_str] = n_vertices_used
+            #results_dfs["n_vertices"].loc[instance_i, algorithm_str] = n_vertices_used
 
         # Prior to save the result, compute the distance between the counterfactual found by the first
         # FACE and the ones found by the other algorithms
@@ -259,7 +249,6 @@ if __name__ == "__main__":
                     results_dfs["distance_to_face_baseline"].loc[i, algorithm_str] = np.inf
 
         if not dummy:
-            file_name = 'likelihood' + str(likelihood_dev) + '_pp' + str(post_prob_dev) + '.csv'
             # Save the results
             for i in metrics:
                 metric_path = os.path.join(results_dir, i)

@@ -12,6 +12,8 @@ from pymoo.operators.selection.tournament import TournamentSelection
 
 from bayesace import get_other_class, path, path_likelihood_length, total_l0_path, ConditionalDE
 from bayesace.algorithms.algorithm import ACEResult
+from bayesace.algorithms.bayesace_autodiff import SGDACE
+from bayesace.models.autodiff_proxies.gbn_classifier import serialize_clg, CLGTorch
 from bayesace.models.conditional_normalizing_flow import ConditionalNF
 
 import pandas as pd
@@ -95,6 +97,35 @@ def check_enough_instances(df_train, gt_estimator: ConditionalDE, log_likelihood
         print("There are not enough instances in the training set that are both accurate and plausible")
         raise Exception("Not enough instances")
 
+def get_counterfactual_from_SGD(instance: pd.DataFrame, algorithm : SGDACE, gt_estimator: ConditionalDE, penalty,
+                                chunks, l0_epsilon=0.1, lr_range= None, parallelize = False, iters = 50,
+                                verbose = False):
+    if lr_range is None:
+        lr_range = (1e-8, 1e-3)
+    class_var_name = gt_estimator.get_class_var_name()
+    target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].to_numpy()[0])
+    result, best_lr, tf = sgd_rs(algorithm, instance, target_label, lr_range=lr_range, iters=iters,
+                                 parallelize=parallelize, verbose = verbose)
+    '''
+    # Uncomment if all paths want to be stored
+    result.path.to_csv(results_dir+'paths/data' + str(dataset_id) + '_likelihood' + str(
+    likelihood_dev) + '_acc' + str(accuracy_threshold) +  + algorithm_str + '_counterfactual' + 
+    str(i) + '.csv') 
+    '''
+    if result.counterfactual is None:
+        print("Counterfactual for:", instance.index[0], "not found")
+        return np.inf, np.inf, np.inf, tf, None, -np.inf, 0, 0
+    path_to_compute = path(result.path.to_numpy(), chunks=chunks)
+    path_length_gt = path_likelihood_length(
+        pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
+        density_estimator=gt_estimator, penalty=penalty)
+    cfx_df = pd.DataFrame([result.counterfactual.to_numpy()], columns=instance.columns[:-1])
+    real_logl = gt_estimator.logl(cfx_df)
+    real_pp = gt_estimator.posterior_probability(cfx_df, target_label)
+    path_l2 = np.linalg.norm(result.counterfactual.to_numpy() - instance.drop(columns=class_var_name).to_numpy().flatten())
+    path_l0 = total_l0_path(result.path.to_numpy(), l0_epsilon)
+    print("Counterfactual:", instance.index[0], "    Distance", path_length_gt)
+    return path_length_gt, path_l0, path_l2, tf, result.counterfactual.to_numpy(), real_logl, real_pp, result.path.shape[0]-2
 
 def get_counterfactual_from_algorithm(instance: pd.DataFrame, algorithm, gt_estimator: ConditionalDE, penalty, chunks, l0_epsilon=0.1):
     print("Instance", instance.index[0])
@@ -233,3 +264,52 @@ def close_factors(number):
             factor2 = number // factor1
 
     return factor1, factor2
+
+def sgd_worker(algorithm : SGDACE, instance, target_label, lr, verbose = False):
+    algorithm.lr = lr
+    print("Lr", lr)
+    t0 = time.time()
+    result: ACEResult = algorithm.run(instance=instance, target_label=target_label, verbose=verbose)
+    tn = time.time() - t0
+    if result.counterfactual is not None:
+        return result, lr, tn
+    else:
+        return result, lr, tn
+
+# This function performs a random search over the learning rate for the SGDACE algorithm and returns the best result found
+def sgd_rs(algorithm : SGDACE, instance, target_label, lr_range = None, iters=50, seed = 0, parallelize = False,
+           verbose = False):
+    if lr_range is None:
+        lr_range = (1e-8, 1e-3)
+    best_loss = np.inf
+    best_result = None
+    best_lr = None
+    from scipy.stats import uniform
+    log_lr = uniform(np.log10(lr_range[0]), np.log10(lr_range[1]) - np.log10(lr_range[0])).rvs(random_state=seed, size=iters)
+    lrs = 10 ** log_lr
+    best_time = 0
+    if not parallelize:
+        for i in range(iters):
+            # Get a random lr (log-uniformly sampled)
+            lr = lrs[i]
+            result, _, tf = sgd_worker(algorithm, instance, target_label, lr, verbose)
+            loss = result.distance
+            if loss <= best_loss:
+                best_result = result
+                best_loss = loss
+                best_lr = lr
+                best_time = tf
+    else :
+        import multiprocessing as mp
+        pool = mp.Pool(mp.cpu_count())
+        results = pool.starmap(sgd_worker, [(algorithm, instance, target_label, lr, verbose) for lr in lrs])
+        pool.close()
+        pool.join()
+        for result, lr, tn in results:
+            loss = result.distance
+            if loss <= best_loss:
+                best_result = result
+                best_loss = loss
+                best_lr = lr
+                best_time = tn
+    return best_result, best_lr, best_time

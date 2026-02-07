@@ -256,9 +256,9 @@ class CLGLogProb(nn.Module):
             variances.append(gaussian_params["variance"])
             coefficients.append([gaussian_params["cofficients"].get(p, 0.0) for p in cont_parents])
 
-        self.register_buffer("intercepts", torch.tensor(intercepts))
-        self.register_buffer("log_scales", torch.tensor(variances).sqrt().log())
-        self.register_buffer("coeffs", torch.tensor(coefficients))
+        self.register_buffer("intercepts", torch.tensor(intercepts, dtype=torch.float32))
+        self.register_buffer("log_scales", torch.tensor(variances, dtype=torch.float32 ).sqrt().log())
+        self.register_buffer("coeffs", torch.tensor(coefficients, dtype=torch.float32))
 
     def forward(self, x, global_grid):
         batch_size = x.shape[0]
