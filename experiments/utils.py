@@ -42,15 +42,19 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
 
     assert class_var_name == gt_estimator.get_class_var_name(), "Class variable name does not match"
 
-    # Generate a test sample
-    torch.manual_seed(0)
-    df_counterfactuals = gt_estimator.sample(n_counterfactuals, seed=seed)
+    # Load the test sample
+    df_counterfactuals = pd.read_csv(os.path.join(results_cv_dir, 'test_instances_' + str(dataset_id) + '.csv'),
+                                        index_col=0)
+    # Categorize the class variable
+    df_counterfactuals[class_var_name] = df_counterfactuals[class_var_name].astype('string').astype('category')
 
     # Open the Bayesian network (conditional linear Gaussian)
     clg_network_path = os.path.join(results_cv_dir, 'clg_' + str(dataset_id) + '.pkl')
     t0 = time.time()
     clg_network = pickle.load(open(clg_network_path, 'rb'))
     print("Time to load the model clg", type(clg_network), time.time() - t0)
+    params = serialize_clg(clg_network.bayesian_network)
+    clg_network.torch_proxy = CLGTorch(*params, continuous_variables=df_train.columns[:-1])
 
     # Open the NF
     nf_path = os.path.join(results_cv_dir, 'nf_' + str(dataset_id) + '.pkl')
@@ -61,7 +65,6 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     # Name the index column
     df_train.index.name = dataset_id
     df_counterfactuals.index.name = dataset_id
-
     return df_train, df_counterfactuals, gt_estimator, gt_estimator_path, clg_network, clg_network_path, normalizing_flow, nf_path
 
 
