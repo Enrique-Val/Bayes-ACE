@@ -10,6 +10,7 @@ import multiprocessing as mp
 
 NON_ZERO_CONST = 0.000001
 n_processes = np.max((1, int(mp.cpu_count()/1)))
+print(f"Using {n_processes} processes for parallelization")
 
 
 def compute_weight(point_i, point_j, epsilon, weight_function, *args):
@@ -61,15 +62,11 @@ def build_weighted_graph(dataframe: pd.DataFrame, epsilon, weight_function, weig
     combs = combinations(list(dataframe.index), 2)
 
     if parallelize:
-        pool = mp.Pool(n_processes)
-
-        result = pool.starmap(compute_weight, [
-            (mat[i[0]], mat[i[1]], epsilon, weight_function, *weight_args)
-            for i in combs
-        ])
-
-        pool.close()
-        pool.join()
+        with mp.Pool(n_processes) as pool:
+            result = pool.starmap(compute_weight, [
+                (mat[i[0]], mat[i[1]], epsilon, weight_function, *weight_args)
+                for i in combs
+            ])
 
         for i, (i_idx, j_idx) in enumerate(combs):
             weight = result[i]
@@ -111,9 +108,8 @@ def find_closest_paths(graph, source_node, target_nodes, parallelize=False):
 
     result = []
     if parallelize :
-        pool = mp.Pool(n_processes)
-        result = pool.starmap_async(compute_path, [(graph, source_node, target_node) for target_node in target_nodes])
-        pool.close()
+        with mp.Pool(n_processes) as pool :
+            result = pool.starmap_async(compute_path, [(graph, source_node, target_node) for target_node in target_nodes])
         for i in result.get():
             if i is not None:
                 all_shortest_paths[i[0]] = i[1]

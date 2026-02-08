@@ -24,6 +24,7 @@ def worker(alg, instance) :
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn', force=True)
     parser = argparse.ArgumentParser(description="Arguments")
     parser.add_argument('--parallelize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--dir_name', nargs='?', default="./results/exp_eqi/", type=str)
@@ -103,8 +104,8 @@ if __name__ == "__main__":
     if not os.path.exists(algorithm_dir):
         os.makedirs(algorithm_dir)
 
-    #algorithms_paths["wachter"] = os.path.join(algorithm_dir, f"wachter.pkl")
-    #algorithms_paths["face"] = os.path.join(algorithm_dir, f"face_{penalty}.pkl")
+    algorithms_paths["wachter"] = os.path.join(algorithm_dir, f"wachter.pkl")
+    algorithms_paths["face"] = os.path.join(algorithm_dir, f"face_{penalty}.pkl")
     for vertices in vertices_list:
         algorithms_paths["bayesace_"+str(vertices)] = os.path.join(algorithm_dir, f"bayesace_{vertices}_{penalty}.pkl")
 
