@@ -84,7 +84,7 @@ if __name__ == "__main__":
     n_counterfactuals = 15
     n_train_size = 1000
     iters = 20
-    max_epochs = 500
+    max_epochs = 400
 
 
     dummy = False

@@ -64,7 +64,7 @@ class SGDACE(Algorithm):
             raise NotImplementedError("density_estimator must implement `predict_proba` for Lagrangian constraints.")
 
     def _warm_start(self, x_og_tensor, n_samples=2000, target_label=1):
-        print("target_label", target_label)
+        #print("target_label", target_label)
         """
         Samples points, filters for constraints, and selects the best start
         by evaluating the exact path cost function.
@@ -94,7 +94,8 @@ class SGDACE(Algorithm):
 
             # If no samples meet criteria
             if not valid_mask.any():
-                print(f"Warm Start: 0/{n_samples} samples met constraints. Selecting instance with lowest logl violation.")
+                # TODO verbose
+                #print(f"Warm Start: 0/{n_samples} samples met constraints. Selecting instance with lowest logl violation.")
                 # Proposed fix for Lines 89-91
                 # Normalize violations roughly to sum them
                 viol_prob_val = torch.clamp(self.posterior_probability_threshold - p_target, min=0)
@@ -105,7 +106,8 @@ class SGDACE(Algorithm):
                 best_idx = torch.argmin(total_violation)
                 best_candidate = candidates[best_idx]
                 best_score = self._torch_path_likelihood_length(torch.stack([x_og_tensor, best_candidate], dim=0))
-                print(f"Warm Start: Selected candidate with lowest logl violation. Init Cost: {best_score:.4f}")
+                # TODO verbose
+                #print(f"Warm Start: Selected candidate with lowest logl violation. Init Cost: {best_score:.4f}")
                 return best_candidate.unsqueeze(0), best_score, 0.0
 
 
@@ -140,8 +142,7 @@ class SGDACE(Algorithm):
                     # Store the parameters (excluding the fixed x_og at index 0)
                     best_path_params = virtual_path[1:].clone()
 
-            print(
-                f"Warm Start: Selected best path from {len(valid_candidates)} valid candidates. Init Cost: {best_score:.4f}")
+            #print(f"Warm Start: Selected best path from {len(valid_candidates)} valid candidates. Init Cost: {best_score:.4f}")
             return best_path_params, best_score, np.std(metrics)
 
     def _torch_path_likelihood_length(self, full_path: torch.Tensor, apply_div=False):
@@ -222,7 +223,6 @@ class SGDACE(Algorithm):
         self.density_estimator.freeze()
 
         # Convert target_label to its index
-        print(self.density_estimator.get_class_labels())
         target_label = self.density_estimator.get_class_labels().index(target_label)
 
         # We use self.features to guarantee column order matches the tensor expectation
@@ -263,6 +263,7 @@ class SGDACE(Algorithm):
 
         final_path = None
         best_loss = np.inf
+        best_norm_loss = np.inf
 
         # ALM Parameters
         # We separate alphas because Probability and Likelihood have different scales
@@ -274,6 +275,8 @@ class SGDACE(Algorithm):
 
         rho_max = 100.0
         rho_multiplier = 1.01
+
+        patience_counter = 0
 
         for epoch in range(self.max_epochs):
             optimizer.zero_grad()
@@ -356,11 +359,26 @@ class SGDACE(Algorithm):
             # Note: viol_logl_item is -inf if constraint is disabled, so check passes automatically
             is_valid = (viol_prob.item() <= 0) and (viol_logl_item <= 0)
 
+            # 1. Constraints must be satisfied
+            if is_valid:
+                # 2. Check for convergence (loss hasn't improved significantly)
+                # Maintain a 'patience' counter (e.g., stop if no improvement for 50 epochs)
+                if best_loss < float('inf') and best_norm_loss - current_path_cost < 1e-2:
+                    patience_counter += 1
+                else:
+                    patience_counter = 0
+
+                if patience_counter > 50:
+                    if verbose:
+                        print(f"Converged at epoch {epoch}. Stopping early.")
+                    break
+
             with torch.no_grad():
                 raw_path_loss_item = self._torch_path_likelihood_length(full_path, apply_div=False).item()
 
             if is_valid and raw_path_loss_item <= best_loss:
                 best_loss = raw_path_loss_item
+                best_norm_loss = current_path_cost
                 final_path = path_params.clone().detach()
 
             if epoch % 50 == 0 and verbose:
