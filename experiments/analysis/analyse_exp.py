@@ -13,6 +13,7 @@ import seaborn as sns
 import re
 
 from bayesace.algorithms.face import FACE
+from experiments.analysis.utils import plot_dolan_more
 from experiments.utils import friedman_posthoc, close_factors
 
 from experiments.experiment2 import FACE_BASELINE, FACE_KDE, FACE_EPS, WACHTER, BAYESACE
@@ -259,41 +260,6 @@ def get_palette(new_algs, shading = False):
 
     return color_palette
 
-    base_colors = {
-        "BayesACE": "#0088cc", #"blue",
-        "FACE": "orange",
-        "Wachter": "orange",
-        "DAACE": "#8b45e6", #"purple"
-    }
-
-    palette = {}
-    if not shading :
-        for method in new_algs:
-            for base_method in base_colors.keys():
-                if base_method in method:
-                    palette[method] = base_colors[base_method]
-    else:
-        model_counts = {}  # To track occurrences
-
-        for method in new_algs:
-            base_color = None
-
-            for key in base_colors:
-                if key in method:
-                    base_color = base_colors[key]
-                    break
-
-            if base_color:
-                if base_color == "orange" :
-                    count = model_counts.get(base_color, -1)  # How many times this color has been used
-                else :
-                    count = model_counts.get(base_color, 0)  # How many times this color has been used
-                factor = 1 - (count * 0.35)  # Slightly darken/brighten each new instance
-                palette[method] = adjust_lightness(base_color, factor)  # Apply adjustment
-                model_counts[base_color] = count + 1  # Increment counter
-
-    return palette
-
 
 def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint_plots, comb=None, box_plot=True):
     p_values_dir = os.path.join(joint_plots, "p_values")
@@ -309,27 +275,21 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
         n_cols = len(values_dict[join_in_plot[1]])
     #fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4*n_cols,2*n_rows))
     fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(3.5*1.2*n_cols*3/4,4.2/1.75*n_rows))
-    if box_plot:
-        fig_data = []
-        fig_box, ax_box = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2*n_cols,4.2/1.75*n_rows))
-        fig_pp, ax_pp = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2*n_cols,4.2/1.75*n_rows))
-        # Another Boxplots without infs or nans
-        figures = [fig, fig_box, fig_pp]
-        figures_str = ["Critical diff", "Box plot", "Performance profile"]
-    else :
-        figures = [fig]
-        figures_str = ["Critical diff"]
+    fig_data = []
+    fig_box, ax_box = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2*n_cols,4.2/1.75*n_rows))
+    fig_pp, ax_pp = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2*n_cols,4.2/1.75*n_rows))
+    # Another Boxplots without infs or nans
+    figures = [fig, fig_box, fig_pp]
+    figures_str = ["Critical diff", "Box plot", "Performance profile"]
     for i, plot_jointly in enumerate(product(*[values_dict[j] for j in join_in_plot])):
         if n_cols > 1 :
             ax_i = ax[i // n_cols, i % n_cols]
-            if box_plot:
-                ax_box_i = ax_box[i // n_cols, i % n_cols]
-                ax_pp_i = ax_pp[i // n_cols, i % n_cols]
+            ax_box_i = ax_box[i // n_cols, i % n_cols]
+            ax_pp_i = ax_pp[i // n_cols, i % n_cols]
         else :
             ax_i = ax[i]
-            if box_plot:
-                ax_box_i = ax_box[i]
-                ax_pp_i = ax_pp[i]
+            ax_box_i = ax_box[i]
+            ax_pp_i = ax_pp[i]
 
         if comb is not None:
             key_i = tuple(comb) + tuple(plot_jointly)
@@ -353,45 +313,49 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
         #fbh["p_adjusted"].to_csv(os.path.join(p_values_dir, p_values_subdir, " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]) + ".csv"))
         ax_i.set_title(
             " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]))
-        if box_plot:
-            # For the boxplot, normalize by dividing by the value of FACE GT
-            data_box = data_new_i.copy()
-            # Normalize each row of data by standardizing it
-            data_box = data_box.subtract(data_box.mean(axis=1), axis=0).divide(data_box.std(axis=1), axis=0)
 
-            # Reorganize order. Order: DAACE GT, DAACE, BayesACE, FACE KDE, FACE epsilon, and Wachter
-            new_order = [col for col in data_box.columns if "DAACE GT" in col] + [col for col in data_box.columns if "DAACE" in col and "GT" not in col] + [col for col in data_box.columns if "BayesACE" in col] + ["FACE GT","FACE-DE", "FACE-ε", "Wachter"]
-            if metric == "Distance to FACE GT":
-                new_order = [col for col in new_order if "FACE GT" != col]
-            data_box = data_box[new_order]
-            if metric == "real_logl" or metric == "real_pp":
-                data_box = data_box * -1
-            medians = data_box.median().to_numpy()
-            vertical_offset = medians * 0.05  # offset from median for display
 
-            sns.boxplot(data=data_box, ax=ax_box_i, showfliers=False, palette=palette)
-            # Round median to 2 decimal places
-            medians = medians.round(2)
-            ax_box_i.set_title(
-                " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]))
-            ax_box_i.set_ylabel(metric)
-            ax_box_i.spines[['right', 'top']].set_visible(False)
-            # Tilt the x-axis labels and add a label with the median values
-            for tick in ax_box_i.get_xticklabels():
-                tick.set_rotation(0)
+        # For the boxplot, normalize by dividing by the value of FACE GT
+        data_box = data_new_i.copy()
+        # Normalize each row of data by standardizing it
+        data_box = data_box.subtract(data_box.mean(axis=1), axis=0).divide(data_box.std(axis=1), axis=0)
 
-            # Label with the number of samples
-            ax_box_i.text(0.5, 0.95, "n = " + str(data_box.shape[0]), horizontalalignment='center',
-                          verticalalignment='center',fontsize=10)
+        # Reorganize order. Order: DAACE GT, DAACE, BayesACE, FACE KDE, FACE epsilon, and Wachter
+        new_order = [col for col in data_box.columns if "DAACE GT" in col] + [col for col in data_box.columns if "DAACE" in col and "GT" not in col] + [col for col in data_box.columns if "BayesACE" in col] + ["FACE GT","FACE-DE", "FACE-ε", "Wachter"]
+        if metric == "Distance to FACE GT":
+            new_order = [col for col in new_order if "FACE GT" != col]
+        data_box = data_box[new_order]
+        if metric == "real_logl" or metric == "real_pp":
+            data_box = data_box * -1
+        medians = data_box.median().to_numpy()
+        vertical_offset = medians * 0.05  # offset from median for display
 
-            for xtick in ax_box_i.get_xticks():
-                ax_box_i.text(xtick, medians[xtick] + vertical_offset[xtick], medians[xtick], horizontalalignment='center',
-                              size='small', color='black', weight='semibold')
-            # Set scale to logarithmic for the y-axis IF a box goes above 100 (Q3 + 1.5*IQR)
-            if (data_box.quantile(0.75) + 1.5 * (data_box.quantile(0.75) - data_box.quantile(0.25)) > 100).any():
-                ax_box_i.set_yscale("log")
-            # Add data to line dataframe
-            fig_data.append(medians)
+        sns.boxplot(data=data_box, ax=ax_box_i, showfliers=False, palette=palette)
+        # Round median to 2 decimal places
+        medians = medians.round(2)
+        title_i = " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))])
+        ax_box_i.set_title(title_i)
+        ax_box_i.set_ylabel(metric)
+        ax_box_i.spines[['right', 'top']].set_visible(False)
+        # Tilt the x-axis labels and add a label with the median values
+        for tick in ax_box_i.get_xticklabels():
+            tick.set_rotation(0)
+
+        # Label with the number of samples
+        ax_box_i.text(0.5, 0.95, "n = " + str(data_box.shape[0]), horizontalalignment='center',
+                      verticalalignment='center',fontsize=10)
+
+        for xtick in ax_box_i.get_xticks():
+            ax_box_i.text(xtick, medians[xtick] + vertical_offset[xtick], medians[xtick], horizontalalignment='center',
+                          size='small', color='black', weight='semibold')
+        # Set scale to logarithmic for the y-axis IF a box goes above 100 (Q3 + 1.5*IQR)
+        if (data_box.quantile(0.75) + 1.5 * (data_box.quantile(0.75) - data_box.quantile(0.25)) > 100).any():
+            ax_box_i.set_yscale("log")
+        # Add data to line dataframe
+        fig_data.append(medians)
+
+        # Performance profile
+        plot_dolan_more(data_new_i, ax=ax_pp_i, palette=palette, metric=metric, title=title_i)
 
     # Prepare the figures
     if len(segregate) == 0:
@@ -411,34 +375,34 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
         curr_fig.tight_layout()
         curr_fig.savefig(os.path.join(joint_plots, fig_str, joint_comb + "_segg_"+ "-".join(join_in_plot) +".pdf"))
 
-    if box_plot:
-        plt.close()
-        fig_line = plt.figure(figsize=(7*1.2*4/5/2,4.5*1.2*2/3/1.5))
-        fig_df_columns = ["DAACE GT", "DAACE", "BayesACE", "FACE GT", "FACE-DE", "FACE-ε", "Wachter"]
-        if metric == "Distance to FACE GT":
-            fig_df_columns = ["DAACE GT", "DAACE", "BayesACE", "FACE-DE", "FACE-ε", "Wachter"]
-        plot_jointly = list(product(*[values_dict[j] for j in join_in_plot]))
-        # Convert list of tuples in list of string
-        plot_jointly = [", ".join(k) for k in plot_jointly]
-        fig_df = pd.DataFrame(fig_data, columns=fig_df_columns, index=[k for k in plot_jointly])
-        ax_line = fig_line.gca()
-        palette = get_palette(fig_df.columns, shading = True)
-        for model in fig_df.columns:
-            subset = fig_df[model]
-            sns.lineplot(data=subset, label=model, color = palette[model], marker="o", ax=ax_line)
+    # Create a line plot with the medians of the box plot, with the same color palette as the box plot
+    plt.close()
+    fig_line = plt.figure(figsize=(7*1.2*4/5/2,4.5*1.2*2/3/1.5))
+    fig_df_columns = ["DAACE GT", "DAACE", "BayesACE", "FACE GT", "FACE-DE", "FACE-ε", "Wachter"]
+    if metric == "Distance to FACE GT":
+        fig_df_columns = ["DAACE GT", "DAACE", "BayesACE", "FACE-DE", "FACE-ε", "Wachter"]
+    plot_jointly = list(product(*[values_dict[j] for j in join_in_plot]))
+    # Convert list of tuples in list of string
+    plot_jointly = [", ".join(k) for k in plot_jointly]
+    fig_df = pd.DataFrame(fig_data, columns=fig_df_columns, index=[k for k in plot_jointly])
+    ax_line = fig_line.gca()
+    palette = get_palette(fig_df.columns, shading = True)
+    for model in fig_df.columns:
+        subset = fig_df[model]
+        sns.lineplot(data=subset, label=model, color = palette[model], marker="o", ax=ax_line)
 
-        ax_line.set_xlabel(" , ".join([k for k in join_in_plot]))
-        ax_line.set_ylabel(metric)
-        ax_line.set_title(joint_comb_eq)
-        # Label with the number of samples
-        ax_line.text(0.5, 0.95, "n = " + str(data_box.shape[0]), horizontalalignment='center',
-                        verticalalignment='center', fontsize=10)
-        fig_line.tight_layout()
-        ax_line.legend()
-        if not os.path.exists(os.path.join(joint_plots, "Line")):
-            os.makedirs(os.path.join(joint_plots, "Line"))
-        fig_line.savefig(os.path.join(joint_plots, "Line", joint_comb + "_segg_"+ "-".join(join_in_plot) + ".pdf"))
-        plt.close()
+    ax_line.set_xlabel(" , ".join([k for k in join_in_plot]))
+    ax_line.set_ylabel(metric)
+    ax_line.set_title(joint_comb_eq)
+    # Label with the number of samples
+    ax_line.text(0.5, 0.95, "n = " + str(data_box.shape[0]), horizontalalignment='center',
+                    verticalalignment='center', fontsize=10)
+    fig_line.tight_layout()
+    ax_line.legend()
+    if not os.path.exists(os.path.join(joint_plots, "Line")):
+        os.makedirs(os.path.join(joint_plots, "Line"))
+    fig_line.savefig(os.path.join(joint_plots, "Line", joint_comb + "_segg_"+ "-".join(join_in_plot) + ".pdf"))
+    plt.close()
 
 def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_dir):
     if len(segregate) > 0:
@@ -460,6 +424,8 @@ def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_di
         ax = fig.gca()
         fig_box = plt.figure()
         ax_box = fig_box.gca()
+        fig_pp = plt.figure()
+        ax_pp = fig_pp.gca()
         data_new[key] = data_new[key].rename(mapper=new_names, axis=1, inplace=False)
         fbh = friedman_posthoc(data_new[key])
         # List of the renamed algorithms
@@ -479,8 +445,15 @@ def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_di
         data_box = data_box.drop(columns=["FACE GT", "Wachter"])
         # Reorganize order. First, Wachter, then FACE, then DAACE, then BAYESACE
         sns.boxplot(data=data_box, ax=ax_box, showfliers=False, palette=palette)
+
+        # Now the performance profile, we plot the cumulative distribution function of the distance to face gt for each algorithm
+        plot_dolan_more(data_new[key], ax=ax_pp, palette=palette)
+
         fig_box.suptitle(", ".join([segregate[k] + " = " + key[k] for k in range(len(segregate))]))
         fig_box.savefig(os.path.join(subplot_dir, file_name + "_box.pdf"), bbox_inches='tight')
+
+        fig_pp.suptitle(", ".join([segregate[k] + " = " + key[k] for k in range(len(segregate))]))
+        fig_pp.savefig(os.path.join(subplot_dir, file_name + "_pp.pdf"), bbox_inches='tight')
 
 def plot_generic(data_dict, values_dict, metrics, root_dir):
     # Subplot, 2x4 for each metric
@@ -505,38 +478,16 @@ def plot_generic(data_dict, values_dict, metrics, root_dir):
                                        color_palette=palette)
 
         axs[i // 2, i % 2].set_title(f"Metric: {metric}")
-        # Create a box plot
-        data_box = data_dict_new.copy()
-        if metric == "Distance to FACE GT":
-            data_box = data_box.drop(columns=["FACE GT"])
-        data_box = data_box.subtract(data_box.mean(axis=1), axis=0).divide(data_box.std(axis=1), axis=0)
-        # Reorganize order. Order: DAACE GT, DAACE, BayesACE, FACE KDE, FACE epsilon, and Wachter
-        new_order = [col for col in data_box.columns if "DAACE GT" in col] + [col for col in data_box.columns if
-                                                                              "DAACE" in col and "GT" not in col] + [
-                        col for col in data_box.columns if "BayesACE" in col] + ["FACE GT", "FACE-DE", "FACE-ε",
-                                                                                 "Wachter"]
-        if metric == "Distance to FACE GT":
-            new_order = [col for col in new_order if "FACE GT" != col]
-        if metric == "real_logl" or metric == "real_pp":
-            data_box = data_box * -1
-        data_box = data_box[new_order]
-        sns.boxplot(data=data_box, ax=axs_box[i // 2, i % 2], showfliers=False, palette=palette)
-        axs_box[i // 2, i % 2].set_ylabel(metric)
-        medians = data_box.median().to_numpy()
-        vertical_offset = medians * 0.05  # offset from median for display
-        # Round median to 2 decimal places
-        medians = medians.round(2)
-
-        for xtick in axs_box[i // 2, i % 2].get_xticks():
-            axs_box[i // 2, i % 2].text(xtick, medians[xtick] + vertical_offset[xtick],
-                                        f'{medians[xtick]:.2f}', color='black', ha='center')
+        # Create a performance profile for the metric distances globally
+        plot_dolan_more(data_dict_new, ax=axs[i // 2, i % 2], palette=palette, metric=metric)
+        axs_box[i // 2, i % 2].suptitle(f"Metric: {metric}")
         # Repeat the process for the joint plot
         axs_joint[i, 1].set_title(f"critical diff diagram")
         sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"],
                                        ax=axs_joint[i, 1],
                                        label_fmt_left="{label}", label_fmt_right="{label}",
                                        color_palette=palette)
-        sns.boxplot(data=data_box, ax=axs_joint[i,0], showfliers=False, palette=palette)
+        plot_dolan_more(data_dict_new, ax=axs_joint[i, 0], palette=palette, metric=metric)
         axs_joint[i, 0].set_title(f"{metric}")
         # Remove top and right bar
         axs_joint[i, 0].spines[['right', 'top']].set_visible(False)
@@ -546,7 +497,7 @@ def plot_generic(data_dict, values_dict, metrics, root_dir):
     fig.tight_layout()
     fig.savefig(os.path.join(root_dir, "plots", f"bh_all.pdf"), bbox_inches='tight')
     fig_box.tight_layout()
-    fig_box.savefig(os.path.join(root_dir, "plots", f"bh_all_box.pdf"), bbox_inches='tight')
+    fig_box.savefig(os.path.join(root_dir, "plots", f"bh_all_pp.pdf"), bbox_inches='tight')
     fig_joint.tight_layout()
     fig_joint.savefig(os.path.join(root_dir, "plots", f"bh_all_joint.pdf"), bbox_inches='tight')
 
@@ -651,7 +602,7 @@ if __name__ == "__main__":
 
     metrics = ['Actionability distance', 'Euclidean distance', 'Distance to FACE GT', 'Path sparsity',
                'Time (graph stored)', 'Time with construction']
-    metrics = ['Euclidean distance']
+    #metrics = ['Euclidean distance']
 
 
     # Create a subfolder for each metric
@@ -664,14 +615,15 @@ if __name__ == "__main__":
     # Overview
     #plot_generic(data_dict, values_dict, metrics, root_dir)
 
-    '''
-        segregate_lists = [[[], ["Data ID"], ["Penalty"], ["Data ID", "Penalty"]], [[], ["Data ID"]], [["Log-likelihood"]]]
-    join_in_plots = [["Log-likelihood"], ["Penalty"], ["Penalty"]]'''
+
+    segregate_lists = [[[], ["Data ID"], ["Penalty"], ["Data ID", "Penalty"]], [[], ["Data ID"]], [["Log-likelihood"]]]
+    join_in_plots = [["Log-likelihood"], ["Penalty"], ["Penalty"]]
 
     # Analyse the optimal amount of vertices for BayesACE
-    plots_dir = os.path.join(root_dir, "plots","vertices")
+    '''plots_dir = os.path.join(root_dir, "plots","vertices")
     segregate_lists = [[[], ["Penalty"]], [[], ["Log-likelihood"]]]
-    join_in_plots = [["Log-likelihood"], ["Penalty"]]
+    join_in_plots = [["Log-likelihood"], ["Penalty"]]'''
+
     '''
     for segregate_list, join_in_plot in zip(segregate_lists, join_in_plots):
         plots_vertices(data_dict, values_dict, metrics, plots_dir, segregate_list, join_in_plot)'''
