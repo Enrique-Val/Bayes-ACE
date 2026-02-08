@@ -147,14 +147,14 @@ class LingamClassifier(ConditionalDE, nn.Module):
         self.trained = True
 
     def logl(self, X: pd.DataFrame | torch.Tensor,
-             y: pd.Series | np.ndarray | torch.Tensor = None) -> np.ndarray | torch.Tensor:
+             y: pd.Series | np.ndarray = None) -> np.ndarray | torch.Tensor:
         """
         Computes Log Likelihood.
         If y is provided, it must be the CLASS INDICES (0, 1, ...), not the string names,
         unless you implement a lookup. For standard optimization/evaluation, assume indices.
         """
         is_torch_input = isinstance(X, torch.Tensor)
-        x_tensor, y_tensor = self._prepare_input(X, y)
+        x_tensor, _ = self._prepare_input(X, None)
 
         # 1. Compute Continuous Predictions (SEM)
         # x_hat = Parent(X) * Coeffs + Intercept
@@ -170,18 +170,23 @@ class LingamClassifier(ConditionalDE, nn.Module):
                 d = self._get_dist(dist_type, params)
                 total_log_prob += d.log_prob(x_residuals[:, i])
 
-        if y_tensor is None:
+        if y is None:
             return total_log_prob if is_torch_input else total_log_prob.detach().cpu().numpy()
 
-        # 3. If y provided, add log P(y|X)
-        y_continuous_hat = (x_tensor @ self.target_coefficients) + self.target_intercept
-
         # Get probabilities matrix [Batch, n_classes]
-        probs = self._compute_proba_matrix(y_continuous_hat)
+        probs = self.predict_proba(x_tensor)
 
-        # Gather specific probabilities for the provided Y labels
-        # Note: y_tensor must contain integer indices here
-        y_idx = y_tensor.long().view(-1, 1)
+        # Gather specific probabilities for the provided Y labels (get the indices)
+        # 1. Create a quick lookup dictionary (String -> Integer)
+        label_to_idx = {name: i for i, name in enumerate(self.bin_names)}
+
+        # 2. Convert the list of strings 'y' to a list of integers
+        # Assuming y is a list, numpy array, or pandas Series
+        y_indices_list = [label_to_idx[val] for val in y]
+
+        # 3. Convert to a LongTensor and reshape to [Batch_Size, 1]
+        # 'gather' needs indices to be the same dimensions as input (2D here)
+        y_idx = torch.tensor(y_indices_list, device=self.device).long().view(-1, 1)
         selected_probs = probs.gather(1, y_idx).squeeze(1)
 
         # Avoid log(0)

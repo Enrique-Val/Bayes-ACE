@@ -1,6 +1,7 @@
 import argparse
 import os
 import pickle
+import time
 
 import numpy as np
 import pandas as pd
@@ -38,7 +39,7 @@ if __name__ == "__main__":
     vertices_list = [0, 1, 2]
     n_counterfactuals = 150
     sigma = 0.5
-    chunks = 20
+    chunks = 10
     graph_size = 1000
     verbose = False
 
