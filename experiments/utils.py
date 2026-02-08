@@ -53,8 +53,6 @@ def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: in
     t0 = time.time()
     clg_network = pickle.load(open(clg_network_path, 'rb'))
     print("Time to load the model clg", type(clg_network), time.time() - t0)
-    params = serialize_clg(clg_network.bayesian_network)
-    clg_network.torch_proxy = CLGTorch(*params, continuous_variables=df_train.columns[:-1])
 
     # Open the NF
     nf_path = os.path.join(results_cv_dir, 'nf_' + str(dataset_id) + '.pkl')

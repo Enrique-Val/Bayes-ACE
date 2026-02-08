@@ -97,7 +97,7 @@ class BayesianNetworkClassifier(ConditionalDE):
         # If CLG or Gaussian, create a Torch proxy
         if self.network_type in ["CLG", "Gaussian"]:
             params = serialize_clg(self.bayesian_network)
-            self.torch_proxy = CLGTorch(*params, continuous_variables=self.columns)
+            self.torch_proxy = CLGTorch(*params, continuous_variables=self.columns, class_var_name=self.class_var_name)
 
 
     def logl(self, X: pd.DataFrame | torch.Tensor, y: pd.Series | np.ndarray = None) -> np.ndarray | torch.Tensor:
