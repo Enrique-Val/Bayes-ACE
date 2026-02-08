@@ -1,14 +1,18 @@
 import os
+import pickle
+import sys
 from collections import defaultdict
 from itertools import product
 
 import numpy as np
 import pandas as pd
+import matplotlib.colors as mcolors
 import scikit_posthocs as sp
 import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
+from bayesace.algorithms.face import FACE
 from experiments.utils import friedman_posthoc, close_factors
 
 from experiments.experiment2 import FACE_BASELINE, FACE_KDE, FACE_EPS, WACHTER, BAYESACE
@@ -23,20 +27,27 @@ wx_alt = ["two-sided", "greater", "less"]
 file_pattern = re.compile(r"distances_data(\d+)_penalty(\d+)\.csv")
 
 # New names dictionary
-new_names = {FACE_BASELINE: "FACE GT",
-             FACE_KDE: "FACE KDE",
-             FACE_EPS: "FACE ε",
+new_names_complete = {FACE_BASELINE: "FACE GT",
+             FACE_KDE: "FACE-DE",
+             FACE_EPS: "FACE-ε",
              WACHTER: "Wachter"}
+new_names = new_names_complete.copy()
+
+metrics_nameing_map = {"real_logl": "GT log-likelihood", "real_pp": "GT post probability", "time": "Time (graph stored)", "distance_to_face_baseline": "Distance to FACE GT",
+                  "distance" : "Actionability distance", "distance_l2" : "Euclidean distance", "path_l0" : "Path sparsity", "time_w_construct" : "Time with construction"}
 
 # This part is hard coded, might be changed in the future
 for vertices in [0, 1, 2, 3]:
-    new_names[BAYESACE + "_" + "clg" + "_v" + str(vertices)] = "BayesACE" + " " + str(vertices) + " vertices"
+    new_names_complete[BAYESACE + "_" + "clg" + "_v" + str(vertices)] = "BayesACE" + " " + str(vertices) + " vertices"
+    new_names[BAYESACE + "_" + "clg" + "_v" + str(vertices)] = "BayesACE"
 
 for vertices in [0, 1, 2, 3]:
-    new_names[BAYESACE + "_" + "nf" + "_v" + str(vertices)] = "DAACE" + " " + str(vertices) + " vertices"
+    new_names_complete[BAYESACE + "_" + "nf" + "_v" + str(vertices)] = "DAACE" + " " + str(vertices) + " vertices"
+    new_names[BAYESACE + "_" + "nf" + "_v" + str(vertices)] = "DAACE"
 
 for vertices in [0, 1, 2, 3]:
-    new_names[BAYESACE + "_" + "gt" + "_v" + str(vertices)] = "DAACE GT" + " " + str(vertices) + " vertices"
+    new_names_complete[BAYESACE + "_" + "gt" + "_v" + str(vertices)] = "DAACE GT" + " " + str(vertices) + " vertices"
+    new_names[BAYESACE + "_" + "gt" + "_v" + str(vertices)] = "DAACE GT"
 
 
 # Get all the values for penalty, dataset_id, models and n_vertex
@@ -55,6 +66,9 @@ def get_values(root_dir):
     # Get the list of penalties
     dataset_path = os.path.join(root_dir, dataset_ids[0])
     penalties = list_subdir(dataset_path)
+    # Order the penalties in ascending order
+    penalties = list(map(str, sorted(map(int, penalties))))
+    print(penalties)
 
     # Get the list of metrics
     penalty_path = os.path.join(dataset_path, penalties[0])
@@ -93,8 +107,11 @@ def get_values(root_dir):
 # Function to load and organize data from the directory
 def load_data(root_dir, metrics, values_dict):
     data_dict = {}
+    metrics_renamed = []
     for metric in metrics:
-        data_dict[metric] = {}
+        metric_renamed = metrics_nameing_map[metric]
+        metrics_renamed.append(metric_renamed)
+        data_dict[metric_renamed] = {}
         for dataset_id, penalty, likelihood, post_prob in product(*values_dict.values()):
             # Get the path to the file
             file_name = "likelihood" + str(likelihood) + "_pp" + str(post_prob) + ".csv"
@@ -106,21 +123,21 @@ def load_data(root_dir, metrics, values_dict):
                 if "real" in metric:
                     df = -df
 
-                # When dealing with time, drop the rows with nans and infs
+                ''' # When dealing with time, drop the rows with nans and infs
                 if "time" in metric:
                     df = df.dropna()
                     df = df.replace([np.inf, -np.inf], np.nan)
-                    df = df.dropna()
+                    df = df.dropna()'''
 
                 # Subsitute nans for inf (a good path was not found, hence infinite distance)
                 df = df.fillna(np.inf)
-                data_dict[metric][(dataset_id, penalty, likelihood, post_prob)] = df
+                data_dict[metric_renamed][(dataset_id, penalty, likelihood, post_prob)] = df
         # Aggregate datasets in two groups:
         group_close = ["44089","44090","44091","44121","44125","44126","44127","44128"]
 
         agg_dict = defaultdict(list)
 
-        for (dataset_id, penalty, likelihood, post_prob), df in data_dict[metric].items():
+        for (dataset_id, penalty, likelihood, post_prob), df in data_dict[metric_renamed].items():
             if dataset_id in group_close:
                 new_key = ("close", penalty, likelihood, post_prob)
             else:
@@ -128,17 +145,17 @@ def load_data(root_dir, metrics, values_dict):
             agg_dict[new_key].append(df)
 
         final_dict = {key : pd.concat(value, ignore_index=True).reset_index(drop=True) for key, value in agg_dict.items()}
-        data_dict[metric] = final_dict
+        data_dict[metric_renamed] = final_dict
     # Readapt values_dict
     new_values_dict = values_dict.copy()
     new_values_dict["Data ID"] = ["close", "different"]
     print(new_values_dict)
-    return data_dict, new_values_dict
+    return data_dict, new_values_dict, metrics_renamed
 
 
 def perform_bh_param(data_dict, values_dict, metric, segregate=None):
     data_dict_new = aggregate_data(data_dict[metric], values_dict, segregate)
-    data_dict_new_dist = aggregate_data(data_dict["distance"], values_dict, segregate)
+    data_dict_new_dist = aggregate_data(data_dict["Actionability distance"], values_dict, segregate)
 
     data_dict_new = remove_redundant(data_dict_new, data_dict_new_dist)
     for key in data_dict_new.keys():
@@ -212,15 +229,69 @@ def plot_segregate(segregate, join_in_plot, values_dict, data_new, metric, joint
             create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint_plots, comb=i,
                            box_plot=box_plot)
 
-def get_palette(new_algs):
+def adjust_lightness(color, amount=1):
+    """Adjust lightness of a given color."""
+    try:
+        c = mcolors.cnames[color]  # Convert named color
+    except KeyError:
+        c = color  # If already in hex or other format, use directly
+
+    #print(c)
+    r, g, b = mcolors.to_rgb(c)
+    h, s, l = mcolors.rgb_to_hsv(tuple([r,g,b]))  # Convert to HLS
+    #print(h,s,l)
+    new_l = max(0, min(1, l * amount))  # Adjust lightness safely
+    new_h = max(0, min(1, h * amount))
+    new_s = max(0, min(1, s * amount))
+    new_color_hsl = tuple([new_h, new_s, new_l])  # New color in HLS
+    return mcolors.to_hex(mcolors.hsv_to_rgb(new_color_hsl))  # Convert back to hex
+
+def get_palette(new_algs, shading = False):
+    color_palette = {
+        "DAACE GT": "#D32F2F",  # Red-orange
+        "DAACE": "#F57C00",  # Deep Orange
+        "BayesACE": "#ffb907",  # Golden Yellow
+        "FACE GT": "#2f65ba",  # Dark Blue
+        "FACE-DE": "#2799db",  # Medium Blue
+        "FACE-ε": "#80DEEA",  # Cyan
+        "Wachter": "#865ebf"  # Purple
+    }
+
+    return color_palette
+
+    base_colors = {
+        "BayesACE": "#0088cc", #"blue",
+        "FACE": "orange",
+        "Wachter": "orange",
+        "DAACE": "#8b45e6", #"purple"
+    }
+
     palette = {}
-    for method in new_algs:
-        if "BayesACE" in method:
-            palette[method] = "blue"
-        elif "FACE" in method or "Wachter" in method:
-            palette[method] = "orange"
-        elif "DAACE" in method:
-            palette[method] = "purple"
+    if not shading :
+        for method in new_algs:
+            for base_method in base_colors.keys():
+                if base_method in method:
+                    palette[method] = base_colors[base_method]
+    else:
+        model_counts = {}  # To track occurrences
+
+        for method in new_algs:
+            base_color = None
+
+            for key in base_colors:
+                if key in method:
+                    base_color = base_colors[key]
+                    break
+
+            if base_color:
+                if base_color == "orange" :
+                    count = model_counts.get(base_color, -1)  # How many times this color has been used
+                else :
+                    count = model_counts.get(base_color, 0)  # How many times this color has been used
+                factor = 1 - (count * 0.35)  # Slightly darken/brighten each new instance
+                palette[method] = adjust_lightness(base_color, factor)  # Apply adjustment
+                model_counts[base_color] = count + 1  # Increment counter
+
     return palette
 
 
@@ -228,49 +299,49 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
     p_values_dir = os.path.join(joint_plots, "p_values")
     if not os.path.exists(p_values_dir):
         os.makedirs(p_values_dir)
-    if len(join_in_plot) == 1:
+    if len(join_in_plot) == 1 :
         n_figs = np.prod([len(values_dict[i]) for i in join_in_plot])
         print(n_figs)
         n_rows, n_cols = close_factors(n_figs)
         print(n_rows, n_cols)
-    elif len(join_in_plot) == 2:
+    elif len(join_in_plot) == 2 :
         n_rows = len(values_dict[join_in_plot[0]])
         n_cols = len(values_dict[join_in_plot[1]])
-    fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(10, 10))
+    #fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4*n_cols,2*n_rows))
+    fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(3.5*1.2*n_cols*3/4,4.2/1.75*n_rows))
     if box_plot:
-        fig_box, ax_box = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(10, 10))
+        fig_data = []
+        fig_box, ax_box = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2*n_cols,4.2/1.75*n_rows))
+        fig_pp, ax_pp = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2*n_cols,4.2/1.75*n_rows))
         # Another Boxplots without infs or nans
-        fig_box_nans, ax_box_nans = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(10, 10))
-        figures = [fig, fig_box, fig_box_nans]
-        figures_str = ["Critical diff", "Box plot", "Box plot without nans"]
+        figures = [fig, fig_box, fig_pp]
+        figures_str = ["Critical diff", "Box plot", "Performance profile"]
     else :
         figures = [fig]
         figures_str = ["Critical diff"]
-    #fig_sp, ax_sp = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(10, 10))
     for i, plot_jointly in enumerate(product(*[values_dict[j] for j in join_in_plot])):
         if n_cols > 1 :
             ax_i = ax[i // n_cols, i % n_cols]
             if box_plot:
                 ax_box_i = ax_box[i // n_cols, i % n_cols]
-                ax_box_nans_i = ax_box_nans[i // n_cols, i % n_cols]
+                ax_pp_i = ax_pp[i // n_cols, i % n_cols]
         else :
             ax_i = ax[i]
             if box_plot:
                 ax_box_i = ax_box[i]
-                ax_box_nans_i = ax_box_nans[i]
+                ax_pp_i = ax_pp[i]
 
         if comb is not None:
             key_i = tuple(comb) + tuple(plot_jointly)
         else :
             key_i = plot_jointly
         data_new_i = data_new[key_i].copy()
-        if metric == "distance_to_face_baseline":
+        if metric == "Distance to FACE GT" and "FACE GT" in data_new_i.columns:
             data_new_i = data_new_i.drop(columns=["FACE GT"])
-        fbh = friedman_posthoc(data_new_i)
-        # List of the renamed algorithms
-        new_algs = fbh["p_adjusted"].columns
-        # Create the color palette for the algorithms
+        new_algs = data_new_i.columns
         palette = get_palette(new_algs)
+        fbh = friedman_posthoc(data_new_i)
+        # Create the color palette for the algorithms
         sp.critical_difference_diagram(fbh["summary_ranks"], fbh["p_adjusted"],
                                        label_fmt_left="{label}", label_fmt_right="{label}",
                                        ax=ax_i, color_palette=palette)
@@ -279,7 +350,7 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
             p_values_subdir = "_".join([segregate[k]+"-"+comb[k] for k in range(len(segregate))])
         if not os.path.exists(os.path.join(p_values_dir, p_values_subdir)):
             os.makedirs(os.path.join(p_values_dir, p_values_subdir))
-        fbh["p_adjusted"].to_csv(os.path.join(p_values_dir, p_values_subdir, " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]) + ".csv"))
+        #fbh["p_adjusted"].to_csv(os.path.join(p_values_dir, p_values_subdir, " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]) + ".csv"))
         ax_i.set_title(
             " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]))
         if box_plot:
@@ -289,50 +360,85 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
             data_box = data_box.subtract(data_box.mean(axis=1), axis=0).divide(data_box.std(axis=1), axis=0)
 
             # Reorganize order. Order: DAACE GT, DAACE, BayesACE, FACE KDE, FACE epsilon, and Wachter
-            new_order = [col for col in data_box.columns if "DAACE GT" in col] + [col for col in data_box.columns if "DAACE" in col and "GT" not in col] + [col for col in data_box.columns if "BayesACE" in col] + ["FACE GT","FACE KDE", "FACE ε", "Wachter"]
-            if metric == "distance_to_face_baseline":
+            new_order = [col for col in data_box.columns if "DAACE GT" in col] + [col for col in data_box.columns if "DAACE" in col and "GT" not in col] + [col for col in data_box.columns if "BayesACE" in col] + ["FACE GT","FACE-DE", "FACE-ε", "Wachter"]
+            if metric == "Distance to FACE GT":
                 new_order = [col for col in new_order if "FACE GT" != col]
             data_box = data_box[new_order]
-            if metric == "distance" :
-                print(key_i)
-                print(data_box.median())
-                print()
+            if metric == "real_logl" or metric == "real_pp":
+                data_box = data_box * -1
+            medians = data_box.median().to_numpy()
+            vertical_offset = medians * 0.05  # offset from median for display
+
             sns.boxplot(data=data_box, ax=ax_box_i, showfliers=False, palette=palette)
+            # Round median to 2 decimal places
+            medians = medians.round(2)
             ax_box_i.set_title(
                 " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]))
-            # Tilt the x-axis labels
+            ax_box_i.set_ylabel(metric)
+            ax_box_i.spines[['right', 'top']].set_visible(False)
+            # Tilt the x-axis labels and add a label with the median values
             for tick in ax_box_i.get_xticklabels():
-                tick.set_rotation(45)
+                tick.set_rotation(0)
+
+            # Label with the number of samples
+            ax_box_i.text(0.5, 0.95, "n = " + str(data_box.shape[0]), horizontalalignment='center',
+                          verticalalignment='center',fontsize=10)
+
+            for xtick in ax_box_i.get_xticks():
+                ax_box_i.text(xtick, medians[xtick] + vertical_offset[xtick], medians[xtick], horizontalalignment='center',
+                              size='small', color='black', weight='semibold')
             # Set scale to logarithmic for the y-axis IF a box goes above 100 (Q3 + 1.5*IQR)
             if (data_box.quantile(0.75) + 1.5 * (data_box.quantile(0.75) - data_box.quantile(0.25)) > 100).any():
                 ax_box_i.set_yscale("log")
-            # Do the same, but without infs or nans
-            data_box_nans = data_box.replace([np.inf, -np.inf], np.nan)
-            data_box_nans = data_box_nans.dropna().reset_index(drop=True)
-            sns.boxplot(data=data_box_nans, ax=ax_box_nans_i, showfliers=False, palette=palette)
-            ax_box_nans_i.set_title(
-                " , ".join([join_in_plot[k] + " = " + plot_jointly[k] for k in range(len(plot_jointly))]))
-            # Tilt the x-axis labels
-            for tick in ax_box_nans_i.get_xticklabels():
-                tick.set_rotation(45)
-            # Set scale to logarithmic for the y-axis IF a box goes above 100 (Q3 + 1.5*IQR)
-            if (data_box_nans.quantile(0.75) + 1.5 * (data_box_nans.quantile(0.75) - data_box_nans.quantile(0.25)) > 100).any():
-                ax_box_nans_i.set_yscale("log")
+            # Add data to line dataframe
+            fig_data.append(medians)
 
-    # Set the title
+    # Prepare the figures
+    if len(segregate) == 0:
+        joint_comb_eq = ""
+        joint_comb = "total"
+    else :
+        joint_comb_eq = " ".join([segregate[k] + " = " + comb[k] for k in range(len(segregate))])
+        joint_comb = "_".join([segregate[k] + "-" + comb[k] for k in range(len(segregate))])
+
     for curr_fig, fig_str in zip(figures, figures_str):
+        if fig_str == "Critical diff":
+            pass
+            #continue
         if not os.path.exists(os.path.join(joint_plots, fig_str)):
             os.makedirs(os.path.join(joint_plots, fig_str))
-        if len(segregate) == 0 :
-            curr_fig.suptitle(metric + " " + " ".join(segregate))
-            curr_fig.tight_layout()
-            curr_fig.savefig(os.path.join(joint_plots, fig_str, "total_segg_"+ "-".join(join_in_plot) +".pdf"))
-        else :
-            joint_comb_eq = " ".join([segregate[k] + " = " + comb[k] for k in range(len(segregate))])
-            joint_comb = "_".join([segregate[k] + "-" + comb[k] for k in range(len(segregate))])
-            curr_fig.suptitle(metric + " " + joint_comb_eq)
-            curr_fig.tight_layout()
-            curr_fig.savefig(os.path.join(joint_plots, fig_str, joint_comb + "_segg_"+ "-".join(join_in_plot) + ".pdf"))
+        curr_fig.suptitle(metric + " " + joint_comb_eq)
+        curr_fig.tight_layout()
+        curr_fig.savefig(os.path.join(joint_plots, fig_str, joint_comb + "_segg_"+ "-".join(join_in_plot) +".pdf"))
+
+    if box_plot:
+        plt.close()
+        fig_line = plt.figure(figsize=(7*1.2*4/5/2,4.5*1.2*2/3/1.5))
+        fig_df_columns = ["DAACE GT", "DAACE", "BayesACE", "FACE GT", "FACE-DE", "FACE-ε", "Wachter"]
+        if metric == "Distance to FACE GT":
+            fig_df_columns = ["DAACE GT", "DAACE", "BayesACE", "FACE-DE", "FACE-ε", "Wachter"]
+        plot_jointly = list(product(*[values_dict[j] for j in join_in_plot]))
+        # Convert list of tuples in list of string
+        plot_jointly = [", ".join(k) for k in plot_jointly]
+        fig_df = pd.DataFrame(fig_data, columns=fig_df_columns, index=[k for k in plot_jointly])
+        ax_line = fig_line.gca()
+        palette = get_palette(fig_df.columns, shading = True)
+        for model in fig_df.columns:
+            subset = fig_df[model]
+            sns.lineplot(data=subset, label=model, color = palette[model], marker="o", ax=ax_line)
+
+        ax_line.set_xlabel(" , ".join([k for k in join_in_plot]))
+        ax_line.set_ylabel(metric)
+        ax_line.set_title(joint_comb_eq)
+        # Label with the number of samples
+        ax_line.text(0.5, 0.95, "n = " + str(data_box.shape[0]), horizontalalignment='center',
+                        verticalalignment='center', fontsize=10)
+        fig_line.tight_layout()
+        ax_line.legend()
+        if not os.path.exists(os.path.join(joint_plots, "Line")):
+            os.makedirs(os.path.join(joint_plots, "Line"))
+        fig_line.savefig(os.path.join(joint_plots, "Line", joint_comb + "_segg_"+ "-".join(join_in_plot) + ".pdf"))
+        plt.close()
 
 def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_dir):
     if len(segregate) > 0:
@@ -340,7 +446,7 @@ def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_di
     else:
         subplot_dir = os.path.join(plot_dir, metric, "joint")
     data_new = aggregate_data(data_dict[metric], values_dict, segregate)
-    data_new_dist = aggregate_data(data_dict["distance"], values_dict, segregate)
+    data_new_dist = aggregate_data(data_dict["Actionability distance"], values_dict, segregate)
     data_new = remove_redundant(data_new, data_new_dist)
     # Rename algorithms
     for key in data_new.keys():
@@ -376,31 +482,11 @@ def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_di
         fig_box.suptitle(", ".join([segregate[k] + " = " + key[k] for k in range(len(segregate))]))
         fig_box.savefig(os.path.join(subplot_dir, file_name + "_box.pdf"), bbox_inches='tight')
 
-
-
-
-# Run the main function when the script is executed
-if __name__ == "__main__":
-    # Create subfolder plots if it does not exist in the root dir
-    if not os.path.exists(os.path.join(root_dir, "plots")):
-        os.makedirs(os.path.join(root_dir, "plots"))
-
-    # Get the values for dataset_id, model, penalty and n_vertex
-    algorithms, metrics, values_dict = get_values(root_dir)
-
-    print(metrics)
-
-    # Create a subfolder for each metric
-    for metric in metrics:
-        if not os.path.exists(os.path.join(root_dir, "plots", metric)):
-            os.makedirs(os.path.join(root_dir, "plots", metric))
-
-    # Load the data
-    data_dict, values_dict = load_data(root_dir, metrics, values_dict)
-
+def plot_generic(data_dict, values_dict, metrics, root_dir):
     # Subplot, 2x4 for each metric
-    fig, axs = plt.subplots(4, 2, figsize=(12, 12))
-    fig_box, axs_box = plt.subplots(4, 2, figsize=(12, 12))
+    fig, axs = plt.subplots(4, 2, figsize=(8,8))
+    fig_box, axs_box = plt.subplots(4, 2, figsize=(14*1.2/1.5,7*1.2*1.4))
+    fig_joint, axs_joint = plt.subplots(8, 2, figsize=(7*1.2,9.75*1.2), gridspec_kw={'width_ratios': [2.75, 1]})
     p_values_dir = os.path.join(root_dir, "plots", "p_values")
     if not os.path.exists(p_values_dir):
         os.makedirs(p_values_dir)
@@ -417,25 +503,43 @@ if __name__ == "__main__":
                                        ax=axs[i // 2, i % 2],
                                        label_fmt_left="{label}", label_fmt_right="{label}",
                                        color_palette=palette)
+
         axs[i // 2, i % 2].set_title(f"Metric: {metric}")
         # Create a box plot
         data_box = data_dict_new.copy()
-        if metric == "distance_to_face_baseline":
+        if metric == "Distance to FACE GT":
             data_box = data_box.drop(columns=["FACE GT"])
         data_box = data_box.subtract(data_box.mean(axis=1), axis=0).divide(data_box.std(axis=1), axis=0)
-        print(data_box.median())
-        print(data_box.mean())
-        print()
         # Reorganize order. Order: DAACE GT, DAACE, BayesACE, FACE KDE, FACE epsilon, and Wachter
-        new_order = [col for col in data_box.columns if "DAACE GT" in col] + [col for col in data_box.columns if "DAACE" in col and "GT" not in col] + [col for col in data_box.columns if "BayesACE" in col] + ["FACE GT","FACE KDE", "FACE ε", "Wachter"]
-        if metric == "distance_to_face_baseline":
+        new_order = [col for col in data_box.columns if "DAACE GT" in col] + [col for col in data_box.columns if
+                                                                              "DAACE" in col and "GT" not in col] + [
+                        col for col in data_box.columns if "BayesACE" in col] + ["FACE GT", "FACE-DE", "FACE-ε",
+                                                                                 "Wachter"]
+        if metric == "Distance to FACE GT":
             new_order = [col for col in new_order if "FACE GT" != col]
+        if metric == "real_logl" or metric == "real_pp":
+            data_box = data_box * -1
         data_box = data_box[new_order]
         sns.boxplot(data=data_box, ax=axs_box[i // 2, i % 2], showfliers=False, palette=palette)
-        axs_box[i // 2, i % 2].set_title(f"Metric: {metric}")
-        # Tilt the x-axis labels
-        for tick in axs_box[i // 2, i % 2].get_xticklabels():
-            tick.set_rotation(45)
+        axs_box[i // 2, i % 2].set_ylabel(metric)
+        medians = data_box.median().to_numpy()
+        vertical_offset = medians * 0.05  # offset from median for display
+        # Round median to 2 decimal places
+        medians = medians.round(2)
+
+        for xtick in axs_box[i // 2, i % 2].get_xticks():
+            axs_box[i // 2, i % 2].text(xtick, medians[xtick] + vertical_offset[xtick],
+                                        f'{medians[xtick]:.2f}', color='black', ha='center')
+        # Repeat the process for the joint plot
+        axs_joint[i, 1].set_title(f"critical diff diagram")
+        sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"],
+                                       ax=axs_joint[i, 1],
+                                       label_fmt_left="{label}", label_fmt_right="{label}",
+                                       color_palette=palette)
+        sns.boxplot(data=data_box, ax=axs_joint[i,0], showfliers=False, palette=palette)
+        axs_joint[i, 0].set_title(f"{metric}")
+        # Remove top and right bar
+        axs_joint[i, 0].spines[['right', 'top']].set_visible(False)
 
         # Save the p-values
         friedman_bh_results["p_adjusted"].to_csv(os.path.join(p_values_dir, metric + ".csv"))
@@ -443,15 +547,11 @@ if __name__ == "__main__":
     fig.savefig(os.path.join(root_dir, "plots", f"bh_all.pdf"), bbox_inches='tight')
     fig_box.tight_layout()
     fig_box.savefig(os.path.join(root_dir, "plots", f"bh_all_box.pdf"), bbox_inches='tight')
+    fig_joint.tight_layout()
+    fig_joint.savefig(os.path.join(root_dir, "plots", f"bh_all_joint.pdf"), bbox_inches='tight')
 
-
-    # Analyse the optimal amount of vertices for BayesACE
-    # Plots for each metric, putting al models together
-    plots_dir = os.path.join(root_dir, "plots","vertices")
-
-    segregate_list = [[], ["Data ID"], ["Penaly"], ["Data ID", "Penalty"]]
-    join_in_plot = ["Log-likelihood"]
-    for metric in ["distance", "distance_to_face_baseline"]:
+def plots_vertices(data_dict, values_dict, metrics, plots_dir, segregate_list, join_in_plot):
+    for metric in metrics:
         for segregate in segregate_list:
             data_new = aggregate_data(data_dict[metric], values_dict, segregate + join_in_plot)
             for model in ["clg", "nf", "gt"]:
@@ -461,17 +561,18 @@ if __name__ == "__main__":
                     data_new_model[key] = data_new[key][[col for col in data_new[key].columns if model_str in col]]
                 # Rename algorithms
                 for key in data_new_model.keys():
-                    data_new_model[key] = data_new_model[key].rename(mapper=new_names, axis=1, inplace=False)
+                    data_new_model[key] = data_new_model[key].rename(mapper=new_names_complete, axis=1, inplace=False)
                     # Drop rows with nans
                     data_new_model[key] = data_new_model[key].dropna()
 
                 joint_plots = os.path.join(plots_dir, metric, model)
                 joint_plots = os.path.join(joint_plots, "_".join(segregate + join_in_plot),
                                            "joint_" + "_".join(join_in_plot))
-                plot_segregate(segregate, join_in_plot, values_dict, data_new_model, metric, joint_plots, box_plot=False)
+                plot_segregate(segregate, join_in_plot, values_dict, data_new_model, metric, joint_plots,
+                               box_plot=False)
 
     # In addition, generate a plot for all data aggregated
-    for metric in ["distance", "distance_to_face_baseline"]:
+    for metric in metrics:
         data_new = aggregate_data(data_dict[metric], values_dict, None)["total"]
         for model in ["clg", "nf", "gt"]:
             fig = plt.figure()
@@ -479,7 +580,7 @@ if __name__ == "__main__":
             model_str = BAYESACE + "_" + model
             data_new_model = data_new[[col for col in data_new.columns if model_str in col]]
             # Rename algorithms
-            data_new_model = data_new_model.rename(mapper=new_names, axis=1, inplace=False)
+            data_new_model = data_new_model.rename(mapper=new_names_complete, axis=1, inplace=False)
 
             joint_plots = os.path.join(plots_dir, metric)
             fbh = friedman_posthoc(data_new_model)
@@ -492,15 +593,11 @@ if __name__ == "__main__":
             fig.savefig(os.path.join(joint_plots, model + "_total.pdf"), bbox_inches='tight')
             fbh["p_adjusted"].to_csv(os.path.join(joint_plots, model + "_total_p_values.csv"))
 
-
-    # Plots for each metric, putting al models together
-    plots_dir = os.path.join(root_dir, "plots")
-    segregate_list = [[], ["Data ID"], ["Penalty"], ["Data ID", "Penalty"]]
-    join_in_plot = ["Log-likelihood"]
+def plot_for_each_metric(data_dict, values_dict, metrics, plots_dir, segregate_list, join_in_plot):
     for metric in metrics:
         for segregate in segregate_list:
-            data_new = aggregate_data(data_dict[metric], values_dict, segregate+join_in_plot)
-            data_new_dist = aggregate_data(data_dict["distance"], values_dict, segregate+join_in_plot)
+            data_new = aggregate_data(data_dict[metric], values_dict, segregate + join_in_plot)
+            data_new_dist = aggregate_data(data_dict["Actionability distance"], values_dict, segregate + join_in_plot)
             data_new = remove_redundant(data_new, data_new_dist)
             # Rename algorithms
             for key in data_new.keys():
@@ -511,24 +608,17 @@ if __name__ == "__main__":
                                        "joint_" + "_".join(join_in_plot))
             plot_segregate(segregate, join_in_plot, values_dict, data_new, metric, joint_plots)
 
-
-    plots_dir = os.path.join(root_dir, "plots")
-    # Now, do it the opposite way. We want to plot all the metrics together for each segregate
-    metric_plots_dir = os.path.join(plots_dir, "metrics")
-    segregate_list = [["Data ID", "Penalty","Log-likelihood"]]
-    #  ["Penalty"], ["Data ID"], ["Log-likelihood"], ["Data ID", "Penalty"], ["Data ID", "Log-likelihood"],
-    #                       ["Penalty","Log-likelihood"],
+def plot_metrics_jointly(data_dict, values_dict, metrics, segregate_list, metric_plots_dir):
     for segregate in segregate_list:
-
         metric_plots_subdir = os.path.join(metric_plots_dir, "_".join(segregate))
         if not os.path.exists(metric_plots_subdir):
             os.makedirs(metric_plots_subdir)
         # Get a combination of the segregate values
         for comb in product(*[values_dict[key] for key in segregate]):
-            fig, ax = plt.subplots(4, 2, figsize=(12, 12))
+            fig, ax = plt.subplots(4, 2, figsize=(12,8))
             for i, metric in enumerate(metrics):
                 data_new = aggregate_data(data_dict[metric], values_dict, segregate)
-                data_new_dist = aggregate_data(data_dict["distance"], values_dict, segregate)
+                data_new_dist = aggregate_data(data_dict["Actionability distance"], values_dict, segregate)
                 data_comb = remove_redundant(data_new, data_new_dist)[comb]
                 # Rename algorithms
                 data_comb = data_comb.rename(mapper=new_names, axis=1, inplace=False)
@@ -545,3 +635,55 @@ if __name__ == "__main__":
             fig.tight_layout()
             segregate_str = "_".join([segregate[k] + "-" + comb[k] for k in range(len(segregate))])
             fig.savefig(os.path.join(metric_plots_subdir, segregate_str + ".pdf"), bbox_inches='tight')
+
+
+# Run the main function when the script is executed
+if __name__ == "__main__":
+    # Create subfolder plots if it does not exist in the root dir
+    if not os.path.exists(os.path.join(root_dir, "plots")):
+        os.makedirs(os.path.join(root_dir, "plots"))
+
+    # Get the values for dataset_id, model, penalty and n_vertex
+    algorithms, metrics, values_dict = get_values(root_dir)
+
+    # Load the data
+    data_dict, values_dict, metrics = load_data(root_dir, metrics, values_dict)
+
+    metrics = ['Actionability distance', 'Euclidean distance', 'Distance to FACE GT', 'Path sparsity',
+               'Time (graph stored)', 'Time with construction']
+    metrics = ['Euclidean distance']
+
+
+    # Create a subfolder for each metric
+    for metric in metrics:
+        if not os.path.exists(os.path.join(root_dir, "plots", metric)):
+            os.makedirs(os.path.join(root_dir, "plots", metric))
+
+
+
+    # Overview
+    #plot_generic(data_dict, values_dict, metrics, root_dir)
+
+    '''
+        segregate_lists = [[[], ["Data ID"], ["Penalty"], ["Data ID", "Penalty"]], [[], ["Data ID"]], [["Log-likelihood"]]]
+    join_in_plots = [["Log-likelihood"], ["Penalty"], ["Penalty"]]'''
+
+    # Analyse the optimal amount of vertices for BayesACE
+    plots_dir = os.path.join(root_dir, "plots","vertices")
+    segregate_lists = [[[], ["Penalty"]], [[], ["Log-likelihood"]]]
+    join_in_plots = [["Log-likelihood"], ["Penalty"]]
+    '''
+    for segregate_list, join_in_plot in zip(segregate_lists, join_in_plots):
+        plots_vertices(data_dict, values_dict, metrics, plots_dir, segregate_list, join_in_plot)'''
+
+    # Plots for each metric, putting al models together
+    plots_dir = os.path.join(root_dir, "plots")
+    for segregate_list, join_in_plot in zip(segregate_lists, join_in_plots):
+        plot_for_each_metric(data_dict, values_dict, metrics, plots_dir, segregate_list, join_in_plot)
+
+    raise ValueError("Stop here")
+    segregate_list = [["Data ID", "Penalty","Log-likelihood"]]
+    metric_plots_dir = os.path.join(plots_dir, "metrics")
+    plot_metrics_jointly(data_dict, values_dict, metrics, segregate_list, metric_plots_dir)
+
+
