@@ -21,6 +21,10 @@ import pybnesian as pb
 
 import platform
 
+from skopt import gp_minimize
+from skopt.space import Real
+from skopt.utils import use_named_args
+
 
 def setup_experiment(results_cv_dir: str, dataset_id: int, n_counterfactuals: int, seed:int = 0) -> tuple[
     pd.DataFrame, pd.DataFrame, ConditionalNF, str, pb.CLGNetwork, str, ConditionalNF, str]:
@@ -278,39 +282,51 @@ def sgd_worker(algorithm : SGDACE, instance, target_label, lr, verbose = False):
         return result, lr, tn
 
 # This function performs a random search over the learning rate for the SGDACE algorithm and returns the best result found
-def sgd_rs(algorithm : SGDACE, instance, target_label, lr_range = None, iters=50, seed = 0, parallelize = False,
-           verbose = False):
+def sgd_rs(algorithm, instance, target_label, lr_range=None, iters=20, seed=0, verbose=False):
+    """
+    Optimizes learning rate using Bayesian Optimization (Gaussian Processes).
+    Requires: pip install scikit-optimize
+    """
     if lr_range is None:
         lr_range = (1e-8, 1e-3)
-    best_loss = np.inf
-    best_result = None
-    best_lr = None
-    from scipy.stats import uniform
-    log_lr = uniform(np.log10(lr_range[0]), np.log10(lr_range[1]) - np.log10(lr_range[0])).rvs(random_state=seed, size=iters)
-    lrs = 10 ** log_lr
-    best_time = 0
-    if not parallelize:
-        for i in range(iters):
-            # Get a random lr (log-uniformly sampled)
-            lr = lrs[i]
-            result, _, tf = sgd_worker(algorithm, instance, target_label, lr, verbose)
-            loss = result.distance
-            if loss <= best_loss:
-                best_result = result
-                best_loss = loss
-                best_lr = lr
-                best_time = tf
-    else :
-        import multiprocessing as mp
-        pool = mp.Pool(mp.cpu_count())
-        results = pool.starmap(sgd_worker, [(algorithm, instance, target_label, lr, verbose) for lr in lrs])
-        pool.close()
-        pool.join()
-        for result, lr, tn in results:
-            loss = result.distance
-            if loss <= best_loss:
-                best_result = result
-                best_loss = loss
-                best_lr = lr
-                best_time = tn
-    return best_result, best_lr, best_time
+
+    # 1. Define the Search Space
+    # We use a 'log-uniform' prior because learning rates vary over orders of magnitude.
+    space = [Real(lr_range[0], lr_range[1], name='learning_rate', prior='log-uniform')]
+
+    # 2. State tracking
+    # BO libraries usually just return the best *loss* value.
+    # Since we need the complex 'result' object (the counterfactual), we cache it here.
+    best_cache = {
+        'result': None,
+        'loss': np.inf,
+        'time': 0,
+        'lr': None
+    }
+
+    # 3. Define the Objective Function
+    @use_named_args(space)
+    def objective(learning_rate):
+        # Call your existing worker
+        result, _, tf = sgd_worker(algorithm, instance, target_label, learning_rate, verbose)
+        loss = result.distance
+
+        # Side-effect: Check if this is the new global best and cache it if so
+        # We do this because gp_minimize returns the params, not our custom result object
+        if loss < best_cache['loss']:
+            best_cache['loss'] = loss
+            best_cache['result'] = result
+            best_cache['time'] = tf
+            best_cache['lr'] = learning_rate
+            if verbose:
+                print(f"New best found: lr={learning_rate:.2e}, loss={loss:.4f}")
+
+        return loss
+
+    # 4. Run the Optimization
+    # n_calls=iters: How many times to sample the function
+    # n_initial_points=10: It will behave like random search for the first 10, then switch to BO.
+    gp_minimize(objective, space, n_calls=iters, random_state=seed, n_initial_points=min(10, iters))
+
+    # 5. Return the best found artifacts
+    return best_cache['result'], best_cache['lr'] if best_cache['result'] else None, best_cache['time']

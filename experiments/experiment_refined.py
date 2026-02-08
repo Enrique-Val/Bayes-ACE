@@ -32,7 +32,7 @@ FACE_EPS = "face_eps"
 WACHTER = "wachter"
 BAYESACE = "bayesace"
 
-lr_range = (1e-5, 1e-2)
+lr_range = (1e-8, 1e-2)
 
 def parse_space_sep_array(s):
     if isinstance(s, str):
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     # Number of counterfactuals
     n_counterfactuals = 15
     n_train_size = 1000
-    iters = 50
+    iters = 20
     max_epochs = 500
 
 
