@@ -109,8 +109,7 @@ def get_counterfactual_from_SGD(instance: pd.DataFrame, algorithm : SGDACE, gt_e
         lr_range = (1e-8, 1e-3)
     class_var_name = gt_estimator.get_class_var_name()
     target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].to_numpy()[0])
-    result, best_lr, tf = sgd_rs(algorithm, instance, target_label, lr_range=lr_range, iters=iters,
-                                 parallelize=parallelize, verbose = verbose)
+    result, best_lr, tf = sgd_rs(algorithm, instance, target_label, lr_range=lr_range, iters=iters, verbose = verbose)
     '''
     # Uncomment if all paths want to be stored
     result.path.to_csv(results_dir+'paths/data' + str(dataset_id) + '_likelihood' + str(
