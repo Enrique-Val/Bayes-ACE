@@ -4,26 +4,22 @@ import pickle
 
 import numpy as np
 import pandas as pd
-from pymoo.algorithms.moo.nsga2 import NSGA2
 
-from bayesace.algorithms.bayesace_algorithm import BayesACE
 from bayesace.algorithms.bayesace_autodiff import SGDACE
 from bayesace.algorithms.face import FACE
 from bayesace.algorithms.wachter import WachterCounterfactual
-from experiments.utils import get_constraints, get_best_opt_params
+from experiments.utils import get_constraints, sgd_rs
 import multiprocessing as mp
 
 def worker(alg, instance) :
     class_var_name = alg.density_estimator.get_class_var_name()
     target_label = str(int(instance[class_var_name].to_numpy()[0]) - 2)
-    best_result = None
-    best_distance = np.inf
-    for _ in range(50):
+    if isinstance(alg, SGDACE):
+        result, best_lr, best_time = sgd_rs(alg, instance, target_label, lr_range=(1e-8,1e-6), iters=20, seed=0, verbose=True)
+    else :
+        # Either FACE or Wachter, just run once
         result = alg.run(instance, target_label=target_label)
-        if result.counterfactual is not None and result.distance < best_distance:
-            best_result = result
-            best_distance = result.distance
-    return best_result
+    return result
 
 
 if __name__ == "__main__":
@@ -56,17 +52,13 @@ if __name__ == "__main__":
         n_gen = 5
 
     # Load all the models and store their paths
-    models = {}
-    models_path = {}
-    for model in os.listdir(model_dir):
-        model_path = os.path.join(model_dir, model)
-        model_name = model.split(".")[0]
-        with open(model_path, "rb") as f:
-            models[model_name] = pickle.load(f)
-            models_path[model_name] = model_path
+    model_name = "lingam"
+    model_path = os.path.join(model_dir, model_name+".pkl")
+    with open(model_path, "rb") as f:
+        model = pickle.load(f)
 
-    models["lingam"].class_var_name = "EQI"
-    class_var_name = models["lingam"].get_class_var_name()
+    model.class_var_name = "EQI"
+    class_var_name = model.get_class_var_name()
 
     # Load and scale the data
     df_train = pd.read_csv(os.path.join(data_dir, "data_train.csv"), index_col=0)
@@ -87,10 +79,10 @@ if __name__ == "__main__":
     df_counterfactuals = df_test[class_int > 1].head(n_counterfactuals)
 
     # The constraints will be defined by the performance of the normalizing flow model on unseen data
-    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(pd.concat([df_train, df_test]), df_test, models["lingam"])
+    sampling_range, mu_gt, std_gt, mae_gt, std_mae_gt = get_constraints(pd.concat([df_train, df_test]), df_test, model)
     print("Constraints: ", mu_gt, std_gt, mae_gt, std_mae_gt)
     logl_threshold = mu_gt + sigma * std_gt
-    pp_threshold = 0.7
+    pp_threshold = 0.8
 
     manual_change = True
     if manual_change :
@@ -115,16 +107,17 @@ if __name__ == "__main__":
     for vertices in vertices_list:
         algorithms_paths["bayesace_"+str(vertices)] = os.path.join(algorithm_dir, f"bayesace_{vertices}_{penalty}.pkl")
 
-    '''# First, a FACE instance using the normalizing flow model
+    # First, a FACE instance using the normalizing flow model
     if os.path.exists(algorithms_paths["face"]) and not args.dummy:
         with open(algorithms_paths["face"], "rb") as f:
             algorithms["face"] = pickle.load(f)
     else:
-        alg = FACE(density_estimator=models["lingam"], features=df_train.columns[:-1], chunks=chunks,
+        alg = FACE(density_estimator=model, features=df_train.columns[:-1], chunks=chunks,
                    dataset=df_train.drop(class_var_name, axis=1).head(graph_size),
                    distance_threshold=np.inf, graph_type="kde", f_tilde=None, seed=0,
                    log_likelihood_threshold=logl_threshold, posterior_probability_threshold=pp_threshold,
-                   penalty=penalty, parallelize=False, verbose=verbose)
+                   penalty=penalty, parallelize=args.parallelize, verbose=verbose)
+        alg.parallelize = False
         algorithms["face"] = alg
         print("Trained FACE")
         if not args.dummy:
@@ -135,21 +128,21 @@ if __name__ == "__main__":
         with open(algorithms_paths["wachter"], "rb") as f:
             algorithms["wachter"] = pickle.load(f)
     else:
-        alg = WachterCounterfactual(density_estimator=models["lingam"], features=df_train.columns[:-1],
+        alg = WachterCounterfactual(density_estimator=model, features=df_train.columns[:-1],
                                     dataset=df_train,
                                     log_likelihood_threshold=logl_threshold,
                                     posterior_probability_threshold=pp_threshold,
                                     )
         algorithms["wachter"] = alg
         if not args.dummy and False:
-            pickle.dump(alg, open(algorithms_paths["wachter"], "wb"))'''
+            pickle.dump(alg, open(algorithms_paths["wachter"], "wb"))
 
     for vertices in vertices_list:
         if os.path.exists(algorithms_paths["bayesace_"+str(vertices)]) and not args.dummy and False:
             with open(algorithms_paths["bayesace_"+str(vertices)], "rb") as f:
                 algorithms["bayesace_"+str(vertices)] = pickle.load(f)
         else:
-            alg = SGDACE(density_estimator=models["lingam"], chunks = chunks, features= df_train.columns[:-1],
+            alg = SGDACE(density_estimator=model, chunks = chunks, features= df_train.columns[:-1],
                          n_vertices= vertices, penalty = penalty, lr=1e-7, log_likelihood_threshold=logl_threshold, posterior_probability_threshold=pp_threshold)
             algorithms["bayesace_"+str(vertices)] = alg
             if not args.dummy:
@@ -164,46 +157,23 @@ if __name__ == "__main__":
         df_counterfactuals.to_csv(os.path.join(results_dir, f"cf_{penalty}.csv"))
 
     # Run the experiments on the test data
-    for algorithm in list(algorithms.keys())[2:]:
+    for algorithm in list(algorithms.keys()):
         print(f"Running experiment for algorithm {algorithm}, penalty {penalty}")
         df_counterfactuals_res = df_counterfactuals.drop(class_var_name, axis=1)
         distances = pd.Series(index=df_counterfactuals_res.index)
         alg = algorithms[algorithm]
-        if algorithm == "face" or algorithm == "wachter" and not args.parallelize:
+        if not args.parallelize :
             results = []
             for i in range(len(df_counterfactuals.index)):
                 instance = df_counterfactuals.iloc[[i]]
-                target_label = str(int(instance[class_var_name].to_numpy()[0]) - 2)
-                result = alg.run(instance, target_label=target_label)
+                result = worker(alg, instance)
                 results.append(result)
-        elif algorithm == "face" or algorithm == "wachter" and args.parallelize:
-            pool = mp.Pool(min(mp.cpu_count()-1,len(df_counterfactuals.index)))
-            results = pool.starmap(worker, [(alg, df_counterfactuals.loc[[i]]) for i in df_counterfactuals.index])
-            pool.close()
-            pool.join()
-        elif not args.parallelize :
-            results = []
-            for i in range(len(df_counterfactuals.index)):
-                instance = df_counterfactuals.iloc[[i]]
-                target_label = str(int(instance[class_var_name].to_numpy()[0])-2)
-                best_result = None
-                best_distance = np.inf
-                for _ in range(50):
-                    result = alg.run(instance, target_label=target_label, verbose = True)
-                    print(result)
-                    if result.counterfactual is not None and result.distance < best_distance:
-                        best_result = result
-                        best_distance = result.distance
-                results.append(best_result)
         else:
-            pool = mp.Pool(min(mp.cpu_count()-1,len(df_counterfactuals.index)))
-            results = pool.starmap(worker, [(alg, df_counterfactuals.loc[[i]]) for i in df_counterfactuals.index])
-            pool.close()
-            pool.join()
-
+            with mp.Pool(min(mp.cpu_count()-1,len(df_counterfactuals.index)), maxtasksperchild=1) as pool:
+                results = pool.starmap(worker, [(alg, df_counterfactuals.loc[[i]]) for i in df_counterfactuals.index])
+        # Extract results
         for i,result in enumerate(results):
             if result.counterfactual is not None:
-                print("Not none")
                 df_counterfactuals_res.iloc[i] = result.counterfactual.values
                 distances.iloc[i] = result.distance
             else:
