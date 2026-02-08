@@ -171,7 +171,7 @@ if __name__ == "__main__":
                 result = worker(alg, instance)
                 results.append(result)
         else:
-            with mp.Pool(min(mp.cpu_count()-1,len(df_counterfactuals.index)), maxtasksperchild=1) as pool:
+            with mp.Pool(processes=30, maxtasksperchild=1) as pool:
                 results = pool.starmap(worker, [(alg, df_counterfactuals.loc[[i]]) for i in df_counterfactuals.index])
         # Extract results
         for i,result in enumerate(results):

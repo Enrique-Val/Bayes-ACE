@@ -9,8 +9,7 @@ from bayesace.algorithms.algorithm import ACE, ACEResult
 import multiprocessing as mp
 
 NON_ZERO_CONST = 0.000001
-n_processes = np.max((1, int(mp.cpu_count()/1)))
-print(f"Using {n_processes} processes for parallelization")
+n_processes = 30
 
 
 def compute_weight(point_i, point_j, epsilon, weight_function, *args):

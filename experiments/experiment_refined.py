@@ -215,7 +215,7 @@ if __name__ == "__main__":
         if parallelize:
             if parallelize:
                 # The 'with' block forces clean shutdown immediately after indentation ends
-                with mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals * len(algorithms_paths)), maxtasksperchild=1) as pool:
+                with mp.Pool(processes=20, maxtasksperchild=1) as pool:
                     results = pool.starmap(worker, [
                         (df_counterfactuals.iloc[[i]], alg_path, gt_estimator_path,
                          penalty, chunks, logl_threshold, pp_threshold)
