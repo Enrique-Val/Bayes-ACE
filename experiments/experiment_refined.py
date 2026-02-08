@@ -16,6 +16,7 @@ from bayesace.algorithms.wachter import WachterCounterfactual
 from bayesace.utils import *
 from bayesace.algorithms.bayesace_algorithm import BayesACE
 from bayesace.algorithms.face import FACE
+import traceback
 
 import time
 
@@ -43,12 +44,18 @@ def parse_space_sep_array(s):
 
 
 def worker(instance, algorithm_path, gt_estimator_path, penalty, chunks, logl_threshold, pp_threshold):
-    torch.set_num_threads(1)
-    algorithm: SGDACE = pickle.load(open(algorithm_path, 'rb'))
-    algorithm.set_log_likelihood_threshold(logl_threshold)
-    algorithm.set_posterior_probability_threshold(pp_threshold)
-    gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
-    return get_counterfactual_from_SGD(instance, algorithm, gt_estimator, penalty, chunks, lr_range=lr_range)
+    try:
+        torch.set_num_threads(1)
+        algorithm: SGDACE = pickle.load(open(algorithm_path, 'rb'))
+        algorithm.set_log_likelihood_threshold(logl_threshold)
+        algorithm.set_posterior_probability_threshold(pp_threshold)
+        gt_estimator = pickle.load(open(gt_estimator_path, 'rb'))
+        return get_counterfactual_from_SGD(instance, algorithm, gt_estimator, penalty, chunks, lr_range=lr_range)
+    except Exception as e:
+        # This will print the ACTUAL error if one happens
+        print(f"CRASH IN WORKER for instance {instance.index[0]}: {e}")
+        traceback.print_exc()
+        raise e
 
 
 if __name__ == "__main__":
@@ -206,13 +213,13 @@ if __name__ == "__main__":
             algorithm.set_posterior_probability_threshold(pp_threshold)
 
         if parallelize:
-            pool = mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals*len(algorithms_paths)))
-            results = pool.starmap(worker, [
-                    (df_counterfactuals.iloc[[i]], alg_path, gt_estimator_path,
-                     penalty, chunks, logl_threshold, pp_threshold)
-                     for i,alg_path in product(range(n_counterfactuals), algorithms_paths)])
-            pool.close()
-            pool.join()
+            if parallelize:
+                # The 'with' block forces clean shutdown immediately after indentation ends
+                with mp.Pool(min(mp.cpu_count() - 1, n_counterfactuals * len(algorithms_paths)), maxtasksperchild=1) as pool:
+                    results = pool.starmap(worker, [
+                        (df_counterfactuals.iloc[[i]], alg_path, gt_estimator_path,
+                         penalty, chunks, logl_threshold, pp_threshold)
+                        for i, alg_path in product(range(n_counterfactuals), algorithms_paths)])
         else:
             results = []
             for i, algorithm in product(range(n_counterfactuals), algorithms):

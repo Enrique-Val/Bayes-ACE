@@ -380,4 +380,10 @@ class LingamClassifier(ConditionalDE, nn.Module):
             return list(self.class_labels_)
         return list(self.class_distribution.keys())
 
+    def freeze(self):
+        # Method to not update gradients during optimization (if needed)
+        self.eval()
+        for param in self.parameters():
+            param.requires_grad = False
+
 

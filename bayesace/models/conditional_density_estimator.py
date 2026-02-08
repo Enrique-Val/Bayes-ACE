@@ -103,3 +103,9 @@ class ConditionalDE(ABC):
 
     def likelihood(self, X: pd.DataFrame, y: pd.Series | np.ndarray = None) -> np.ndarray:
         return np.exp(self.logl(X, y))
+
+    def freeze(self):
+        """
+        Optional method to freeze the model parameters after training.
+        """
+        pass

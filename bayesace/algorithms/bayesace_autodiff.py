@@ -218,6 +218,9 @@ class SGDACE(Algorithm):
         if isinstance(instance, pd.Series):
             instance = instance.to_frame().T
 
+        # Freeze the model grads, just in case
+        self.density_estimator.freeze()
+
         # Convert target_label to its index
         print(self.density_estimator.get_class_labels())
         target_label = self.density_estimator.get_class_labels().index(target_label)

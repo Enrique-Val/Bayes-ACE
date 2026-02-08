@@ -188,6 +188,13 @@ class BayesianNetworkClassifier(ConditionalDE):
     def fitted(self):
         return self.bayesian_network.fitted()
 
+    def freeze(self):
+        # Avoid computation of gradient graphs for the torch proxy
+        if self.torch_proxy is not None:
+            self.torch_proxy.eval()
+            for param in self.torch_proxy.parameters():
+                param.requires_grad = False
+
     def __setstate__(self, state):
         self.__dict__.update(state)
         self.bayesian_network.include_cpd = True

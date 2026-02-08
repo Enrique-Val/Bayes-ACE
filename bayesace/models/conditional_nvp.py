@@ -325,6 +325,11 @@ class ConditionalNVP(ConditionalNF):
         # Calculate log likelihood
         return self.dist_x_given_class.log_prob(X, y.reshape((-1,1))) + torch.log(prior_probs)
 
+    def freeze(self):
+        self.dist_x_given_class.eval()
+        for param in self.dist_x_given_class.parameters():
+            param.requires_grad = False
+
     def __getstate__(self):
         state = self.__dict__.copy()
         # Save the module's state_dict separately
