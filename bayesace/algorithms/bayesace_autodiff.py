@@ -223,7 +223,7 @@ class SGDACE(Algorithm):
         return total_loss
 
     def run(self, instance: pd.DataFrame | pd.Series, target_label, verbose = False, initial_guess : torch.Tensor = None,
-            ret_norm_loss = False) -> ACEResult:
+            ret_norm_loss = False) -> tuple[ACEResult, float] | ACEResult:
         """
         Executes the SGD optimization to find the path.
         """
@@ -254,7 +254,6 @@ class SGDACE(Algorithm):
         if initial_guess is None:
             initial_guess, initial_guess_score, sigma = self._warm_start(x_og, n_samples=2000, target_label=target_label)
         else :
-            initial_guess = torch.tensor(initial_guess, dtype=torch.float32, device=x_og.device)
             initial_guess_score = self._torch_path_likelihood_length(torch.cat([x_og.unsqueeze(0), initial_guess], dim=0)).item()
             sigma = 0.01 * initial_guess_score
 
@@ -407,6 +406,8 @@ class SGDACE(Algorithm):
         # Detach and convert to Numpy
         if final_path is None:
             print("Warning: No valid path found that satisfies constraints. Returning None.")
+            if ret_norm_loss:
+                return ACEResult(None, instance[instance.columns[:-1]], float('inf')), float('inf')
             return ACEResult(None, instance[instance.columns[:-1]], float('inf'))
         optimized_path_np = torch.cat([x_og.unsqueeze(0), final_path], dim=0).detach().cpu().numpy()
 
@@ -419,7 +420,7 @@ class SGDACE(Algorithm):
         distance = best_loss
 
         if ret_norm_loss:
-            ACEResult(counterfactual, path_df, distance), best_norm_loss
+            return ACEResult(counterfactual, path_df, distance), best_norm_loss
         return ACEResult(counterfactual, path_df, distance)
 
 if __name__ == "__main__":

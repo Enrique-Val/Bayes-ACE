@@ -291,7 +291,7 @@ def sgd_rs(algorithm : SGDACE, instance, target_label, lr_range=None, iters=20, 
         lr_range = (1e-8, 1e-3)
 
     # First, we derive a common initial best guess
-    best_guess = algorithm._warm_start(instance, target_label = target_label, n_samples=10000)
+    best_guess, _, _ = algorithm._warm_start(instance, target_label = target_label, n_samples=10000)
 
     # 1. Define the Search Space
     # We use a 'log-uniform' prior because learning rates vary over orders of magnitude.
