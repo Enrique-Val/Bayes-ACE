@@ -47,6 +47,13 @@ class SGDACE(Algorithm):
         if isinstance(self.density_estimator, nn.Module):
             self.density_estimator.eval()
 
+    def get_device(self):
+        if isinstance(self.density_estimator, BayesianNetworkClassifier):
+            # TODO to be fixed in next iteration. For now, it works, as we are limiting the implementation to cpu
+            return "cpu"
+        else:
+            return self.density_estimator.device
+
     def _get_end_probability(self, endpoint: torch.Tensor, target_label):
         """
         Retrieves P(y=target | endpoint).
@@ -69,6 +76,9 @@ class SGDACE(Algorithm):
         Samples points, filters for constraints, and selects the best start
         by evaluating the exact path cost function.
         """
+        # In case we input a pandas df, we convert it to tensor here and use it for the rest of the warm start
+        if isinstance(x_og_tensor, pd.DataFrame):
+            x_og_tensor = torch.tensor(x_og_tensor[self.features].to_numpy(), dtype=torch.float32, device=self.get_device()).squeeze(0)
         # 1. Sample from the model (Batch)
         if not hasattr(self.density_estimator, "sample"):
             print("Warning: density_estimator has no 'sample' method. Skipping warm start.")
@@ -210,7 +220,8 @@ class SGDACE(Algorithm):
         total_loss = density_integral*self.penalty + length_integral
         return total_loss
 
-    def run(self, instance: pd.DataFrame | pd.Series, target_label, verbose = False, initial_guess = None) -> ACEResult:
+    def run(self, instance: pd.DataFrame | pd.Series, target_label, verbose = False, initial_guess : torch.Tensor = None,
+            ret_norm_loss = False) -> ACEResult:
         """
         Executes the SGD optimization to find the path.
         """
@@ -227,10 +238,7 @@ class SGDACE(Algorithm):
 
         # We use self.features to guarantee column order matches the tensor expectation
         x_og_np = instance[self.features].to_numpy().flatten()
-        if isinstance(self.density_estimator, BayesianNetworkClassifier) :
-            x_og = torch.tensor(x_og_np, dtype=torch.float32, device="cpu")
-        else :
-            x_og = torch.tensor(x_og_np, dtype=torch.float32, device=self.density_estimator.device)
+        x_og = torch.tensor(x_og_np, dtype=torch.float32, device=self.get_device())
 
         # 2. Scale the problem by a constant. This does not change the optimal path, but makes the optimization landscape smoother and more stable.
         with torch.no_grad():
@@ -408,6 +416,8 @@ class SGDACE(Algorithm):
         # Calculate final "distance" using the exact metric
         distance = best_loss
 
+        if ret_norm_loss:
+            ACEResult(counterfactual, path_df, distance), best_norm_loss
         return ACEResult(counterfactual, path_df, distance)
 
 if __name__ == "__main__":

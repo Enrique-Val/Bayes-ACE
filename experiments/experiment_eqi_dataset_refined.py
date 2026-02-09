@@ -39,7 +39,7 @@ if __name__ == "__main__":
     # Hard code some parameters
     vertices_list = [0, 1, 2]
     n_counterfactuals = 150
-    sigma = 0.5
+    sigma = 0
     chunks = 10
     graph_size = 1000
     verbose = False

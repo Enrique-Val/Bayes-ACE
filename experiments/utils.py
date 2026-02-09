@@ -269,25 +269,29 @@ def close_factors(number):
 
     return factor1, factor2
 
-def sgd_worker(algorithm : SGDACE, instance, target_label, lr, verbose = False):
+def sgd_worker(algorithm : SGDACE, instance, target_label, lr, verbose = False, initial_guess = None):
     algorithm.lr = lr
     print("Lr", lr)
     t0 = time.time()
-    result: ACEResult = algorithm.run(instance=instance, target_label=target_label, verbose=verbose)
+    result, norm_loss = algorithm.run(instance=instance, target_label=target_label, verbose=verbose,
+                                      initial_guess=initial_guess, ret_norm_loss= True)
     tn = time.time() - t0
     if result.counterfactual is not None:
-        return result, lr, tn
+        return result, lr, tn, norm_loss
     else:
-        return result, lr, tn
+        return result, lr, tn, 1e12
 
 # This function performs a random search over the learning rate for the SGDACE algorithm and returns the best result found
-def sgd_rs(algorithm, instance, target_label, lr_range=None, iters=20, seed=0, verbose=False):
+def sgd_rs(algorithm : SGDACE, instance, target_label, lr_range=None, iters=20, seed=0, verbose=False):
     """
     Optimizes learning rate using Bayesian Optimization (Gaussian Processes).
     Requires: pip install scikit-optimize
     """
     if lr_range is None:
         lr_range = (1e-8, 1e-3)
+
+    # First, we derive a common initial best guess
+    best_guess = algorithm._warm_start(instance, target_label = target_label, n_samples=10000)
 
     # 1. Define the Search Space
     # We use a 'log-uniform' prior because learning rates vary over orders of magnitude.
@@ -297,7 +301,7 @@ def sgd_rs(algorithm, instance, target_label, lr_range=None, iters=20, seed=0, v
     # BO libraries usually just return the best *loss* value.
     # Since we need the complex 'result' object (the counterfactual), we cache it here.
     best_cache = {
-        'result': None,
+        'result': ACEResult(None, instance, np.inf),
         'loss': np.inf,
         'time': 0,
         'lr': None
@@ -307,8 +311,11 @@ def sgd_rs(algorithm, instance, target_label, lr_range=None, iters=20, seed=0, v
     @use_named_args(space)
     def objective(learning_rate):
         # Call your existing worker
-        result, _, tf = sgd_worker(algorithm, instance, target_label, learning_rate, verbose)
+        result, _, tf, norm_loss = sgd_worker(algorithm, instance, target_label, learning_rate, verbose, initial_guess=best_guess)
         loss = result.distance
+        # An overflow or NaN loss can break the optimization, so we return a large number in that case
+        if not np.isfinite(norm_loss) or norm_loss > 1e12 :
+            return 1e12
 
         # Side-effect: Check if this is the new global best and cache it if so
         # We do this because gp_minimize returns the params, not our custom result object
@@ -318,9 +325,8 @@ def sgd_rs(algorithm, instance, target_label, lr_range=None, iters=20, seed=0, v
             best_cache['time'] = tf
             best_cache['lr'] = learning_rate
             if verbose:
-                print(f"New best found: lr={learning_rate:.2e}, loss={loss:.4f}")
-
-        return loss
+                print(f"New best found: lr={learning_rate:.2e}, loss={loss:.4f}, norm_loss={norm_loss:.4f}s")
+        return norm_loss
 
     # 4. Run the Optimization
     # n_calls=iters: How many times to sample the function
