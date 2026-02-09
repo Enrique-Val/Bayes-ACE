@@ -77,8 +77,10 @@ class SGDACE(Algorithm):
         by evaluating the exact path cost function.
         """
         # In case we input a pandas df, we convert it to tensor here and use it for the rest of the warm start
+        # The target label should also be converted to index
         if isinstance(x_og_tensor, pd.DataFrame):
             x_og_tensor = torch.tensor(x_og_tensor[self.features].to_numpy(), dtype=torch.float32, device=self.get_device()).squeeze(0)
+            target_label = self.density_estimator.get_class_labels().index(target_label)
         # 1. Sample from the model (Batch)
         if not hasattr(self.density_estimator, "sample"):
             print("Warning: density_estimator has no 'sample' method. Skipping warm start.")

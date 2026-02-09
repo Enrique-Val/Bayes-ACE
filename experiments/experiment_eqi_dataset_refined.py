@@ -111,6 +111,7 @@ if __name__ == "__main__":
 
     # First, a FACE instance using the normalizing flow model
     if os.path.exists(algorithms_paths["face"]) and not args.dummy:
+        print("Loaded FACE from file. Penalty: ", penalty)
         with open(algorithms_paths["face"], "rb") as f:
             algorithms["face"] = pickle.load(f)
     else:

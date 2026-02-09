@@ -73,7 +73,7 @@ def plot_dolan_more(df, ax=None, palette=None, linestyle="-", lw=2, metric=None,
     else:
         ax.set_xlabel(r"Performance ratio (" + metric + ")")
 
-    ax.set_ylabel(r"Proportion of problems solved")
+    ax.set_ylabel(r"Proportion of problems")
     ax.set_ylim(0, 1)
     # Adjust xlim as needed, 1 to 10 is standard for tight profiles
     ax.set_xlim(1, 10)
