@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
 
-def plot_dolan_more(df, ax=None, palette=None, linestyle="-", lw=2, metric=None, title=None):
+def plot_dolan_more(df, ax=None, palette=None, linestyle="-", lw=2, metric=None, title=None, x_lim = 10):
     """
     Plots the Dolan-More performance profile for a DataFrame of metrics
     with scalar x-ticks and specific quantile markers.
@@ -76,7 +76,7 @@ def plot_dolan_more(df, ax=None, palette=None, linestyle="-", lw=2, metric=None,
     ax.set_ylabel(r"Proportion of problems")
     ax.set_ylim(0, 1)
     # Adjust xlim as needed, 1 to 10 is standard for tight profiles
-    ax.set_xlim(1, 10)
+    ax.set_xlim(1, x_lim)
 
     ax.legend(loc="lower right", fontsize=8)
     ax.grid(True, linestyle=":", alpha=0.6)

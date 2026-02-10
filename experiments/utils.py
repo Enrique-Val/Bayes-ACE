@@ -279,7 +279,7 @@ def sgd_worker(algorithm : SGDACE, instance, target_label, lr, verbose = False, 
     if result.counterfactual is not None:
         return result, lr, tn, norm_loss
     else:
-        return result, lr, tn, 1e12
+        return result, lr, tn, 10
 
 # This function performs a random search over the learning rate for the SGDACE algorithm and returns the best result found
 def sgd_rs(algorithm : SGDACE, instance, target_label, lr_range=None, iters=20, seed=0, verbose=False):
@@ -313,9 +313,10 @@ def sgd_rs(algorithm : SGDACE, instance, target_label, lr_range=None, iters=20, 
         # Call your existing worker
         result, _, tf, norm_loss = sgd_worker(algorithm, instance, target_label, learning_rate, verbose, initial_guess=best_guess)
         loss = result.distance
-        # An overflow or NaN loss can break the optimization, so we return a large number in that case
-        if not np.isfinite(norm_loss) or norm_loss > 1e12 :
-            return 1e12
+        # An overflow or NaN loss can break the optimization, so we return a large number in that case.
+        # Since the loss is normalized, 10 is already bad.
+        if not np.isfinite(norm_loss) or norm_loss > 10 :
+            return 10
 
         # Side-effect: Check if this is the new global best and cache it if so
         # We do this because gp_minimize returns the params, not our custom result object

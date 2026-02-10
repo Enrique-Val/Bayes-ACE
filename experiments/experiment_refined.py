@@ -32,7 +32,7 @@ FACE_EPS = "face_eps"
 WACHTER = "wachter"
 BAYESACE = "bayesace"
 
-lr_range = (1e-8, 1e-2)
+lr_range = (1e-9, 1e-2)
 
 def parse_space_sep_array(s):
     if isinstance(s, str):
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     dummy = False
     if dummy:
         chunks = 3
-        n_counterfactuals = 2
+        n_counterfactuals = 8
         likelihood_dev_list = likelihood_dev_list[-1:]
         post_prob_dev_list = post_prob_dev_list[-1:]
         n_train_size = 10

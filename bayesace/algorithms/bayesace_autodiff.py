@@ -76,6 +76,8 @@ class SGDACE(Algorithm):
         Samples points, filters for constraints, and selects the best start
         by evaluating the exact path cost function.
         """
+        assert self.n_vertices >= 0
+
         # In case we input a pandas df, we convert it to tensor here and use it for the rest of the warm start
         # The target label should also be converted to index
         if isinstance(x_og_tensor, pd.DataFrame):
@@ -162,6 +164,9 @@ class SGDACE(Algorithm):
         Vectorized PyTorch implementation of the 'path_likelihood_length' utility.
         Minimizes Integral of (-LogL)^penalty * dl
         """
+
+        # Assert chunks > 1
+        assert self.chunks > 1, "Chunks must be greater than 1 for path interpolation."
 
         # Number of features
         d = full_path.shape[1]
@@ -288,6 +293,11 @@ class SGDACE(Algorithm):
         patience_counter = 0
 
         for epoch in range(self.max_epochs):
+            # If path_params is empty or contains NaN, break and return the best found so far
+            if path_params is None or torch.isnan(path_params).any():
+                if verbose:
+                    print(f"Epoch {epoch}: Path parameters contain NaN. Stopping optimization.")
+                break
             optimizer.zero_grad()
 
             # --- 1. Construct Path & Primal Objective ---
