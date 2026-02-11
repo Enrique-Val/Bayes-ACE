@@ -83,8 +83,8 @@ if __name__ == "__main__":
     # Number of counterfactuals
     n_counterfactuals = 15
     n_train_size = 1000
-    iters = 20
-    max_epochs = 400
+    iters = 30
+    max_epochs = 500
 
 
     dummy = False
@@ -205,6 +205,8 @@ if __name__ == "__main__":
                     # Check first value to ensure it's an array-string before converting
                     if results_dfs[i][col].astype(str).str.startswith('[').any():
                         results_dfs[i][col] = results_dfs[i][col].apply(parse_space_sep_array)
+                # Change the dtype to object after conversion
+                results_dfs[i] = results_dfs[i].astype(object)
         # Set the proper likelihood  and accuracy thresholds
         logl_threshold = mu_gt + likelihood_dev * std_gt
         pp_threshold = min(mae_gt + std_mae_gt * post_prob_dev, 0.99)
