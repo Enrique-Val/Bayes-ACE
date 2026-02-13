@@ -17,11 +17,13 @@ import matplotlib.pyplot as plt
 
 from bayesace.models.conditional_kde import ConditionalKDE
 from bayesace.models.conditional_nvp import ConditionalNVP
+from bayesace.models.lingam_cat import LingamClassifier
 
 
 class SGDACE(Algorithm):
     def __init__(self, density_estimator, features, n_vertices=10, lr=0.1, max_epochs=1000, penalty=0,
-                 log_likelihood_threshold=-np.inf, posterior_probability_threshold=0.8, chunks=10):
+                 log_likelihood_threshold=-np.inf, posterior_probability_threshold=0.8, chunks=10, continuous = False,
+                 trim_features=0, cfx_direction="lower"):
         """
         Args:
             density_estimator: The CLGDensityNetwork (must act as the Torch model).
@@ -42,6 +44,10 @@ class SGDACE(Algorithm):
         self.penalty = penalty
         self.chunks = chunks
         self.logl_scale_factor = 1
+        self.continuous = continuous
+        self.trim_features = trim_features
+        # Only use for continuous counterfactuals
+        self.cfx_direction = cfx_direction
 
         # Ensure model is in eval mode (freeze BN parameters)
         if isinstance(self.density_estimator, nn.Module):
@@ -90,13 +96,26 @@ class SGDACE(Algorithm):
         metrics = []
         with torch.no_grad():
             candidates = self.density_estimator.sample(n_samples)
+            subset = -1
+            # If they have not been trimmed before
+            if self.trim_features > 0 and len(self.features) == x_og_tensor.shape[0]:
+                print("Tries trimming")
+                subset = -1 - self.trim_features
+                x_og_tensor = x_og_tensor[:-self.trim_features]
 
             # 2. Filter: Probability Constraint (Batch)
             # We do this in batch for speed, rather than calling _get_end_probability 2000 times
-            candidates = torch.tensor(candidates.drop(columns=candidates.columns[-1:]).to_numpy(), dtype=torch.float32)
-            probs = self.density_estimator.predict_proba(candidates)
-            p_target = probs[:, target_label]
-            valid_prob_mask = p_target >= self.posterior_probability_threshold
+            candidates = torch.tensor(candidates.drop(columns=candidates.columns[subset:]).to_numpy(), dtype=torch.float32)
+            if not self.continuous:
+                probs = self.density_estimator.predict_proba(candidates)
+                p_target = probs[:, target_label]
+                valid_prob_mask = p_target >= self.posterior_probability_threshold
+            else :
+                y_vals = self.density_estimator.continuous_target_argmax(candidates)
+                if self.cfx_direction == "lower":
+                    valid_prob_mask = y_vals < target_label
+                else :
+                    valid_prob_mask = y_vals > target_label
 
             # 3. Filter: Log-Likelihood Constraint (Batch - Optional)
             if self.log_likelihood_threshold > -np.inf:
@@ -246,6 +265,10 @@ class SGDACE(Algorithm):
         # We use self.features to guarantee column order matches the tensor expectation
         x_og_np = instance[self.features].to_numpy().flatten()
         x_og = torch.tensor(x_og_np, dtype=torch.float32, device=self.get_device())
+        x_og_copy = x_og.clone()
+        # Trim features if needed
+        if self.trim_features > 0:
+            x_og = x_og[:-self.trim_features]
 
         # 2. Scale the problem by a constant. This does not change the optimal path, but makes the optimization landscape smoother and more stable.
         with torch.no_grad():
@@ -311,12 +334,21 @@ class SGDACE(Algorithm):
 
             # --- 2. Constraint 1: Target Probability ---
             # g1(x) <= 0
-            p_target = self._get_end_probability(endpoint, target_label)
-            log_p_target = torch.log(p_target + 1e-9)
-            log_threshold = np.log(self.posterior_probability_threshold)
+            # If its categorical
+            if not self.continuous:
+                p_target = self._get_end_probability(endpoint, target_label)
+                log_p_target = torch.log(p_target + 1e-9)
+                log_threshold = np.log(self.posterior_probability_threshold)
 
-            # Violation 1
-            viol_prob = log_threshold - log_p_target
+                # Violation 1
+                viol_prob = log_threshold - log_p_target
+
+            else :
+                y_val = self.density_estimator.continuous_target_argmax(endpoint.unsqueeze(0))
+                if self.cfx_direction == "lower":
+                    viol_prob = y_val - target_label
+                else :
+                    viol_prob = target_label - y_val
 
             # ALM Term 1
             # L_aug = (rho/2) * [max(0, viol + alpha/rho)]^2
@@ -387,7 +419,7 @@ class SGDACE(Algorithm):
                 else:
                     patience_counter = 0
 
-                if patience_counter > 50:
+                if patience_counter > 200:
                     if verbose:
                         print(f"Converged at epoch {epoch}. Stopping early.")
                     break
@@ -419,6 +451,11 @@ class SGDACE(Algorithm):
             if ret_norm_loss:
                 return ACEResult(None, instance[instance.columns[:-1]], float('inf')), float('inf')
             return ACEResult(None, instance[instance.columns[:-1]], float('inf'))
+
+        if self.trim_features > 0 and isinstance(self.density_estimator, LingamClassifier):
+            final_path = self.density_estimator.expand(final_path)
+            x_og = x_og_copy
+
         optimized_path_np = torch.cat([x_og.unsqueeze(0), final_path], dim=0).detach().cpu().numpy()
 
         path_df = pd.DataFrame(optimized_path_np, columns=self.features)
@@ -496,11 +533,11 @@ if __name__ == "__main__":
         density_estimator=density_est,
         features=["X1", "X2"],
         n_vertices=2,
-        lr=1e-2,
+        lr=1e-3,
         max_epochs=1000,
-        penalty=1,
+        penalty=10,
         posterior_probability_threshold=0.9,
-        log_likelihood_threshold=-10
+        log_likelihood_threshold=-6
 
     )
 

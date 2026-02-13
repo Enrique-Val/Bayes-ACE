@@ -8,6 +8,7 @@ from scipy.stats import t, norm
 from sklearn.mixture import GaussianMixture
 from bayesace import ConditionalDE
 
+MIN_SCALE = 1e-2
 
 class LingamClassifier(ConditionalDE, nn.Module):
     def __init__(self, bin_edges=None, bin_names=None, random_state=42, prior_knowledge=None, device="cpu"):
@@ -156,6 +157,12 @@ class LingamClassifier(ConditionalDE, nn.Module):
         is_torch_input = isinstance(X, torch.Tensor)
         x_tensor, _ = self._prepare_input(X, None)
 
+        # If less features than expected, assume the last ones are missing and pad with zeros (for compatibility with the SEM)
+        # First store the number of missing features
+        n_missing = self.B.shape[0] - x_tensor.shape[1]
+        if n_missing > 0:
+            x_tensor = self.expand(x_tensor)
+
         # 1. Compute Continuous Predictions (SEM)
         # x_hat = Parent(X) * Coeffs + Intercept
         x_hat = x_tensor @ self.B.T + self.intercepts
@@ -164,13 +171,13 @@ class LingamClassifier(ConditionalDE, nn.Module):
         # 2. Sum log_prob of residuals for features
         total_log_prob = torch.zeros(x_tensor.shape[0], device=self.device)
 
-        for i in range(x_tensor.shape[1]):
+        for i in range(x_tensor.shape[1]-n_missing):
             if i in self.noise_config_:
                 dist_type, params = self.noise_config_[i]
                 d = self._get_dist(dist_type, params)
                 total_log_prob += d.log_prob(x_residuals[:, i])
 
-        if y is None:
+        if y is None or n_missing > 0:
             return total_log_prob if is_torch_input else total_log_prob.detach().cpu().numpy()
 
         # Get probabilities matrix [Batch, n_classes]
@@ -196,9 +203,44 @@ class LingamClassifier(ConditionalDE, nn.Module):
 
         return total_log_prob if is_torch_input else total_log_prob.detach().cpu().numpy()
 
+    def expand(self, X: torch.Tensor | np.ndarray) -> torch.Tensor:
+        x_tensor, _ = self._prepare_input(X)
+
+        n_features_input = x_tensor.shape[1]
+        n_total_features = self.B.shape[0]
+
+        # If already full size, nothing to do
+        if n_features_input >= n_total_features:
+            return x_tensor
+
+        # We use a list to collect columns to preserve the Autograd graph cleanly
+        expanded_cols = [x_tensor[:, i].unsqueeze(1) for i in range(n_features_input)]
+
+        # Roll forward chronologically
+        for i in range(n_features_input, n_total_features):
+            # Concatenate what we have built so far: Shape [Batch, current_number_of_features]
+            X_ancestors = torch.cat(expanded_cols, dim=1)
+
+            # Extract ONLY the row weights for the ancestors that exist
+            ancestor_weights = self.B[i, :X_ancestors.shape[1]]
+            intercept = self.intercepts[i]
+
+            # Calculate the new deterministic variable
+            next_feature = (X_ancestors @ ancestor_weights) + intercept
+
+            # Store it
+            expanded_cols.append(next_feature.unsqueeze(1))
+
+        # Stitch the full DAG together
+        return torch.cat(expanded_cols, dim=1)
+
     def predict_proba(self, X: np.ndarray | torch.Tensor, output="numpy") -> np.ndarray | pd.DataFrame | torch.Tensor:
         is_torch_input = isinstance(X, torch.Tensor)
         x_tensor, _ = self._prepare_input(X)
+
+        # Expand if necessary
+        if x_tensor.shape[1] < self.B.shape[0]:
+            x_tensor = self.expand(x_tensor)
 
         y_continuous_hat = (x_tensor @ self.target_coefficients) + self.target_intercept
         probs = self._compute_proba_matrix(y_continuous_hat)
@@ -209,6 +251,15 @@ class LingamClassifier(ConditionalDE, nn.Module):
         elif output == "numpy" and not is_torch_input:
             return probs.detach().cpu().numpy()
         return probs
+
+    def continuous_target_argmax(self, X: torch.Tensor | np.ndarray):
+        is_torch_input = isinstance(X, torch.Tensor)
+        X,_ = self._prepare_input(X)
+        if X.shape[1] < self.B.shape[0]:
+            X = self.expand(X)
+
+        y_continuous_hat = (X @ self.target_coefficients) + self.target_intercept
+        return y_continuous_hat
 
     def predict(self, X: np.ndarray | torch.Tensor):
         """
@@ -323,16 +374,21 @@ class LingamClassifier(ConditionalDE, nn.Module):
     def _fit_single_dist(self, data, dist_type):
         if dist_type == 'Normal':
             scale = torch.sqrt((data ** 2).mean())
+            scale = torch.clamp(scale, MIN_SCALE)
             ll = dist.Normal(0.0, scale).log_prob(data).sum().item()
             return ll, {'scale': scale}, 1
         elif dist_type == 'Laplace':
             scale = torch.abs(data).mean()
+            scale = torch.clamp(scale, MIN_SCALE)
             ll = dist.Laplace(0.0, scale).log_prob(data).sum().item()
             return ll, {'scale': scale}, 1
         elif dist_type == 'StudentT':
             try:
                 params = t.fit(data.numpy(), floc=0)
                 df, scale = params[0], params[2]
+                scale = max(scale, MIN_SCALE)
+                df = max(df, 2.1)  # Ensure df > 2 for finite variance
+                df = min(df, 10000)
                 ll = dist.StudentT(df=df, loc=0.0, scale=scale).log_prob(data).sum().item()
                 return ll, {'df': torch.tensor(df), 'scale': torch.tensor(scale)}, 2
             except:
@@ -345,6 +401,7 @@ class LingamClassifier(ConditionalDE, nn.Module):
                 weights = torch.tensor(gmm.weights_, dtype=torch.float32)
                 means = torch.tensor(gmm.means_.flatten(), dtype=torch.float32)
                 scales = torch.sqrt(torch.tensor(gmm.covariances_.flatten(), dtype=torch.float32))
+                scales = torch.clamp(scales, MIN_SCALE)
                 mix = dist.Categorical(probs=weights)
                 comp = dist.Normal(loc=means, scale=scales)
                 ll = dist.MixtureSameFamily(mix, comp).log_prob(data).sum().item()
@@ -354,6 +411,7 @@ class LingamClassifier(ConditionalDE, nn.Module):
         elif "Logistic":
             from scipy.stats import logistic as sc_log
             loc, scale = sc_log.fit(data.numpy(), floc=0)
+            scale = max(scale, MIN_SCALE)
             base = dist.Uniform(0, 1)
             transforms = [dist.SigmoidTransform().inv, dist.AffineTransform(loc=loc, scale=scale)]
             d = dist.TransformedDistribution(base, transforms)
