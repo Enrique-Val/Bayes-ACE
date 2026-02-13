@@ -414,7 +414,7 @@ class SGDACE(Algorithm):
             if is_valid:
                 # 2. Check for convergence (loss hasn't improved significantly)
                 # Maintain a 'patience' counter (e.g., stop if no improvement for 50 epochs)
-                if best_loss < float('inf') and best_norm_loss - current_path_cost < 1e-2:
+                if best_loss < float('inf') and best_norm_loss - current_path_cost < 1e-4:
                     patience_counter += 1
                 else:
                     patience_counter = 0
