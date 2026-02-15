@@ -207,6 +207,9 @@ if __name__ == "__main__":
                         results_dfs[i][col] = results_dfs[i][col].apply(parse_space_sep_array)
                 # Change the dtype to object after conversion
                 results_dfs[i] = results_dfs[i].astype(object)
+            else :
+                # Change dtype to float64
+                results_dfs[i] = results_dfs[i].astype(float)
         # Set the proper likelihood  and accuracy thresholds
         logl_threshold = mu_gt + likelihood_dev * std_gt
         pp_threshold = min(mae_gt + std_mae_gt * post_prob_dev, 0.99)

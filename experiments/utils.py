@@ -14,7 +14,7 @@ from bayesace import get_other_class, path, path_likelihood_length, total_l0_pat
 from bayesace.algorithms.algorithm import ACEResult
 from bayesace.algorithms.bayesace_autodiff import SGDACE
 from bayesace.models.autodiff_proxies.gbn_classifier import serialize_clg, CLGTorch
-from bayesace.models.conditional_normalizing_flow import ConditionalNF
+from bayesace.models.conditional_normalizing_flow import ConditionalNF, NanLogProb
 
 import pandas as pd
 import pybnesian as pb
@@ -109,7 +109,11 @@ def get_counterfactual_from_SGD(instance: pd.DataFrame, algorithm : SGDACE, gt_e
         lr_range = (1e-8, 1e-3)
     class_var_name = gt_estimator.get_class_var_name()
     target_label = get_other_class(instance[class_var_name].cat.categories, instance[class_var_name].to_numpy()[0])
-    result, best_lr, tf = sgd_rs(algorithm, instance, target_label, lr_range=lr_range, iters=iters, verbose = verbose)
+    try :
+        result, best_lr, tf = sgd_rs(algorithm, instance, target_label, lr_range=lr_range, iters=iters, verbose = verbose)
+    except NanLogProb as e:
+        print("Nan log probability encountered during optimization. Returning inf distance. Error message:", str(e))
+        return np.inf, np.inf, np.inf, np.inf, None, -np.inf, 0.0, 0.0
     '''
     # Uncomment if all paths want to be stored
     result.path.to_csv(results_dir+'paths/data' + str(dataset_id) + '_likelihood' + str(
@@ -118,7 +122,7 @@ def get_counterfactual_from_SGD(instance: pd.DataFrame, algorithm : SGDACE, gt_e
     '''
     if result.counterfactual is None:
         print("Counterfactual for:", instance.index[0], "not found")
-        return np.inf, np.inf, np.inf, tf, None, -np.inf, 0, 0
+        return np.inf, np.inf, np.inf, tf, None, -np.inf, 0.0, 0.0
     path_to_compute = path(result.path.to_numpy(), chunks=chunks)
     path_length_gt = path_likelihood_length(
         pd.DataFrame(path_to_compute, columns=instance.columns[:-1]),
