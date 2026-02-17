@@ -119,6 +119,8 @@ def load_data(root_dir, metrics, values_dict):
             file_path = os.path.join(root_dir, dataset_id, penalty, metric, file_name)
             if os.path.exists(file_path):
                 df = pd.read_csv(open(file_path), index_col=0)
+                # Subselect the first 8 rows
+                df = df.iloc[8:, :]
                 #df = df[df.columns[:7]]
                 # If real_logl or real_pp, invert the sign
                 if "real" in metric:
@@ -274,10 +276,10 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
         n_rows = len(values_dict[join_in_plot[0]])
         n_cols = len(values_dict[join_in_plot[1]])
     #fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4*n_cols,2*n_rows))
-    fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(3.5*1.2*n_cols*3/4,4.2/1.75*n_rows))
+    fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(3.5*1.5*n_cols*3/4,4.2/1.75*n_rows))
     fig_data = []
     fig_box, ax_box = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2*n_cols,4.2/1.75*n_rows))
-    fig_pp, ax_pp = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2*n_cols,4.2/1.75*n_rows))
+    fig_pp, ax_pp = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(4.5*1.2/1.25*n_cols,4.2/1.5*n_rows))
     # Another Boxplots without infs or nans
     figures = [fig, fig_box, fig_pp]
     figures_str = ["Critical diff", "Box plot", "Performance profile"]
@@ -355,7 +357,7 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
         fig_data.append(medians)
 
         # Performance profile
-        plot_dolan_more(data_new_i, ax=ax_pp_i, palette=palette, metric=metric, title=title_i)
+        plot_dolan_more(data_new_i, ax=ax_pp_i, palette=palette, metric=metric, title=title_i, x_lim=20)
 
     # Prepare the figures
     if len(segregate) == 0:
@@ -377,7 +379,7 @@ def create_subplot(segregate, join_in_plot, values_dict, data_new, metric, joint
 
     # Create a line plot with the medians of the box plot, with the same color palette as the box plot
     plt.close()
-    fig_line = plt.figure(figsize=(7*1.2*4/5/2,4.5*1.2*2/3/1.5))
+    fig_line = plt.figure(figsize=(7*1.2*4/5/2*1.5,4.5*1.2/3*1.5))
     fig_df_columns = ["DAACE GT", "DAACE", "BayesACE", "FACE GT", "FACE-DE", "FACE-ε", "Wachter"]
     if metric == "Distance to FACE GT":
         fig_df_columns = ["DAACE GT", "DAACE", "BayesACE", "FACE-DE", "FACE-ε", "Wachter"]
@@ -447,7 +449,7 @@ def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_di
         sns.boxplot(data=data_box, ax=ax_box, showfliers=False, palette=palette)
 
         # Now the performance profile, we plot the cumulative distribution function of the distance to face gt for each algorithm
-        plot_dolan_more(data_new[key], ax=ax_pp, palette=palette)
+        plot_dolan_more(data_new[key], ax=ax_pp, palette=palette, x_lim = 20)
 
         fig_box.suptitle(", ".join([segregate[k] + " = " + key[k] for k in range(len(segregate))]))
         fig_box.savefig(os.path.join(subplot_dir, file_name + "_box.pdf"), bbox_inches='tight')
@@ -458,7 +460,7 @@ def get_single_agregated_plot(data_dict, values_dict, metric, segregate, plot_di
 def plot_generic(data_dict, values_dict, metrics, root_dir):
     # Subplot, 2x4 for each metric
     fig, axs = plt.subplots(4, 2, figsize=(8,8))
-    fig_box, axs_box = plt.subplots(4, 2, figsize=(14*1.2/1.5,7*1.2*1.4))
+    fig_box, axs_box = plt.subplots(4, 2, figsize=(14*1.2/2,7*1.2))
     fig_joint, axs_joint = plt.subplots(8, 2, figsize=(7*1.2,9.75*1.2), gridspec_kw={'width_ratios': [2.75, 1]})
     p_values_dir = os.path.join(root_dir, "plots", "p_values")
     if not os.path.exists(p_values_dir):
@@ -468,7 +470,10 @@ def plot_generic(data_dict, values_dict, metrics, root_dir):
         # Perform BH test for the metric distances globally
         friedman_bh_results, data_dict_new = perform_bh_param(data_dict, values_dict, metric)
         friedman_bh_results = friedman_bh_results["total"]
-        data_dict_new = data_dict_new["total"]
+        data_dict_new = data_dict_new["total"].copy()
+        if metric == "Distance to FACE GT":
+            # Remove FACE GT from the data dict and from the friedman results
+            data_dict_new = data_dict_new.drop(columns=["FACE GT"])
         # Create the color palette for the algorithms
         new_algs = friedman_bh_results["p_adjusted"].columns
         palette = get_palette(new_algs)
@@ -479,15 +484,15 @@ def plot_generic(data_dict, values_dict, metrics, root_dir):
 
         axs[i // 2, i % 2].set_title(f"Metric: {metric}")
         # Create a performance profile for the metric distances globally
-        plot_dolan_more(data_dict_new, ax=axs[i // 2, i % 2], palette=palette, metric=metric)
-        axs_box[i // 2, i % 2].suptitle(f"Metric: {metric}")
+        plot_dolan_more(data_dict_new, ax=axs_box[i // 2, i % 2], palette=palette, metric=metric, x_lim = 20)
+        axs_box[i // 2, i % 2].set_title(f"Metric: {metric}")
         # Repeat the process for the joint plot
         axs_joint[i, 1].set_title(f"critical diff diagram")
         sp.critical_difference_diagram(friedman_bh_results["summary_ranks"], friedman_bh_results["p_adjusted"],
                                        ax=axs_joint[i, 1],
                                        label_fmt_left="{label}", label_fmt_right="{label}",
                                        color_palette=palette)
-        plot_dolan_more(data_dict_new, ax=axs_joint[i, 0], palette=palette, metric=metric)
+        plot_dolan_more(data_dict_new, ax=axs_joint[i, 0], palette=palette, metric=metric, x_lim=20)
         axs_joint[i, 0].set_title(f"{metric}")
         # Remove top and right bar
         axs_joint[i, 0].spines[['right', 'top']].set_visible(False)
@@ -614,15 +619,17 @@ if __name__ == "__main__":
 
     # Overview
     #plot_generic(data_dict, values_dict, metrics, root_dir)
+    #raise ValueError()
 
 
-    segregate_lists = [[[], ["Data ID"], ["Penalty"], ["Data ID", "Penalty"]], [[], ["Data ID"]], [["Log-likelihood"]]]
-    join_in_plots = [["Log-likelihood"], ["Penalty"], ["Penalty"]]
+    segregate_lists = [[[], ["Data ID"], ["Penalty"], ["Data ID", "Penalty"]], [[], ["Data ID"]], [["Log-likelihood"]],[[]]]
+    join_in_plots = [["Log-likelihood"], ["Penalty"], ["Penalty"],["Data ID"]]
+
 
     # Analyse the optimal amount of vertices for BayesACE
-    '''plots_dir = os.path.join(root_dir, "plots","vertices")
+    plots_dir = os.path.join(root_dir, "plots","vertices")
     segregate_lists = [[[], ["Penalty"]], [[], ["Log-likelihood"]]]
-    join_in_plots = [["Log-likelihood"], ["Penalty"]]'''
+    join_in_plots = [["Log-likelihood"], ["Penalty"]]
 
     '''
     for segregate_list, join_in_plot in zip(segregate_lists, join_in_plots):
