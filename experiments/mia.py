@@ -1,6 +1,7 @@
 import argparse
 import os
 import pickle
+import time
 from collections import OrderedDict
 
 import pandas as pd
@@ -107,7 +108,7 @@ if __name__ == "__main__":
         best_params : OrderedDict = search_obj.cv_results_['params'][best_index]
         return best_auc, best_acc, best_params
 
-
+    t0 = time.time()
     # Evaluate Scenario 1
     print("Running BayesSearchCV for Scenario 1...")
     bayes_search.fit(X_scenario_1, y_true)
@@ -122,6 +123,7 @@ if __name__ == "__main__":
     print(f"\n--- Combined MIA Results for Dataset {args.dataset_id} ---")
     print(f"Scenario 1 (Signals Only)       -> AUC: {auc_s1:.4f} | CV Accuracy: {acc_s1:.4f}")
     print(f"Scenario 2 (Signals + Features) -> AUC: {auc_s2:.4f} | CV Accuracy: {acc_s2:.4f}\n")
+    print(f"Time taken: {time.time() - t0:.2f} seconds")
 
     # Save to CSV
     results_df = pd.DataFrame({
@@ -130,6 +132,6 @@ if __name__ == "__main__":
         'Scenario_2_Signals_And_Features': [auc_s2, acc_s2] + list(bp_s2.values())
     })
 
-    results_out_path = os.path.join(results_dir, "mia_results.csv")
-    results_df.to_csv(results_out_path, index=False)
+    results_out_path = os.path.join(results_dir, "mia_results_"+args.model+".csv")
+    #results_df.to_csv(results_out_path, index=False)
     print(f"Results saved to: {results_out_path}")
