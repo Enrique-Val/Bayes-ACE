@@ -96,11 +96,9 @@ class SGDACE(Algorithm):
         metrics = []
         with torch.no_grad():
             candidates = self.density_estimator.sample(n_samples)
-            subset = -1
             # If they have not been trimmed before
+            subset = -1 - self.trim_features
             if self.trim_features > 0 and len(self.features) == x_og_tensor.shape[0]:
-                print("Tries trimming")
-                subset = -1 - self.trim_features
                 x_og_tensor = x_og_tensor[:-self.trim_features]
 
             # 2. Filter: Probability Constraint (Batch)

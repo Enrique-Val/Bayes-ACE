@@ -133,5 +133,5 @@ if __name__ == "__main__":
     })
 
     results_out_path = os.path.join(results_dir, "mia_results_"+args.model+".csv")
-    #results_df.to_csv(results_out_path, index=False)
+    results_df.to_csv(results_out_path, index=False)
     print(f"Results saved to: {results_out_path}")
