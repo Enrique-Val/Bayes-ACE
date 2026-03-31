@@ -13,14 +13,17 @@ from bayesace.algorithms.wachter import WachterCounterfactual
 from experiments.utils import get_constraints, sgd_rs
 import multiprocessing as mp
 
-def worker(alg : SGDACE, instance, model, vertices) :
+def worker(alg : SGDACE, instance, model, vertices, results_dir) :
     alg.density_estimator = model
     alg.n_vertices = vertices
     class_var_name = alg.density_estimator.get_class_var_name()
     target_label = str(int(instance[class_var_name].to_numpy()[0]) - 2)
-    if isinstance(alg, SGDACE):
-        # Get the right limit of the target interval
-        result, best_lr, best_time = sgd_rs(alg, instance, target_label, lr_range=(1e-5,1e-1), iters=20, seed=0, verbose=False)
+    # Get the right limit of the target interval
+    result, best_lr, best_time = sgd_rs(alg, instance, target_label, lr_range=(1e-5,1e-1), iters=20, seed=0, verbose=False)
+    # Pickle the results
+    save_path = os.path.join(results_dir, f"bayesace_{vert}_{penalty}", "lingam_"+str(i), f"{args.cf_id}.pkl")
+    with open(save_path, "wb") as f:
+        pickle.dump(result, f)
     return result
 
 
@@ -40,6 +43,7 @@ if __name__ == "__main__":
     args.parallelize = True
 
     # Hard code some parameters
+    n_counterfacuals = 150 # Max number of counterfactuals to generate (will be filtered by constraints later)
     vertices_list = [0, 1, 2]
     sigma = 0
     chunks = 10
@@ -104,12 +108,16 @@ if __name__ == "__main__":
         os.makedirs(os.path.join(model_dir, "perturbed_"+str(perturb_noise_std)))
     models_path = {}
     models_path[0] = model_path
-    for i in range(n_perturbations):
+
+    '''for i in range(n_perturbations):
         perturbed_model = model.perturb(noise_std=perturb_noise_std)
         perturbed_model_path = os.path.join(model_dir, "perturbed_"+str(perturb_noise_std), f"lingam_{i+1}.pkl")
         with open(perturbed_model_path, "wb") as f:
             pickle.dump(perturbed_model, f)
-        models_path[i+1] = perturbed_model
+        models_path[i+1] = perturbed_model'''
+    for i in range(n_perturbations):
+        perturbed_model_path = os.path.join(model_dir, "perturbed_"+str(perturb_noise_std), f"lingam_{i+1}.pkl")
+        models_path[i+1] = perturbed_model_path
 
     # First, create a DAACE instance. The vertices, lr and model will be updated at each iteration,
     # this is just for a more straightforward parallelization.
@@ -121,6 +129,12 @@ if __name__ == "__main__":
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
 
+    # Create additional dirs
+    for vert in vertices_list:
+        save_path = os.path.join(results_dir, f"bayesace_{vert}_{penalty}", "lingam_" + str(i))
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+
     # Run the experiments on the test data
     df_counterfactuals_res = df_counterfactuals.drop(class_var_name, axis=1)
     distances = pd.Series(index=df_counterfactuals_res.index)
@@ -130,17 +144,18 @@ if __name__ == "__main__":
             instance = df_counterfactuals.iloc[[args.cf_id]]
             with open(models_path[i], "rb") as f:
                 model = pickle.load(f)
-            result = worker(alg, instance, model, vert)
+            result = worker(alg, instance, model, vert, results_dir)
             results.append(result)
     else:
         with mp.Pool(processes=30, maxtasksperchild=1) as pool:
-            results = pool.starmap(worker, [(alg, df_counterfactuals.iloc[[args.cf_id]], models_path[i], vert) for vert,i in product(vertices_list, range(n_perturbations+1))])
+            results = pool.starmap(worker, [(alg, df_counterfactuals.iloc[[args.cf_id]], models_path[i], vert, results_dir) for vert,i in product(vertices_list, range(n_perturbations+1))])
     # Extract results
-    for vert_i,result in enumerate(results):
+    # Already done in real time
+    '''for vert_i,result in enumerate(results):
         vert = vert_i // n_perturbations
         i = vert_i % n_perturbations
         # Save in a subfolder for each algorithm
         save_path = os.path.join(results_dir, f"bayesace_{vert}_{penalty}", "lingam_"+str(i))
         if not os.path.exists(save_path):
             os.makedirs(save_path)
-        pickle.dump(result, open(os.path.join(save_path, f"{args.cf_id}.pkl"), "wb"))
+        pickle.dump(result, open(os.path.join(save_path, f"{args.cf_id}.pkl"), "wb"))'''

@@ -449,4 +449,22 @@ class LingamClassifier(ConditionalDE, nn.Module):
         for param in self.parameters():
             param.requires_grad = False
 
+    def perturb(self, noise_std):
+        # Returns a copy of itself with perturbed parameters (for robustness testing). If a parameter is 0, leave it unchanged
+        perturbed = LingamClassifier(
+            bin_edges=self.user_bin_edges,
+            bin_names=self.bin_names,
+            random_state=self.random_state,
+            prior_knowledge=self.prior_knowledge,
+            device=self.device)
+        perturbed.B = self.B + (torch.randn_like(self.B) * noise_std)
+        perturbed.intercepts = self.intercepts + (torch.randn_like(self.intercepts) * noise_std)
+        perturbed.target_coefficients = self.target_coefficients + (torch.randn_like(self.target_coefficients) * noise_std)
+        perturbed.target_intercept = self.target_intercept + (torch.randn_like(self.target_intercept) * noise_std)
+        perturbed.noise_config_ = self.noise_config_  # Keep noise config the same for simplicity
+        perturbed.class_labels_ = self.class_labels_
+        perturbed.class_distribution = self.class_distribution
+        perturbed.trained = True
+        return perturbed
+
 
