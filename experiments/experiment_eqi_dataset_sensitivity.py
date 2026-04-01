@@ -70,7 +70,6 @@ if __name__ == "__main__":
     with open(model_path, "rb") as f:
         model = pickle.load(f)
 
-    model.class_var_name = "EQI"
     class_var_name = model.get_class_var_name()
 
     # Load and scale the data

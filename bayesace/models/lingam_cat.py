@@ -7,6 +7,7 @@ import lingam
 from scipy.stats import t, norm
 from sklearn.mixture import GaussianMixture
 from bayesace import ConditionalDE
+import copy
 
 MIN_SCALE = 1e-2
 
@@ -449,22 +450,56 @@ class LingamClassifier(ConditionalDE, nn.Module):
         for param in self.parameters():
             param.requires_grad = False
 
-    def perturb(self, noise_std):
-        # Returns a copy of itself with perturbed parameters (for robustness testing). If a parameter is 0, leave it unchanged
+    def perturb(self, noise_std: float):
+        """
+        Returns a detached copy of the classifier with perturbed parameters.
+        Strictly preserves 0 values to maintain the LiNGAM causal DAG structure.
+        """
+        # 1. Initialize the new instance
         perturbed = LingamClassifier(
             bin_edges=self.user_bin_edges,
             bin_names=self.bin_names,
             random_state=self.random_state,
             prior_knowledge=self.prior_knowledge,
-            device=self.device)
-        perturbed.B = self.B + (torch.randn_like(self.B) * noise_std)
-        perturbed.intercepts = self.intercepts + (torch.randn_like(self.intercepts) * noise_std)
-        perturbed.target_coefficients = self.target_coefficients + (torch.randn_like(self.target_coefficients) * noise_std)
-        perturbed.target_intercept = self.target_intercept + (torch.randn_like(self.target_intercept) * noise_std)
-        perturbed.noise_config_ = self.noise_config_  # Keep noise config the same for simplicity
-        perturbed.class_labels_ = self.class_labels_
-        perturbed.class_distribution = self.class_distribution
-        perturbed.trained = True
+            device=self.device
+        )
+
+        # 2. Helper to perturb while protecting zeros and detaching from autograd
+        def apply_noise(tensor):
+            if tensor is None:
+                return None
+            # Detach from the graph to prevent memory leaks
+            t_clean = tensor.clone().detach()
+            # Create a mask of non-zero elements (using a small epsilon for float comparison safety)
+            mask = (t_clean.abs() > 1e-8).float()
+            # Generate noise and apply it ONLY where mask is 1
+            noise = torch.randn_like(t_clean) * noise_std
+            return t_clean + (noise * mask)
+
+        with torch.no_grad():
+            # 3. Properly register buffers so .to(device) works
+            perturbed.B = apply_noise(self.B)
+            perturbed.intercepts = apply_noise(self.intercepts)
+
+            # Note: I changed this to target_coeffs to match your __init__ registration
+            perturbed.target_coeffs = apply_noise(self.target_coeffs)
+            perturbed.target_intercept = apply_noise(self.target_intercept)
+
+            if self.bin_edges is not None:
+                perturbed.bin_edges = self.bin_edges.clone().detach()
+
+        # 4. Deep copy the non-tensor states to prevent shared memory mutation
+        perturbed.noise_config_ = copy.deepcopy(self.noise_config_)
+        perturbed.class_labels_ = copy.deepcopy(self.class_labels_)
+        perturbed.class_distribution = copy.deepcopy(self.class_distribution)
+
+        # 5. Copy miscellaneous state variables
+        perturbed.class_var_name = self.class_var_name
+        perturbed.trained = self.trained
+
+        # Move to the correct device immediately
+        perturbed.to(self.device)
+
         return perturbed
 
 
