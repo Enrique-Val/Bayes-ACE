@@ -10,10 +10,13 @@ import pandas as pd
 from bayesace.algorithms.bayesace_autodiff import SGDACE
 from bayesace.algorithms.face import FACE
 from bayesace.algorithms.wachter import WachterCounterfactual
+from bayesace.models.lingam_cat import LingamClassifier
 from experiments.utils import get_constraints, sgd_rs
 import multiprocessing as mp
 
-def worker(alg : SGDACE, instance, model, vertices, results_dir) :
+def worker(alg : SGDACE, instance, model_path : str, vertices, results_dir) :
+    with open(model_path, "rb") as f:
+        model : LingamClassifier = pickle.load(f)
     alg.density_estimator = model
     alg.n_vertices = vertices
     class_var_name = alg.density_estimator.get_class_var_name()
@@ -43,7 +46,7 @@ if __name__ == "__main__":
     args.parallelize = True
 
     # Hard code some parameters
-    n_counterfacuals = 150 # Max number of counterfactuals to generate (will be filtered by constraints later)
+    n_counterfactuals = 150 # Max number of counterfactuals to generate (will be filtered by constraints later)
     vertices_list = [0, 1, 2]
     sigma = 0
     chunks = 10
@@ -147,7 +150,7 @@ if __name__ == "__main__":
             result = worker(alg, instance, model, vert, results_dir)
             results.append(result)
     else:
-        with mp.Pool(processes=30, maxtasksperchild=1) as pool:
+        with mp.Pool(processes=20, maxtasksperchild=1) as pool:
             results = pool.starmap(worker, [(alg, df_counterfactuals.iloc[[args.cf_id]], models_path[i], vert, results_dir) for vert,i in product(vertices_list, range(n_perturbations+1))])
     # Extract results
     # Already done in real time
