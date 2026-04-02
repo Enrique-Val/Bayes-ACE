@@ -47,7 +47,7 @@ class LingamClassifier(ConditionalDE, nn.Module):
         self.register_buffer('bin_edges', None)
         self.register_buffer('B', None)  # SEM Matrix for Features
         self.register_buffer('intercepts', None)  # Intercepts for Features
-        self.register_buffer('target_coeffs', None)  # Coeffs for Target
+        self.register_buffer('target_coefficients', None)  # Coefficients for Target
         self.register_buffer('target_intercept', None)  # Intercept for Target
 
         self.trained = False
@@ -481,8 +481,8 @@ class LingamClassifier(ConditionalDE, nn.Module):
             perturbed.B = apply_noise(self.B)
             perturbed.intercepts = apply_noise(self.intercepts)
 
-            # Note: I changed this to target_coeffs to match your __init__ registration
-            perturbed.target_coeffs = apply_noise(self.target_coeffs)
+            # Note: I changed this to target_coefficients to match your __init__ registration
+            perturbed.target_coefficients = apply_noise(self.target_coefficients)
             perturbed.target_intercept = apply_noise(self.target_intercept)
 
             if self.bin_edges is not None:

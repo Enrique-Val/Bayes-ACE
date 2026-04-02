@@ -68,7 +68,7 @@ if __name__ == "__main__":
     model_name = "lingam"
     model_path = os.path.join(model_dir, model_name+".pkl")
     with open(model_path, "rb") as f:
-        model = pickle.load(f)
+        model : LingamClassifier = pickle.load(f)
 
     class_var_name = model.get_class_var_name()
 
