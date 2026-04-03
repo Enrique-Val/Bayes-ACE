@@ -22,9 +22,12 @@ def worker(alg : SGDACE, instance, model_path : str, vertices, results_dir) :
     class_var_name = alg.density_estimator.get_class_var_name()
     target_label = str(int(instance[class_var_name].to_numpy()[0]) - 2)
     # Get the right limit of the target interval
-    result, best_lr, best_time = sgd_rs(alg, instance, target_label, lr_range=(1e-5,1e-1), iters=20, seed=0, verbose=False)
+    t0 = time.time()
+    result, best_lr, best_time = sgd_rs(alg, instance, target_label, lr_range=(1e-5,5e-1), iters=20, seed=0, verbose=True)
+    tn = time.time()
+    print(f"Finished in {tn-t0} seconds. Model perturbation: {model_path}, vertices: {vertices}")
     # Pickle the results
-    save_path = os.path.join(results_dir, f"bayesace_{vert}_{penalty}", "lingam_"+str(i), f"{args.cf_id}.pkl")
+    save_path = os.path.join(results_dir, f"bayesace_{vertices}_{penalty}", "lingam_"+str(i), f"{args.cf_id}.pkl")
     with open(save_path, "wb") as f:
         pickle.dump(result, f)
     return result
@@ -125,7 +128,7 @@ if __name__ == "__main__":
     # this is just for a more straightforward parallelization.
     alg = SGDACE(density_estimator=model, chunks = chunks, features= df_train.columns[:-1],
                          n_vertices= 0, penalty = penalty, lr=1e-7, log_likelihood_threshold=logl_threshold,
-                         posterior_probability_threshold=pp_threshold, max_epochs=1000, trim_features=5)
+                         posterior_probability_threshold=pp_threshold, max_epochs=750, trim_features=5)
 
     results_dir = os.path.join(args.dir_name, "results", "perturb_"+str(perturb_noise_std))
     if not os.path.exists(results_dir):
