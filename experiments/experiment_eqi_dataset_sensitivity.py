@@ -14,7 +14,8 @@ from bayesace.models.lingam_cat import LingamClassifier
 from experiments.utils import get_constraints, sgd_rs
 import multiprocessing as mp
 
-def worker(alg : SGDACE, instance, model_path : str, vertices, results_dir) :
+# TODO
+def worker(alg : SGDACE, instance, model_path : str, vertices, penalty, i, cf_id,  results_dir) :
     with open(model_path, "rb") as f:
         model : LingamClassifier = pickle.load(f)
     alg.density_estimator = model
@@ -27,7 +28,7 @@ def worker(alg : SGDACE, instance, model_path : str, vertices, results_dir) :
     tn = time.time()
     print(f"Finished in {tn-t0} seconds. Model perturbation: {model_path}, vertices: {vertices}")
     # Pickle the results
-    save_path = os.path.join(results_dir, f"bayesace_{vertices}_{penalty}", "lingam_"+str(i), f"{args.cf_id}.pkl")
+    save_path = os.path.join(results_dir, f"bayesace_{vertices}_{penalty}", "lingam_"+str(i), f"{cf_id}.pkl")
     with open(save_path, "wb") as f:
         pickle.dump(result, f)
     return result
@@ -147,13 +148,12 @@ if __name__ == "__main__":
     if not args.parallelize :
         for vert,i in product(vertices_list, range(n_perturbations+1)) :
             instance = df_counterfactuals.iloc[[args.cf_id]]
-            with open(models_path[i], "rb") as f:
-                model = pickle.load(f)
-            result = worker(alg, instance, model, vert, results_dir)
+            result = worker(alg, instance, models_path[i], vert, penalty, i, args.cf_id, results_dir)
             results.append(result)
     else:
-        with mp.Pool(processes=20, maxtasksperchild=1) as pool:
-            results = pool.starmap(worker, [(alg, df_counterfactuals.iloc[[args.cf_id]], models_path[i], vert, results_dir) for vert,i in product(vertices_list, range(n_perturbations+1))])
+        with mp.Pool(processes=1, maxtasksperchild=1) as pool:
+            results = pool.starmap(worker, [(alg, df_counterfactuals.iloc[[args.cf_id]], models_path[i], vert, penalty,
+                                             i, args.cf_id, results_dir) for vert,i in product(vertices_list, range(n_perturbations+1))])
     # Extract results
     # Already done in real time
     '''for vert_i,result in enumerate(results):
