@@ -137,9 +137,10 @@ if __name__ == "__main__":
 
     # Create additional dirs
     for vert in vertices_list:
-        save_path = os.path.join(results_dir, f"bayesace_{vert}_{penalty}", "lingam_" + str(i))
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
+        for i in range(n_perturbations+1) :
+            save_path = os.path.join(results_dir, f"bayesace_{vert}_{penalty}", "lingam_" + str(i))
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
 
     # Run the experiments on the test data
     df_counterfactuals_res = df_counterfactuals.drop(class_var_name, axis=1)
