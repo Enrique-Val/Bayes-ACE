@@ -1,0 +1,8 @@
+Metric,Scenario_1_Signals_Only,Scenario_2_Signals_And_Features
+AUC,0.6354432666666667,0.6439804444444445
+Accuracy,0.5932333333333333,0.5985
+gbc__learning_rate,0.01,0.013699261036512993
+gbc__max_depth,3.0,6.0
+gbc__min_samples_split,10.0,10.0
+gbc__n_estimators,345.0,500.0
+gbc__subsample,0.8,0.8
