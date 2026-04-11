@@ -14,7 +14,6 @@ from bayesace.models.lingam_cat import LingamClassifier
 from experiments.utils import get_constraints, sgd_rs
 import multiprocessing as mp
 
-# TODO
 def worker(alg : SGDACE, instance, model_path : str, vertices, penalty, i, cf_id,  results_dir) :
     with open(model_path, "rb") as f:
         model : LingamClassifier = pickle.load(f)
@@ -23,12 +22,18 @@ def worker(alg : SGDACE, instance, model_path : str, vertices, penalty, i, cf_id
     class_var_name = alg.density_estimator.get_class_var_name()
     target_label = str(int(instance[class_var_name].to_numpy()[0]) - 2)
     # Get the right limit of the target interval
+    #First, check if the result already exists, if so, skip
+    save_path = os.path.join(results_dir, f"bayesace_{vertices}_{penalty}", "lingam_"+str(i), f"{cf_id}.pkl")
+    if os.path.exists(save_path):
+        print(f"Result already exists for model {model_path}, vertices {vertices}, instance {cf_id}. Skipping.")
+        with open(save_path, "rb") as f:
+            result = pickle.load(f)
+        return result
     t0 = time.time()
-    result, best_lr, best_time = sgd_rs(alg, instance, target_label, lr_range=(1e-5,5e-1), iters=20, seed=0, verbose=True)
+    result, best_lr, best_time = sgd_rs(alg, instance, target_label, lr_range=(1e-5,5e-1), iters=20, seed=0, verbose=False)
     tn = time.time()
     print(f"Finished in {tn-t0} seconds. Model perturbation: {model_path}, vertices: {vertices}")
     # Pickle the results
-    save_path = os.path.join(results_dir, f"bayesace_{vertices}_{penalty}", "lingam_"+str(i), f"{cf_id}.pkl")
     with open(save_path, "wb") as f:
         pickle.dump(result, f)
     return result
