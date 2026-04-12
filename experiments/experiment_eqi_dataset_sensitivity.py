@@ -47,12 +47,13 @@ if __name__ == "__main__":
     parser.add_argument('--dummy', action=argparse.BooleanOptionalAction)
     parser.add_argument('--penalty', nargs='?', default=1, type=int)
     parser.add_argument('--cf_id', nargs='?', default=0, type=int)
+    parser.add_argument('--n_perturbations', nargs='?', default=20, type=int)
+    parser.add_argument('--noise', nargs='?', default=0.1, type=float)
     args = parser.parse_args()
 
     data_dir = os.path.join(args.dir_name, "data_processed")
     model_dir = os.path.join(args.dir_name, "models")
     penalty = args.penalty
-    args.parallelize = True
 
     # Hard code some parameters
     n_counterfactuals = 150 # Max number of counterfactuals to generate (will be filtered by constraints later)
@@ -61,8 +62,8 @@ if __name__ == "__main__":
     chunks = 10
     graph_size = 1000
     verbose = False
-    n_perturbations = 30
-    perturb_noise_std = 0.1
+    n_perturbations = args.n_perturbations
+    perturb_noise_std = args.noise
 
     # dummy mode
     if args.dummy:
